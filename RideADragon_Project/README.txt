@@ -1,4 +1,4 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 6)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 7)
 ======================================================
 
 CONTENTS
@@ -81,6 +81,21 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
 
+COINS ON THE MAP (new in TEST 7)
+  - About 290 coins along the roads and landmarks of Dragon Haven: COPPER coins on trails that
+    follow every road (for walkers and low flyers), big gold SKY COINS in arcs above the roads and
+    a ring above the village (for riders), and TREASURE GEMS at the landmarks (ruins, waterfall
+    top and pool, cave mouth, the top of the sky pillar, lake island, the forests, the ends of
+    the roads). Just touch a coin (on foot, or with your dragon) to take it.
+  - A coin is worth a few seconds of your income (copper 0.6 s, sky coin 2 s, gem 30 s) so it
+    stays worth taking as you grow, with a floor for new players ($6 / $20 / $150).
+  - CHAIN: coins taken within 2.5 s of each other build a chain; every coin pays 25% more than
+    the one before, up to x3. A pill under the cash shows "CHAIN x2.5  +$1.2K" while it runs.
+  - Every player has their own coins; a coin you took comes back after 75 s (sky coin 100 s,
+    treasure 10 min). The server checks every pickup (distance, your own cooldown) and pays.
+  - Numbers, layout rules and respawn times: ReplicatedStorage > Configs > CoinConfig. Sounds:
+    AudioConfig keys CoinPickup, CoinChain. The total is kept in Stats.Coins.
+
 EGG HUNTING (new in TEST 6)  -  Shop > ROBUX tab: sections POTIONS / EGG HUNTING / CASH & SPINS
   - EGG RADAR (49 R$, 30 min): every egg on the map gets a marker you can see through walls and a
     chip under the level badge points an arrow at the best egg (luck + distance). Without the
@@ -153,6 +168,9 @@ DONE IN THIS SNAPSHOT (TEST 5 additions first)
   - Passive income, offline earnings, inventory, perches, nest, spawn at own plot
 
 NOT FINISHED YET (planned next, in this order)
+  - The INDEX, QUESTS and DAILY buttons of the HUD (and the Hall of Dragons / Elder Rowan stations)
+    open nothing yet: their windows were never built in the original project. Next: DAILY streak,
+    the Dragon Index (collection book), Quests and the guided tutorial for new players.
   - New eggs / dragons and the zones they live in
   - Bigger map with Frostpeak / Ember Caldera / Skyreach regions (their eggs currently
     spawn at the valley's landmark spots: plateau, cave, ruins, pillar, island)

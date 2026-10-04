@@ -222,7 +222,8 @@ function Hud:BuildCash()
 	local row = Kit.frame({ Name = "Secondary", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 1), Size = UDim2.fromScale(1, 0.32), Parent = root })
 	Kit.list(row, "H", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
 	self.PillRow = row
-	self.PillScale = Create("UIScale", { Parent = row }) -- shrinks the row on phones when many pills are lit
+	-- which pills want to be seen (FitPills decides what the width allows)
+	self.Want = { Income = false, Luck = false, Cash = false, Hunt = false, Chain = false }
 	local function smallPill(name: string, icon: string, order: number)
 		local p = Create("TextButton", {
 			Name = name,
@@ -256,12 +257,16 @@ function Hud:BuildCash()
 	self.CashBoostPill, self.CashBoostText = smallPill("CashBoost", "Coin", 4)
 	-- egg hunting perks (Egg Magnet / Fast Hatch potions, the Egg Hunter pass): one pill
 	self.HuntPill, self.HuntText = smallPill("Hunt", "Magnet", 5)
+	-- coin chain (CoinController): lit while coins keep being collected
+	self.ChainPill, self.ChainText = smallPill("Chain", "Coin", 6)
+	self.ChainPill.Active = false
+	self.ChainText.TextColor3 = Color3.fromRGB(190, 120, 0)
 	self.LuckText.TextColor3 = Color3.fromRGB(46, 150, 70)
 	self.CashBoostText.TextColor3 = C.AccentDeep
 	self.HuntText.TextColor3 = Color3.fromRGB(214, 112, 40)
-	self.LuckPill.Visible = false
-	self.CashBoostPill.Visible = false
-	self.HuntPill.Visible = false
+	for _, pill in { self.IncomePill, self.LuckPill, self.CashBoostPill, self.HuntPill, self.ChainPill } do
+		pill.Visible = false
+	end
 	for _, pill in { self.LuckPill, self.CashBoostPill, self.HuntPill } do
 		pill.Activated:Connect(function()
 			Kit.hooks.Click()
@@ -299,16 +304,49 @@ local function huntText(names: { string }, left: number): string
 	return left < math.huge and (text .. "  " .. mmss(left)) or text
 end
 
--- Many lit pills do not fit on a phone: the row shrinks a little instead of running off the screen.
-local PILL_FIT = { 1, 1, 1, 0.9, 0.8, 0.72 }
+-- The pills under the cash do not all fit on a portrait phone: besides the eggs pill at most
+-- PHONE_PILLS of the others show, in this order of importance (the coin chain only lives a few
+-- seconds, the income is the first to give way). Everywhere else every wanted pill shows.
+local PILL_PRIORITY = { { "Chain", "ChainPill" }, { "Luck", "LuckPill" }, { "Cash", "CashBoostPill" }, { "Hunt", "HuntPill" }, { "Income", "IncomePill" } }
+local PHONE_PILLS = 3
 function Hud:FitPills()
-	local lit = 0
-	for _, pill in { self.EggPill, self.IncomePill, self.LuckPill, self.CashBoostPill, self.HuntPill } do
-		if pill.Visible then
-			lit += 1
+	local budget = (Responsive.Device == "Phone" and Responsive.Portrait) and PHONE_PILLS or math.huge
+	for _, item in PILL_PRIORITY do
+		local show = self.Want[item[1]] == true and budget > 0
+		if show then
+			budget -= 1
 		end
+		self[item[2]].Visible = show
 	end
-	self.PillScale.Scale = Responsive.Device == "Phone" and PILL_FIT[math.clamp(lit, 1, #PILL_FIT)] or 1
+end
+
+local function trimNumber(n: number): string
+	local text = string.format("%.2f", n)
+	text = string.gsub(text, "0+$", "")
+	text = string.gsub(text, "%.$", "")
+	return text
+end
+
+-- Coin chain (CoinController): "CHAIN x2.5  +$1.2K" while coins keep coming, a lone coin shows
+-- just its cash; nil hides the pill.
+function Hud:SetCoinChain(mult: number?, gained: number?, n: number?)
+	if not mult then
+		self.Want.Chain = false
+		self:FitPills()
+		return
+	end
+	local cash = Format.cash(gained or 0)
+	local text
+	if (n or 1) < 2 then
+		text = "+" .. cash
+	elseif Responsive.Device == "Phone" then
+		text = string.format("x%s +%s", trimNumber(mult), cash)
+	else
+		text = string.format("CHAIN x%s  +%s", trimNumber(mult), cash)
+	end
+	self.ChainText.Text = text
+	self.Want.Chain = true
+	self:FitPills()
 end
 
 -- UI Lab: every boost pill with sample text (the longest case), whatever the data says.
@@ -317,19 +355,20 @@ function Hud:PreviewBoosts(on: boolean)
 	self:RefreshBoosts()
 	if not on then
 		self:RefreshIncome()
+		self:SetCoinChain(nil)
 	end
 end
 
 function Hud:RefreshBoosts()
 	if self._previewBoosts then
-		self.LuckPill.Visible = true
+		self.Want.Luck = true
 		self.LuckText.Text = boostText("x6", "LUCK", 842)
-		self.CashBoostPill.Visible = true
+		self.Want.Cash = true
 		self.CashBoostText.Text = boostText("x2", "CASH", 581)
-		self.HuntPill.Visible = true
+		self.Want.Hunt = true
 		self.HuntText.Text = huntText({ "HUNTER", "FAST HATCH", "MAGNET" }, 860)
-		self.IncomePill.Visible = true
-		self:FitPills()
+		self.Want.Income = true
+		self:SetCoinChain(2.75, 18400, 8)
 		return
 	end
 	local data = self.Data.all()
@@ -355,11 +394,11 @@ function Hud:RefreshBoosts()
 			end
 		end
 	end
-	self.LuckPill.Visible = luck > 1
+	self.Want.Luck = luck > 1
 	if luck > 1 then
 		self.LuckText.Text = boostText("x" .. tostring(math.floor(luck * 10 + 0.5) / 10), "LUCK", luckLeft)
 	end
-	self.CashBoostPill.Visible = cash > 1
+	self.Want.Cash = cash > 1
 	if cash > 1 then
 		self.CashBoostText.Text = boostText("x" .. tostring(cash), "CASH", cashLeft)
 	end
@@ -379,7 +418,7 @@ function Hud:RefreshBoosts()
 			table.insert(hunt, 1, "HUNTER")
 		end
 	end
-	self.HuntPill.Visible = #hunt > 0
+	self.Want.Hunt = #hunt > 0
 	if #hunt > 0 then
 		self.HuntText.Text = huntText(hunt, huntLeft)
 	end
@@ -1146,7 +1185,7 @@ function Hud:RefreshIncome()
 		end
 	end
 	self.IncomeText.Text = Format.perSecond(total)
-	self.IncomePill.Visible = total > 0
+	self.Want.Income = total > 0
 	self:FitPills()
 end
 

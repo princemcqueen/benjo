@@ -58,6 +58,7 @@ local ORDER = {
 	"AnnounceController",
 	"WildEggController",
 	"RadarController",
+	"CoinController",
 	"InventoryController",
 	"TutorialController",
 	"RegionController",
