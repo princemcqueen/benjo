@@ -31,7 +31,7 @@ MonetizationConfig.GamePasses = {
 		Mutation = "Omni",
 		Luck = 20,
 		Badges = { "LEGENDARY" },
-		Perks = { "x20 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$50T/s, $1.25Qa/s with Omni", "Crown, halo, stars and a blazing aura" },
+		Perks = { "x20 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$50T/s, $1.25Qa/s with Omni", "Crown, halo and blazing aura" },
 		Featured = true,
 		Order = 0,
 	},

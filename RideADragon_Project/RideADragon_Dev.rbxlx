@@ -11,6 +11,182 @@
 			</Properties>
 			<Item class="ModuleScript" referent="RBX000003">
 				<Properties>
+					<string name="Name">CoinLayout</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	CoinLayout
+	Where the coins are. A pure function of the world layout (WorldConfig) and a few height
+	queries, so the server (validation) and the tests build exactly the same list; clients get
+	the list from CoinService once.
+
+	  CoinLayout.generate(env) -> { { Kind = "Copper" | "Gold" | "Gem", Position = Vector3 } }
+	    env.ground(x, z)  -> height, normalY, isWater   terrain only (nil when there is none)
+	    env.surface(x, z) -> height | nil               the highest thing of any kind (rooftops,
+	                                                    the top of the sky pillar...)
+
+	Copper: trails along every road (swinging a little left and right of it)
+	Gold:   arcs above the roads and a ring above the village
+	Gem:    treasure piles at the landmarks and the ends of the roads
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local WorldConfig = require(Configs:WaitForChild("WorldConfig"))
+local CoinConfig = require(Configs:WaitForChild("CoinConfig"))
+
+local CoinLayout = {}
+
+-- fixed order (dictionaries have no order and the layout must be the same every time)
+local ROAD_ORDER = { "North", "East", "South", "West", "Ruins", "Falls" }
+
+local function lengthOf(points: { Vector2 }): number
+	local total = 0
+	for i = 2, #points do
+		total += (points[i] - points[i - 1]).Magnitude
+	end
+	return total
+end
+
+-- Point and direction at distance s along a polyline.
+local function pointAt(points: { Vector2 }, s: number): (Vector2, Vector2)
+	local left = s
+	for i = 2, #points do
+		local seg = points[i] - points[i - 1]
+		local len = seg.Magnitude
+		if left <= len or i == #points then
+			local dir = seg / math.max(len, 1e-6)
+			return points[i - 1] + dir * math.min(left, len), dir
+		end
+		left -= len
+	end
+	return points[#points], Vector2.new(1, 0)
+end
+
+-- Landmarks that get a treasure pile: { x, z } (the height comes from env.surface)
+local function pileSpots(): { { number } }
+	local spots = {}
+	local function add(x: number, z: number)
+		table.insert(spots, { x, z })
+	end
+	local ruins = WorldConfig.Ruins
+	for i = 0, 2 do
+		local a = math.rad(30 + i * 120)
+		add(ruins.Center.X + math.cos(a) * ruins.Radius * 0.45, ruins.Center.Z + math.sin(a) * ruins.Radius * 0.45)
+	end
+	local fall = WorldConfig.Waterfall
+	add(fall.Top.X - 46, fall.Top.Z - 70) -- on the plateau above the falls
+	add(fall.Bottom.X - 52, fall.Bottom.Z + 26) -- by the pool below
+	local caves = WorldConfig.Caves
+	add(caves.Mouth.X + math.sin(caves.Facing) * -34, caves.Mouth.Z + math.cos(caves.Facing) * -34)
+	add(WorldConfig.SkyPillar.Center.X, WorldConfig.SkyPillar.Center.Z) -- the very top of the pillar
+	add(WorldConfig.Lake.Island.Center.X, WorldConfig.Lake.Island.Center.Y)
+	for _, forest in WorldConfig.Forests do
+		add(forest.Center.X, forest.Center.Y)
+	end
+	-- the far ends of the roads: where the next regions begin
+	for _, name in { "North", "East", "West", "South" } do
+		local road = WorldConfig.Roads[name]
+		local last = road[#road]
+		add(last.X, last.Y)
+	end
+	return spots
+end
+
+function CoinLayout.generate(env): { { Kind: string, Position: Vector3 } }
+	local L = CoinConfig.Layout
+	local out = {}
+	local hub = WorldConfig.Hub.Center
+	local hubXZ = Vector2.new(hub.X, hub.Z)
+	local function add(kind: string, pos: Vector3)
+		table.insert(out, { Kind = kind, Position = pos })
+	end
+
+	-- 1) trails of copper coins along the roads
+	for _, name in ROAD_ORDER do
+		local road = WorldConfig.Roads[name]
+		local total = lengthOf(road)
+		local s = 0
+		while s <= total do
+			local p, dir = pointAt(road, s)
+			local side = Vector2.new(-dir.Y, dir.X) * (math.sin(s * 0.045) * L.Weave)
+			local q = p + side
+			if (q - hubXZ).Magnitude >= L.FromHub then
+				local y, ny, water = env.ground(q.X, q.Y)
+				if y and not water and (ny or 1) >= L.MaxSlope then
+					add("Copper", Vector3.new(q.X, y + L.Lift, q.Y))
+				end
+			end
+			s += L.Spacing
+		end
+	end
+
+	-- 2) a ring of sky coins above the village (the first thing a new rider sees)
+	local ringCount = 14
+	for i = 0, ringCount - 1 do
+		local a = i / ringCount * math.pi * 2
+		local x = hub.X + math.cos(a) * 150
+		local z = hub.Z + math.sin(a) * 150
+		local y = env.ground(x, z)
+		if y then
+			add("Gold", Vector3.new(x, y + 82 + math.sin(a * 3) * 12, z))
+		end
+	end
+
+	-- 3) arcs of sky coins above the roads
+	for _, name in ROAD_ORDER do
+		local road = WorldConfig.Roads[name]
+		local total = lengthOf(road)
+		local arcLength = L.ArcSpacing * (L.ArcCoins - 1)
+		local start = 260
+		while start + arcLength < total do
+			for i = 0, L.ArcCoins - 1 do
+				local p = pointAt(road, start + i * L.ArcSpacing)
+				local y = env.ground(p.X, p.Y)
+				if y then
+					local t = math.sin(math.pi * i / (L.ArcCoins - 1))
+					add("Gold", Vector3.new(p.X, y + L.ArcLift[1] + (L.ArcLift[2] - L.ArcLift[1]) * t, p.Y))
+				end
+			end
+			start += L.ArcEvery
+		end
+	end
+
+	-- 4) treasure piles
+	for _, spot in pileSpots() do
+		local y = env.surface(spot[1], spot[2])
+		if y then
+			add("Gem", Vector3.new(spot[1], y + 2.8, spot[2]))
+		end
+	end
+	return out
+end
+
+-- The layout as three strings of integers plus the kind codes (compact to send to clients).
+function CoinLayout.pack(list: { { Kind: string, Position: Vector3 } }): { X: { number }, Y: { number }, Z: { number }, K: string }
+	local X, Y, Z, K = {}, {}, {}, {}
+	for i, coin in list do
+		X[i] = math.floor(coin.Position.X + 0.5)
+		Y[i] = math.floor(coin.Position.Y + 0.5)
+		Z[i] = math.floor(coin.Position.Z + 0.5)
+		K[i] = CoinConfig.Kinds[coin.Kind].Code
+	end
+	return { X = X, Y = Y, Z = Z, K = table.concat(K) }
+end
+
+function CoinLayout.unpack(packed): { { Kind: string, Position: Vector3 } }
+	local out = {}
+	for i = 1, #packed.X do
+		local code = string.sub(packed.K, i, i)
+		out[i] = { Kind = CoinConfig.KindOfCode[code] or "Copper", Position = Vector3.new(packed.X[i], packed.Y[i], packed.Z[i]) }
+	end
+	return out
+end
+
+return CoinLayout
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000004">
+				<Properties>
 					<string name="Name">DragonStats</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	DragonStats
@@ -126,11 +302,11 @@ return DragonStats
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000004">
+			<Item class="Folder" referent="RBX000005">
 				<Properties>
 					<string name="Name">Dragons</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000005">
+				<Item class="ModuleScript" referent="RBX000006">
 					<Properties>
 						<string name="Name">Animator</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -1569,7 +1745,7 @@ return Animator
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000006">
+				<Item class="ModuleScript" referent="RBX000007">
 					<Properties>
 						<string name="Name">BreathFX</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -1819,7 +1995,7 @@ return BreathFX
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000007">
+				<Item class="ModuleScript" referent="RBX000008">
 					<Properties>
 						<string name="Name">BrickBuilder</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -3315,7 +3491,7 @@ return BrickBuilder
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000008">
+				<Item class="ModuleScript" referent="RBX000009">
 					<Properties>
 						<string name="Name">Builder</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -4041,7 +4217,7 @@ return Builder
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000009">
+				<Item class="ModuleScript" referent="RBX000010">
 					<Properties>
 						<string name="Name">DragonVisual</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -4279,7 +4455,7 @@ return DragonVisual
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000010">
+				<Item class="ModuleScript" referent="RBX000011">
 					<Properties>
 						<string name="Name">Locomotion</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -4932,7 +5108,7 @@ return Locomotion
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000011">
+				<Item class="ModuleScript" referent="RBX000012">
 					<Properties>
 						<string name="Name">Membranes</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -5129,7 +5305,7 @@ return Membranes
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000012">
+				<Item class="ModuleScript" referent="RBX000013">
 					<Properties>
 						<string name="Name">Primitives</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -5267,7 +5443,7 @@ return Primitives
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000013">
+				<Item class="ModuleScript" referent="RBX000014">
 					<Properties>
 						<string name="Name">RiderPose</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -5374,7 +5550,7 @@ return RiderPose
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000014">
+				<Item class="ModuleScript" referent="RBX000015">
 					<Properties>
 						<string name="Name">Species</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -5714,7 +5890,7 @@ return Species
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000015">
+			<Item class="ModuleScript" referent="RBX000016">
 				<Properties>
 					<string name="Name">EggReach</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -5829,7 +6005,7 @@ return EggReach
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000016">
+			<Item class="ModuleScript" referent="RBX000017">
 				<Properties>
 					<string name="Name">EggVisual</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6023,7 +6199,7 @@ return EggVisual
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000017">
+			<Item class="ModuleScript" referent="RBX000018">
 				<Properties>
 					<string name="Name">InventoryQuery</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6131,7 +6307,7 @@ return InventoryQuery
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000018">
+			<Item class="ModuleScript" referent="RBX000019">
 				<Properties>
 					<string name="Name">Net</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6358,7 +6534,7 @@ return Net
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000019">
+			<Item class="ModuleScript" referent="RBX000020">
 				<Properties>
 					<string name="Name">Odds</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6539,7 +6715,7 @@ return Odds
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000020">
+			<Item class="ModuleScript" referent="RBX000021">
 				<Properties>
 					<string name="Name">Types</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6581,11 +6757,11 @@ return {}
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000021">
+			<Item class="Folder" referent="RBX000022">
 				<Properties>
 					<string name="Name">Util</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000022">
+				<Item class="ModuleScript" referent="RBX000023">
 					<Properties>
 						<string name="Name">Format</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6714,7 +6890,7 @@ return Format
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000023">
+				<Item class="ModuleScript" referent="RBX000024">
 					<Properties>
 						<string name="Name">MathUtil</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6825,7 +7001,7 @@ return MathUtil
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000024">
+				<Item class="ModuleScript" referent="RBX000025">
 					<Properties>
 						<string name="Name">PromptGate</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6861,7 +7037,7 @@ return PromptGate
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000025">
+				<Item class="ModuleScript" referent="RBX000026">
 					<Properties>
 						<string name="Name">Signal</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6946,7 +7122,7 @@ return Signal
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000026">
+				<Item class="ModuleScript" referent="RBX000027">
 					<Properties>
 						<string name="Name">Spring</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6999,7 +7175,7 @@ return Spring
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000027">
+				<Item class="ModuleScript" referent="RBX000028">
 					<Properties>
 						<string name="Name">TableUtil</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -7090,7 +7266,7 @@ return TableUtil
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000028">
+				<Item class="ModuleScript" referent="RBX000029">
 					<Properties>
 						<string name="Name">Trove</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -7155,7 +7331,7 @@ return Trove
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000029">
+				<Item class="ModuleScript" referent="RBX000030">
 					<Properties>
 						<string name="Name">WeightedRandom</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -7193,11 +7369,11 @@ return WeightedRandom
 				</Item>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000030">
+		<Item class="Folder" referent="RBX000031">
 			<Properties>
 				<string name="Name">Configs</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000031">
+			<Item class="ModuleScript" referent="RBX000032">
 				<Properties>
 					<string name="Name">AudioConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -7242,6 +7418,8 @@ AudioConfig.Sounds = {
 
 	-- Eggs & hatching
 	EggPickup = { Id = "", Group = "SFX", Volume = 0.7 }, -- "pickup chime"
+	CoinPickup = { Id = "", Group = "SFX", Volume = 0.55 }, -- "coin clink"
+	CoinChain = { Id = "", Group = "UI", Volume = 0.5 }, -- "rising chime" (3+ coins in a chain)
 	EggPlace = { Id = "", Group = "SFX", Volume = 0.6 }, -- "soft thud" / "wood tap" (egg set into the nest)
 	EggShake = { Id = "", Group = "SFX", Volume = 0.5 }, -- "wood creak" / "egg wobble"
 	EggCrack = { Id = "", Group = "SFX", Volume = 0.8 }, -- "egg crack"
@@ -7275,7 +7453,7 @@ return table.freeze(AudioConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000032">
+			<Item class="ModuleScript" referent="RBX000033">
 				<Properties>
 					<string name="Name">BondConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -7372,7 +7550,116 @@ return table.freeze(BondConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000033">
+			<Item class="ModuleScript" referent="RBX000034">
+				<Properties>
+					<string name="Name">CoinConfig</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	CoinConfig
+	Coins to collect on the map (CoinService / CoinController / CoinLayout).
+
+	Three kinds:
+	  Copper  small coins on trails along the roads: for walkers and low flyers
+	  Gold    big sky coins in arcs above the roads: for riders
+	  Gem     treasure piles at the landmarks (ruins, waterfall, caves, pillar, island, forests,
+	          the ends of the roads): rare and rich
+
+	A coin is worth some seconds of the player's income (so it stays worth picking up as the
+	game goes on) with a floor for new players. Coins collected within a short time of each other
+	build a CHAIN: every coin in the chain pays a bit more (up to x3). Every player has their
+	own coins: they come back on their own timer.
+]]
+
+local CoinConfig = {}
+
+CoinConfig.Kinds = {
+	Copper = {
+		Name = "Coin",
+		Code = "c",
+		Seconds = 0.6, -- worth this many seconds of income...
+		Min = 6, -- ...but at least this much cash
+		Respawn = 75, -- seconds until the player sees it again
+		Radius = 9, -- pickup radius (studs, client)
+		Size = 2.8, -- coin diameter
+		Color = Color3.fromRGB(255, 196, 48),
+		Rim = Color3.fromRGB(214, 150, 20),
+	},
+	Gold = {
+		Name = "Sky Coin",
+		Code = "g",
+		Seconds = 2,
+		Min = 20,
+		Respawn = 100,
+		Radius = 16,
+		Size = 4.6,
+		Color = Color3.fromRGB(255, 226, 90),
+		Rim = Color3.fromRGB(255, 160, 30),
+	},
+	Gem = {
+		Name = "Treasure",
+		Code = "j",
+		Seconds = 30,
+		Min = 150,
+		Respawn = 600,
+		Radius = 14,
+		Size = 4.2,
+		Color = Color3.fromRGB(90, 230, 255),
+		Rim = Color3.fromRGB(190, 110, 255),
+	},
+}
+
+-- layout string code -> kind id
+CoinConfig.KindOfCode = {}
+for id, kind in CoinConfig.Kinds do
+	CoinConfig.KindOfCode[kind.Code] = id
+end
+
+-- Coins collected within `Window` seconds of the previous one extend the chain; each coin of the
+-- chain pays (1 + Step * (n - 1)) times its value, at most Max.
+CoinConfig.Chain = { Window = 2.5, Step = 0.25, Max = 3 }
+
+-- How far (studs) from a coin the server still accepts the pickup: the radius the client uses
+-- plus this slack for lag and the speed of a dragon.
+CoinConfig.ServerSlack = 42
+
+-- The client builds the coins within this many studs of the camera / player.
+CoinConfig.ViewRadius = 460
+
+-- The client sends the touched coins in batches.
+CoinConfig.Batch = { Size = 12, Interval = 0.2 }
+
+-- Layout (the trails and arcs are generated from WorldConfig; see CoinLayout)
+CoinConfig.Layout = {
+	Spacing = 22, -- studs between the coins of a trail
+	Weave = 5, -- the trail swings this far (studs) left and right of the road
+	FromHub = 110, -- no coins closer than this to the village centre
+	Lift = 3.4, -- height above the ground of a ground coin
+	ArcCoins = 9, -- coins in a sky arc
+	ArcSpacing = 36, -- studs between the coins of an arc
+	ArcLift = { 62, 104 }, -- height above the ground at the ends / the top of an arc
+	ArcEvery = 340, -- one arc per this many studs of road
+	MaxSlope = 0.55, -- no ground coins where the ground is steeper than this (normal.Y below it)
+}
+
+-- Cash a coin is worth right now.
+function CoinConfig.value(kindId: string, incomePerSecond: number): number
+	local kind = CoinConfig.Kinds[kindId]
+	if not kind then
+		return 0
+	end
+	return math.max(kind.Min, math.floor(incomePerSecond * kind.Seconds + 0.5))
+end
+
+-- Pay multiplier of the n-th coin of a chain (n = 1 is the first coin).
+function CoinConfig.multiplier(n: number): number
+	local c = CoinConfig.Chain
+	return math.min(c.Max, 1 + c.Step * (math.max(1, n) - 1))
+end
+
+return CoinConfig
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000035">
 				<Properties>
 					<string name="Name">CombatConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -7478,7 +7765,7 @@ return CombatConfig
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000034">
+			<Item class="ModuleScript" referent="RBX000036">
 				<Properties>
 					<string name="Name">DragonConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -7969,7 +8256,7 @@ return table.freeze(DragonConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000035">
+			<Item class="ModuleScript" referent="RBX000037">
 				<Properties>
 					<string name="Name">EconomyConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8117,7 +8404,7 @@ return table.freeze(EconomyConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000036">
+			<Item class="ModuleScript" referent="RBX000038">
 				<Properties>
 					<string name="Name">EggConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8565,7 +8852,7 @@ return table.freeze(EggConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000037">
+			<Item class="ModuleScript" referent="RBX000039">
 				<Properties>
 					<string name="Name">GameConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8698,7 +8985,7 @@ return table.freeze(GameConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000038">
+			<Item class="ModuleScript" referent="RBX000040">
 				<Properties>
 					<string name="Name">HatchConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8744,7 +9031,7 @@ return table.freeze(HatchConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000039">
+			<Item class="ModuleScript" referent="RBX000041">
 				<Properties>
 					<string name="Name">LeaderboardConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8898,7 +9185,7 @@ return table.freeze(LeaderboardConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000040">
+			<Item class="ModuleScript" referent="RBX000042">
 				<Properties>
 					<string name="Name">MonetizationConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8934,7 +9221,7 @@ MonetizationConfig.GamePasses = {
 		Mutation = "Omni",
 		Luck = 20,
 		Badges = { "LEGENDARY" },
-		Perks = { "x20 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$50T per second (x25 Omni = $1.25Qa/s)", "Legendary crown, halo, stars and a blazing aura" },
+		Perks = { "x20 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$50T/s, $1.25Qa/s with Omni", "Crown, halo and blazing aura" },
 		Featured = true,
 		Order = 0,
 	},
@@ -8959,7 +9246,7 @@ MonetizationConfig.GamePasses = {
 		Grants = "PrinceDragon",
 		Mutation = "Omni",
 		Luck = 3,
-		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second (x25 Omni = $250T/s)", "Royal halo, crown and golden aura" },
+		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T/s, $250T/s with Omni", "Royal halo, crown and golden aura" },
 		Featured = true,
 		Order = 1,
 	},
@@ -8972,7 +9259,7 @@ MonetizationConfig.GamePasses = {
 		Grants = "N2RC1SDragon",
 		Mutation = "Omni",
 		Luck = 3,
-		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second (x25 Omni = $250T/s)", "Crystal crown, stars and neon aura" },
+		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T/s, $250T/s with Omni", "Crystal crown, stars and neon aura" },
 		Featured = true,
 		Order = 2,
 	},
@@ -9317,7 +9604,7 @@ return MonetizationConfig
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000041">
+			<Item class="ModuleScript" referent="RBX000043">
 				<Properties>
 					<string name="Name">MutationConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9423,7 +9710,7 @@ return table.freeze(MutationConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000042">
+			<Item class="ModuleScript" referent="RBX000044">
 				<Properties>
 					<string name="Name">QuestConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9465,7 +9752,7 @@ return table.freeze(QuestConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000043">
+			<Item class="ModuleScript" referent="RBX000045">
 				<Properties>
 					<string name="Name">RaceConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9739,7 +10026,7 @@ return RaceConfig
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000044">
+			<Item class="ModuleScript" referent="RBX000046">
 				<Properties>
 					<string name="Name">RegionConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9842,7 +10129,7 @@ return table.freeze(RegionConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000045">
+			<Item class="ModuleScript" referent="RBX000047">
 				<Properties>
 					<string name="Name">SpinConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9922,7 +10209,7 @@ return table.freeze(SpinConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000046">
+			<Item class="ModuleScript" referent="RBX000048">
 				<Properties>
 					<string name="Name">TreeConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10133,7 +10420,7 @@ return table.freeze(TreeConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000047">
+			<Item class="ModuleScript" referent="RBX000049">
 				<Properties>
 					<string name="Name">WildEggConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10192,7 +10479,7 @@ return table.freeze(WildEggConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000048">
+			<Item class="ModuleScript" referent="RBX000050">
 				<Properties>
 					<string name="Name">WorldConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10374,42 +10661,42 @@ return WorldConfig
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000049">
+		<Item class="Folder" referent="RBX000051">
 			<Properties>
 				<string name="Name">Remotes</string>
 			</Properties>
-			<Item class="RemoteFunction" referent="RBX000050">
+			<Item class="RemoteFunction" referent="RBX000052">
 				<Properties>
 					<string name="Name">Request</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000051">
+			<Item class="RemoteEvent" referent="RBX000053">
 				<Properties>
 					<string name="Name">DataSync</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000052">
+			<Item class="RemoteEvent" referent="RBX000054">
 				<Properties>
 					<string name="Name">Notify</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000053">
+			<Item class="RemoteEvent" referent="RBX000055">
 				<Properties>
 					<string name="Name">Signal</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000054">
+			<Item class="RemoteEvent" referent="RBX000056">
 				<Properties>
 					<string name="Name">ClientEvent</string>
 				</Properties>
 			</Item>
 		</Item>
 	</Item>
-	<Item class="ReplicatedFirst" referent="RBX000055">
+	<Item class="ReplicatedFirst" referent="RBX000057">
 		<Properties>
 			<string name="Name">ReplicatedFirst</string>
 		</Properties>
-		<Item class="LocalScript" referent="RBX000056">
+		<Item class="LocalScript" referent="RBX000058">
 			<Properties>
 				<string name="Name">LoadingScreen</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -10592,11 +10879,11 @@ gui:Destroy()
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="ServerScriptService" referent="RBX000057">
+	<Item class="ServerScriptService" referent="RBX000059">
 		<Properties>
 			<string name="Name">ServerScriptService</string>
 		</Properties>
-		<Item class="Script" referent="RBX000058">
+		<Item class="Script" referent="RBX000060">
 			<Properties>
 				<string name="Name">Main</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -10631,6 +10918,7 @@ local ORDER = {
 	"BondService",
 	"EggService",
 	"WildEggService",
+	"CoinService",
 	"ShopService",
 	"MonetizationService",
 	"QuestService",
@@ -10725,11 +11013,11 @@ ReplicatedStorage:SetAttribute("ServerReady", true)
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="Folder" referent="RBX000059">
+		<Item class="Folder" referent="RBX000061">
 			<Properties>
 				<string name="Name">Services</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000060">
+			<Item class="ModuleScript" referent="RBX000062">
 				<Properties>
 					<string name="Name">BondService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11078,7 +11366,7 @@ return BondService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000061">
+			<Item class="ModuleScript" referent="RBX000063">
 				<Properties>
 					<string name="Name">BoostService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11211,7 +11499,209 @@ return BoostService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000062">
+			<Item class="ModuleScript" referent="RBX000064">
+				<Properties>
+					<string name="Name">CoinService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	CoinService
+	Coins on the map: copper trails along the roads, gold arcs in the sky, treasure piles at the
+	landmarks (CoinConfig / CoinLayout). The list of coins is the same for everybody; whether a
+	coin is there is per player (it comes back CoinConfig.Kinds[kind].Respawn seconds after the
+	player took it). The server builds the list from the finished world, validates every pickup
+	(distance, own cooldown) and pays: the value of a coin is a few seconds of the player's income;
+	coins taken in quick succession form a CHAIN that pays more per coin.
+
+	Net (domain "Coins"):
+	  Layout {}          -> { Layout = { X, Y, Z, K }, Back = { [id] = seconds left } }
+	  Collect { Ids }    -> { Collected = { id... }, Gained, Chain, Mult, Total }
+	Ids the server does not take (too far, not back yet) are simply left out of Collected.
+	Test hooks: CoinService.List(), CoinService.State(player), CoinService.Build().
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local CoinLayout = require(Shared:WaitForChild("CoinLayout"))
+local CoinConfig = require(Configs:WaitForChild("CoinConfig"))
+
+local CoinService = {}
+
+local Data
+local Services
+local list: { { Kind: string, Position: Vector3 } } = {}
+local packed: any = nil
+local states: { [Player]: { Back: { [number]: number }, Chain: number, Last: number } } = {}
+
+-- (the simulator's os.clock is wall time; server time is what the rest of the game uses)
+local function clock(): number
+	return Workspace:GetServerTimeNow()
+end
+
+-- ============================================================== layout
+local function build()
+	local groundParams = RaycastParams.new()
+	groundParams.FilterType = Enum.RaycastFilterType.Include
+	groundParams.FilterDescendantsInstances = { Workspace.Terrain }
+	groundParams.IgnoreWater = false
+
+	local exclude = {}
+	local world = Workspace:FindFirstChild("World")
+	for _, name in { "Nature", "EggSpots" } do
+		local folder = world and world:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, name in { "Dragons", "MyEggs", "HeldEggs" } do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, p in Players:GetPlayers() do
+		if p.Character then
+			table.insert(exclude, p.Character)
+		end
+	end
+	local surfaceParams = RaycastParams.new()
+	surfaceParams.FilterType = Enum.RaycastFilterType.Exclude
+	surfaceParams.FilterDescendantsInstances = exclude
+	surfaceParams.IgnoreWater = false
+
+	local env = {
+		ground = function(x: number, z: number)
+			local hit = Workspace:Raycast(Vector3.new(x, 900, z), Vector3.new(0, -1800, 0), groundParams)
+			if not hit then
+				return nil
+			end
+			return hit.Position.Y, hit.Normal.Y, hit.Material == Enum.Material.Water
+		end,
+		surface = function(x: number, z: number)
+			local hit = Workspace:Raycast(Vector3.new(x, 900, z), Vector3.new(0, -1800, 0), surfaceParams)
+			if not hit or hit.Material == Enum.Material.Water then
+				return nil
+			end
+			return hit.Position.Y
+		end,
+	}
+	list = CoinLayout.generate(env)
+	packed = CoinLayout.pack(list)
+	return #list
+end
+
+function CoinService.Build(): number
+	return build()
+end
+
+function CoinService.List()
+	return list
+end
+
+-- ============================================================== players
+local function stateOf(player: Player)
+	local st = states[player]
+	if not st then
+		st = { Back = {}, Chain = 0, Last = -math.huge }
+		states[player] = st
+	end
+	return st
+end
+
+function CoinService.State(player: Player)
+	return stateOf(player)
+end
+
+-- ============================================================== net
+local function handleLayout(player: Player)
+	if not packed then
+		return false, "NOT_READY"
+	end
+	-- coins the player took a short while ago are still gone (a client that restarts must not see them)
+	local st = stateOf(player)
+	local now = clock()
+	local back = {}
+	for id, at in st.Back do
+		if at > now then
+			back[tostring(id)] = math.ceil(at - now)
+		end
+	end
+	return true, { Layout = packed, Back = back }
+end
+
+local function handleCollect(player: Player, p)
+	local data = Data.Get(player)
+	if not data or #list == 0 then
+		return false, "NOT_READY"
+	end
+	local ids = p.Ids
+	if type(ids) ~= "table" or #ids == 0 or #ids > CoinConfig.Batch.Size * 2 then
+		return false, "BAD_REQUEST"
+	end
+	local st = stateOf(player)
+	local now = clock()
+	local income = Services.EconomyService.IncomeRate(player)
+	local collected = {}
+	local gained, mult = 0, 1
+	local seen = {}
+	for _, id in ids do
+		if Net.check.int(id, 1, #list) and not seen[id] then
+			seen[id] = true
+			local coin = list[id]
+			local kind = CoinConfig.Kinds[coin.Kind]
+			if (st.Back[id] or 0) <= now and Services.EggService.DistanceTo(player, coin.Position) <= kind.Radius + CoinConfig.ServerSlack then
+				if now - st.Last <= CoinConfig.Chain.Window then
+					st.Chain += 1
+				else
+					st.Chain = 1
+				end
+				st.Last = now
+				mult = CoinConfig.multiplier(st.Chain)
+				gained += math.floor(CoinConfig.value(coin.Kind, income) * mult + 0.5)
+				st.Back[id] = now + kind.Respawn
+				table.insert(collected, id)
+			end
+		end
+	end
+	if #collected > 0 then
+		Services.EconomyService.Earn(player, gained, "Coins")
+		Data.Increment(player, { "Stats", "Coins" }, #collected)
+	end
+	local stats = data.Stats
+	return true, { Collected = collected, Gained = gained, Chain = st.Chain, Mult = mult, Total = stats and stats.Coins or 0 }
+end
+
+-- ============================================================== lifecycle
+function CoinService.Init(services)
+	Services = services
+	Data = services.PlayerDataService
+	Net.handle("Coins", "Layout", handleLayout, { Burst = 4, PerSecond = 1 })
+	Net.handle("Coins", "Collect", handleCollect, { Burst = 8, PerSecond = 6 })
+end
+
+function CoinService.Start()
+	Players.PlayerRemoving:Connect(function(player)
+		states[player] = nil
+	end)
+	task.spawn(function()
+		while not Workspace:GetAttribute("WorldReady") do
+			task.wait(0.5)
+		end
+		local count = build()
+		if count < 100 then
+			warn(string.format("[Coins] only %d coins could be placed", count))
+		end
+	end)
+end
+
+return CoinService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000065">
 				<Properties>
 					<string name="Name">CombatService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11804,7 +12294,7 @@ return CombatService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000063">
+			<Item class="ModuleScript" referent="RBX000066">
 				<Properties>
 					<string name="Name">DevService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11976,7 +12466,7 @@ return DevService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000064">
+			<Item class="ModuleScript" referent="RBX000067">
 				<Properties>
 					<string name="Name">DragonAssetService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12076,7 +12566,7 @@ return DragonAssetService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000065">
+			<Item class="ModuleScript" referent="RBX000068">
 				<Properties>
 					<string name="Name">DragonService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12794,7 +13284,7 @@ return DragonService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000066">
+			<Item class="ModuleScript" referent="RBX000069">
 				<Properties>
 					<string name="Name">EconomyService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12966,7 +13456,7 @@ return EconomyService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000067">
+			<Item class="ModuleScript" referent="RBX000070">
 				<Properties>
 					<string name="Name">EggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13797,7 +14287,7 @@ return EggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000068">
+			<Item class="ModuleScript" referent="RBX000071">
 				<Properties>
 					<string name="Name">LeaderboardService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14395,7 +14885,7 @@ return LeaderboardService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000069">
+			<Item class="ModuleScript" referent="RBX000072">
 				<Properties>
 					<string name="Name">LeaderstatsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14485,7 +14975,7 @@ return LeaderstatsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000070">
+			<Item class="ModuleScript" referent="RBX000073">
 				<Properties>
 					<string name="Name">LevelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14677,7 +15167,7 @@ return LevelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000071">
+			<Item class="ModuleScript" referent="RBX000074">
 				<Properties>
 					<string name="Name">MonetizationService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14957,7 +15447,7 @@ return MonetizationService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000072">
+			<Item class="ModuleScript" referent="RBX000075">
 				<Properties>
 					<string name="Name">MountService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15595,7 +16085,7 @@ return MountService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000073">
+			<Item class="ModuleScript" referent="RBX000076">
 				<Properties>
 					<string name="Name">PhysicsGroups</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15681,7 +16171,7 @@ return PhysicsGroups
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000074">
+			<Item class="ModuleScript" referent="RBX000077">
 				<Properties>
 					<string name="Name">PlayerDataService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15767,6 +16257,7 @@ local TEMPLATE = {
 		Spins = 0,
 		ArenaKills = 0,
 		ArenaDeaths = 0,
+		Coins = 0,
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},
@@ -16147,7 +16638,7 @@ return PlayerDataService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000075">
+			<Item class="ModuleScript" referent="RBX000078">
 				<Properties>
 					<string name="Name">RaceService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17084,7 +17575,7 @@ return RaceService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000076">
+			<Item class="ModuleScript" referent="RBX000079">
 				<Properties>
 					<string name="Name">SanctuaryService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17346,7 +17837,7 @@ return SanctuaryService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000077">
+			<Item class="ModuleScript" referent="RBX000080">
 				<Properties>
 					<string name="Name">SettingsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17404,7 +17895,7 @@ return SettingsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000078">
+			<Item class="ModuleScript" referent="RBX000081">
 				<Properties>
 					<string name="Name">ShopService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17458,7 +17949,7 @@ return ShopService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000079">
+			<Item class="ModuleScript" referent="RBX000082">
 				<Properties>
 					<string name="Name">SpinService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17757,7 +18248,7 @@ return SpinService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000080">
+			<Item class="ModuleScript" referent="RBX000083">
 				<Properties>
 					<string name="Name">TravelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17880,7 +18371,7 @@ return TravelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000081">
+			<Item class="ModuleScript" referent="RBX000084">
 				<Properties>
 					<string name="Name">TreeService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18002,7 +18493,7 @@ return TreeService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000082">
+			<Item class="ModuleScript" referent="RBX000085">
 				<Properties>
 					<string name="Name">WildEggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18240,7 +18731,7 @@ return WildEggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000083">
+			<Item class="ModuleScript" referent="RBX000086">
 				<Properties>
 					<string name="Name">WorldService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18397,11 +18888,11 @@ return WorldService
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000084">
+		<Item class="Folder" referent="RBX000087">
 			<Properties>
 				<string name="Name">World</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000085">
+			<Item class="ModuleScript" referent="RBX000088">
 				<Properties>
 					<string name="Name">GreatTree</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18602,7 +19093,7 @@ return GreatTree
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000086">
+			<Item class="ModuleScript" referent="RBX000089">
 				<Properties>
 					<string name="Name">Haven</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18768,7 +19259,7 @@ return Haven
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000087">
+			<Item class="ModuleScript" referent="RBX000090">
 				<Properties>
 					<string name="Name">HavenLayout</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/layout.py - do not edit by hand.
@@ -23154,7 +23645,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000088">
+			<Item class="ModuleScript" referent="RBX000091">
 				<Properties>
 					<string name="Name">HavenTerrainData</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/terrain_data.py - do not edit by hand.
@@ -23205,7 +23696,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000089">
+			<Item class="ModuleScript" referent="RBX000092">
 				<Properties>
 					<string name="Name">Kit</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -23551,7 +24042,7 @@ return Kit
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000090">
+			<Item class="ModuleScript" referent="RBX000093">
 				<Properties>
 					<string name="Name">Landmarks</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -23913,7 +24404,7 @@ return Landmarks
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000091">
+			<Item class="ModuleScript" referent="RBX000094">
 				<Properties>
 					<string name="Name">Props</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24109,7 +24600,7 @@ return Props
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000092">
+			<Item class="ModuleScript" referent="RBX000095">
 				<Properties>
 					<string name="Name">RaceIsland</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24545,7 +25036,7 @@ return RaceIsland
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000093">
+			<Item class="ModuleScript" referent="RBX000096">
 				<Properties>
 					<string name="Name">Sanctuaries</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24933,7 +25424,7 @@ return Sanctuaries
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000094">
+			<Item class="ModuleScript" referent="RBX000097">
 				<Properties>
 					<string name="Name">TerrainWriter</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -25347,7 +25838,7 @@ return TerrainWriter
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000095">
+			<Item class="ModuleScript" referent="RBX000098">
 				<Properties>
 					<string name="Name">Village</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -25761,7 +26252,7 @@ return Village
 			</Item>
 		</Item>
 	</Item>
-	<Item class="StarterPlayer" referent="RBX000096">
+	<Item class="StarterPlayer" referent="RBX000099">
 		<Properties>
 			<string name="Name">StarterPlayer</string>
 			<bool name="EnableMouseLockOption">false</bool>
@@ -25769,15 +26260,15 @@ return Village
 			<float name="CameraMinZoomDistance">6.0</float>
 			<float name="CharacterWalkSpeed">20.0</float>
 		</Properties>
-		<Item class="StarterPlayerScripts" referent="RBX000097">
+		<Item class="StarterPlayerScripts" referent="RBX000100">
 			<Properties>
 				<string name="Name">StarterPlayerScripts</string>
 			</Properties>
-			<Item class="Folder" referent="RBX000098">
+			<Item class="Folder" referent="RBX000101">
 				<Properties>
 					<string name="Name">Controllers</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000099">
+				<Item class="ModuleScript" referent="RBX000102">
 					<Properties>
 						<string name="Name">AnimationController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26382,7 +26873,7 @@ return AnimationController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000100">
+				<Item class="ModuleScript" referent="RBX000103">
 					<Properties>
 						<string name="Name">AnnounceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26646,7 +27137,7 @@ return AnnounceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000101">
+				<Item class="ModuleScript" referent="RBX000104">
 					<Properties>
 						<string name="Name">AudioController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26819,7 +27310,7 @@ return AudioController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000102">
+				<Item class="ModuleScript" referent="RBX000105">
 					<Properties>
 						<string name="Name">BondController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27147,7 +27638,7 @@ return BondController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000103">
+				<Item class="ModuleScript" referent="RBX000106">
 					<Properties>
 						<string name="Name">CameraController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27517,7 +28008,442 @@ return CameraController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000104">
+				<Item class="ModuleScript" referent="RBX000107">
+					<Properties>
+						<string name="Name">CoinController</string>
+						<ProtectedString name="Source"><![CDATA[--[[
+	CoinController
+	Client side of the coins on the map (CoinService / CoinConfig / CoinLayout):
+
+	  * asks the server for the coin list once (retrying until the world is ready) and builds the
+	    coins that are near the player: spinning, bobbing gold coins on the roads, big sky coins in
+	    arcs, glowing treasure piles at the landmarks
+	  * flying or walking into a coin takes it (it vanishes with a little burst); touched coins are
+	    sent to the server in small batches, the server decides what it pays
+	  * a CHAIN pill in the HUD (under the cash) counts the chain and the cash earned by it while
+	    coins keep coming; coins the server did not take simply come back
+
+	Coins come back after their own respawn time (the server tells the rest of it when this
+	client starts late).
+]]
+
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local CoinLayout = require(Shared:WaitForChild("CoinLayout"))
+local CoinConfig = require(Configs:WaitForChild("CoinConfig"))
+
+local LocalPlayer = Players.LocalPlayer
+
+local CoinController = {}
+
+local registry
+local coins: { { Kind: string, Def: any, Position: Vector3, Phase: number } } = {}
+local visible: { [number]: Model } = {} -- built coins by id
+local hidden: { [number]: number } = {} -- id -> clock when it comes back
+local retry: { [number]: number } = {} -- id -> clock before which a refused coin is not tried again
+local queue: { number } = {}
+local flushing = false
+local flushAt = 0
+local clock = 0
+local streamAcc = 0
+local folder: Folder? = nil
+local chain = { N = 0, Until = 0, Gained = 0, Mult = 1 }
+local loaded = false
+local total = 0
+local touching = true -- off: coins are not taken by touching them (UI Lab, tests)
+
+-- ============================================================== visuals
+local function part(name: string, size: Vector3, color: Color3, material: Enum.Material, parent: Instance): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Size = size
+	p.Color = color
+	p.Material = material
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+local function buildCoin(kindId: string): Model
+	local def = CoinConfig.Kinds[kindId]
+	local model = Instance.new("Model")
+	model.Name = "Coin"
+	model:SetAttribute("Kind", kindId)
+	local s = def.Size
+	if kindId == "Gem" then
+		-- a gem: a block that place() stands on a corner (45 degrees twice) and a second one turned
+		-- 45 degrees against it, whose corners poke out in the other colour - a crystal star
+		local body = part("Body", Vector3.new(s * 0.72, s * 0.72, s * 0.72), def.Color, Enum.Material.Neon, model)
+		local core = part("Core", Vector3.new(s * 0.66, s * 0.66, s * 0.66), def.Rim, Enum.Material.Neon, model)
+		core.CFrame = CFrame.Angles(0, math.rad(45), 0)
+		model.PrimaryPart = body
+		local light = Instance.new("PointLight")
+		light.Color = def.Color
+		light.Range = 16
+		light.Brightness = 1.4
+		light.Parent = body
+		local sparkles = Instance.new("ParticleEmitter")
+		sparkles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		sparkles.Color = ColorSequence.new(def.Color, def.Rim)
+		sparkles.LightEmission = 1
+		sparkles.Rate = 6
+		sparkles.Lifetime = NumberRange.new(0.8, 1.5)
+		sparkles.Speed = NumberRange.new(1, 3)
+		sparkles.SpreadAngle = Vector2.new(180, 180)
+		sparkles.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.3, 0.7), NumberSequenceKeypoint.new(1, 0) })
+		sparkles.Parent = body
+		return model
+	end
+	-- a coin: a thin disc with a darker inner disc on both faces (a cylinder's axis is X)
+	local sky = kindId == "Gold"
+	local material = sky and Enum.Material.Neon or Enum.Material.Metal
+	local body = part("Body", Vector3.new(s * 0.16, s, s), def.Color, material, model)
+	body.Shape = Enum.PartType.Cylinder
+	local face = part("Face", Vector3.new(s * 0.2, s * 0.62, s * 0.62), def.Rim, material, model)
+	face.Shape = Enum.PartType.Cylinder
+	model.PrimaryPart = body
+	return model
+end
+
+local GEM_TILT = CFrame.Angles(math.rad(45), 0, math.rad(45))
+
+-- Coins spin around the vertical axis; gems stand on a corner.
+local function place(model: Model, position: Vector3, spin: number, kind: string)
+	local cf = CFrame.new(position) * CFrame.Angles(0, spin, 0)
+	model:PivotTo(kind == "Gem" and cf * GEM_TILT or cf)
+end
+
+local function getFolder(): Folder
+	if folder and folder.Parent then
+		return folder
+	end
+	folder = Instance.new("Folder")
+	folder.Name = "Coins"
+	folder.Parent = Workspace
+	return folder
+end
+
+local function burst(position: Vector3, color: Color3)
+	local anchor = Instance.new("Part")
+	anchor.Name = "CoinBurst"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.5, 0.5, 0.5)
+	anchor.Position = position
+	anchor.Parent = getFolder()
+	local pe = Instance.new("ParticleEmitter")
+	pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	pe.Color = ColorSequence.new(color)
+	pe.LightEmission = 1
+	pe.Rate = 0
+	pe.Lifetime = NumberRange.new(0.4, 0.8)
+	pe.Speed = NumberRange.new(8, 16)
+	pe.SpreadAngle = Vector2.new(180, 180)
+	pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.9), NumberSequenceKeypoint.new(1, 0) })
+	pe.Parent = anchor
+	pe:Emit(9)
+	local audio = registry and registry.AudioController
+	if audio then
+		audio.play3D("CoinPickup", anchor, 0.12, 0.8)
+	end
+	Debris:AddItem(anchor, 1.2)
+end
+
+-- ============================================================== chain pill
+local function showChain()
+	local hud = registry and registry.Hud
+	if not hud or not hud.SetCoinChain then
+		return
+	end
+	if chain.N > 0 and clock < chain.Until then
+		hud:SetCoinChain(chain.Mult, chain.Gained, chain.N)
+	else
+		hud:SetCoinChain(nil)
+	end
+end
+
+-- ============================================================== streaming
+local function myPositions(): ({ Vector3 }, number)
+	local out = {}
+	local slack = 0
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if hrp then
+		table.insert(out, hrp.Position)
+	end
+	local dragons = Workspace:FindFirstChild("Dragons")
+	local model = dragons and dragons:FindFirstChild("Dragon_" .. LocalPlayer.UserId)
+	local root = model and model:FindFirstChild("Root") :: BasePart?
+	if root then
+		table.insert(out, root.Position)
+		slack = ((model :: Model):GetAttribute("BodyRadius") or 0) * 0.5
+		if (model :: Model):GetAttribute("RiderUserId") == LocalPlayer.UserId then
+			slack += 5 -- swooping through a coin while riding is enough
+		end
+	end
+	return out, slack
+end
+
+local function remove(id: number)
+	local model = visible[id]
+	if model then
+		model:Destroy()
+		visible[id] = nil
+	end
+end
+
+-- Builds the coins around the player and removes the far ones.
+local function stream(positions: { Vector3 })
+	local ref = positions[1]
+	local camera = Workspace.CurrentCamera
+	if not ref and camera then
+		ref = camera.CFrame.Position
+	end
+	if not ref then
+		return
+	end
+	local r2 = CoinConfig.ViewRadius * CoinConfig.ViewRadius
+	for id = 1, #coins do
+		local coin = coins[id]
+		local d = coin.Position - ref
+		local back = hidden[id]
+		if back and clock >= back then
+			hidden[id] = nil
+			back = nil
+		end
+		if not back and d.X * d.X + d.Y * d.Y + d.Z * d.Z <= r2 then
+			if not visible[id] then
+				local model = buildCoin(coin.Kind)
+				model.Name = "Coin" .. id
+				place(model, coin.Position, coin.Phase, coin.Kind)
+				model.Parent = getFolder()
+				visible[id] = model
+			end
+		else
+			remove(id)
+		end
+	end
+end
+
+-- ============================================================== taking coins
+local function flush()
+	if flushing or #queue == 0 then
+		return
+	end
+	local ids = {}
+	for _ = 1, math.min(#queue, CoinConfig.Batch.Size) do
+		table.insert(ids, table.remove(queue, 1))
+	end
+	flushing = true
+	task.spawn(function()
+		local res = Net.request("Coins", "Collect", { Ids = ids })
+		flushing = false
+		if not res.ok or not res.data then
+			-- (not loaded yet, rate limited...) the coins come back and can be tried again
+			for _, id in ids do
+				hidden[id] = nil
+				retry[id] = clock + 3
+			end
+			return
+		end
+		local took = {}
+		for _, id in res.data.Collected or {} do
+			took[id] = true
+		end
+		for _, id in ids do
+			if not took[id] then
+				hidden[id] = nil -- the server did not take it (too far, not back yet): it stays in the world
+				retry[id] = clock + 4
+			end
+		end
+		total = res.data.Total or total
+		if #(res.data.Collected or {}) > 0 then
+			if clock >= chain.Until then
+				chain.Gained = 0
+			end
+			chain.N = res.data.Chain or 1
+			chain.Mult = res.data.Mult or 1
+			chain.Gained += res.data.Gained or 0
+			chain.Until = clock + CoinConfig.Chain.Window + 0.6
+			local audio = registry and registry.AudioController
+			if audio and chain.N >= 3 and audio.playUI then
+				audio.playUI("CoinChain")
+			end
+			showChain()
+		end
+	end)
+end
+
+local function touch(id: number)
+	local coin = coins[id]
+	local def = coin.Def
+	hidden[id] = clock + def.Respawn + 5 -- until the server says otherwise
+	remove(id)
+	burst(coin.Position, def.Color)
+	table.insert(queue, id)
+	if #queue >= CoinConfig.Batch.Size then
+		flush()
+	end
+end
+
+local function step(dt: number)
+	clock += dt
+	if #coins == 0 then
+		return
+	end
+	local positions, slack = myPositions()
+	streamAcc += dt
+	if streamAcc >= 0.25 then
+		streamAcc = 0
+		stream(positions)
+	end
+	for id, model in visible do
+		local coin = coins[id]
+		local t = clock * 2.2 + coin.Phase
+		place(model, coin.Position + Vector3.new(0, math.sin(t * 0.8) * 0.4, 0), t, coin.Kind)
+		if touching and (retry[id] or 0) <= clock then
+			local reach = coin.Def.Radius + slack
+			for _, p in positions do
+				if (p - coin.Position).Magnitude <= reach then
+					touch(id)
+					break
+				end
+			end
+		end
+	end
+	if clock >= flushAt then
+		flushAt = clock + CoinConfig.Batch.Interval
+		flush()
+	end
+	if chain.N > 0 and clock >= chain.Until then
+		chain.N = 0
+		chain.Gained = 0
+		chain.Mult = 1
+		showChain()
+	end
+end
+
+-- ============================================================== loading
+local function load()
+	local res = Net.request("Coins", "Layout", {})
+	if not res.ok or not res.data then
+		return false
+	end
+	local list = CoinLayout.unpack(res.data.Layout)
+	local rng = Random.new(77)
+	table.clear(coins)
+	for i, c in list do
+		coins[i] = { Kind = c.Kind, Def = CoinConfig.Kinds[c.Kind], Position = c.Position, Phase = rng:NextNumber(0, math.pi * 2) }
+	end
+	table.clear(hidden)
+	for key, seconds in res.data.Back or {} do
+		local id = tonumber(key)
+		if id and coins[id] then
+			hidden[id] = clock + seconds
+		end
+	end
+	loaded = true
+	return true
+end
+
+-- ============================================================== public
+function CoinController.count(): number
+	return #coins
+end
+
+-- The model of one coin kind (not placed anywhere) - tools and the UI Lab.
+function CoinController.build(kindId: string): Model
+	return buildCoin(kindId)
+end
+
+function CoinController.place(model: Model, position: Vector3, spin: number, kind: string)
+	place(model, position, spin, kind)
+end
+
+function CoinController.visibleCount(): number
+	local n = 0
+	for _ in visible do
+		n += 1
+	end
+	return n
+end
+
+function CoinController.total(): number
+	return total
+end
+
+-- Is coin `id` built right now / where is it / what is it (tools and tests).
+function CoinController.isVisible(id: number): boolean
+	return visible[id] ~= nil
+end
+
+function CoinController.position(id: number): Vector3?
+	return coins[id] and coins[id].Position or nil
+end
+
+function CoinController.kind(id: number): string?
+	return coins[id] and coins[id].Kind or nil
+end
+
+function CoinController.chain()
+	return chain
+end
+
+-- Coins are taken by touching them; tools and tests switch that off.
+function CoinController.setTouch(on: boolean)
+	touching = on
+end
+
+-- UI Lab: the chain pill with sample numbers, whatever the data says.
+function CoinController.preview(on: boolean)
+	touching = not on
+	local hud = registry and registry.Hud
+	if hud and hud.SetCoinChain then
+		if on then
+			hud:SetCoinChain(2.75, 18400, 8)
+		else
+			showChain()
+		end
+	end
+end
+
+function CoinController.Init(reg)
+	registry = reg
+end
+
+function CoinController.Start()
+	RunService.Heartbeat:Connect(step)
+	task.spawn(function()
+		-- the world may not be ready yet: ask again until the list comes
+		while not loaded do
+			if not load() then
+				task.wait(3)
+			end
+		end
+	end)
+end
+
+return CoinController
+]]></ProtectedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX000108">
 					<Properties>
 						<string name="Name">CombatController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28357,7 +29283,7 @@ return CombatController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000105">
+				<Item class="ModuleScript" referent="RBX000109">
 					<Properties>
 						<string name="Name">DataController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28488,7 +29414,7 @@ return DataController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000106">
+				<Item class="ModuleScript" referent="RBX000110">
 					<Properties>
 						<string name="Name">DragonController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29137,7 +30063,7 @@ return DragonController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000107">
+				<Item class="ModuleScript" referent="RBX000111">
 					<Properties>
 						<string name="Name">EggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29452,7 +30378,7 @@ return EggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000108">
+				<Item class="ModuleScript" referent="RBX000112">
 					<Properties>
 						<string name="Name">GraphicsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29589,7 +30515,7 @@ return GraphicsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000109">
+				<Item class="ModuleScript" referent="RBX000113">
 					<Properties>
 						<string name="Name">HatchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30941,7 +31867,7 @@ return HatchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000110">
+				<Item class="ModuleScript" referent="RBX000114">
 					<Properties>
 						<string name="Name">HeldEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31338,7 +32264,7 @@ return HeldEggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000111">
+				<Item class="ModuleScript" referent="RBX000115">
 					<Properties>
 						<string name="Name">InputController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31561,7 +32487,7 @@ return InputController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000112">
+				<Item class="ModuleScript" referent="RBX000116">
 					<Properties>
 						<string name="Name">InteractionController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31624,7 +32550,7 @@ return InteractionController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000113">
+				<Item class="ModuleScript" referent="RBX000117">
 					<Properties>
 						<string name="Name">PerchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32088,7 +33014,7 @@ return PerchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000114">
+				<Item class="ModuleScript" referent="RBX000118">
 					<Properties>
 						<string name="Name">RaceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -33122,7 +34048,7 @@ return RaceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000115">
+				<Item class="ModuleScript" referent="RBX000119">
 					<Properties>
 						<string name="Name">RadarController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -33435,7 +34361,7 @@ return RadarController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000116">
+				<Item class="ModuleScript" referent="RBX000120">
 					<Properties>
 						<string name="Name">SanctuaryController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -33944,7 +34870,7 @@ return SanctuaryController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000117">
+				<Item class="ModuleScript" referent="RBX000121">
 					<Properties>
 						<string name="Name">SettingsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34032,7 +34958,7 @@ return SettingsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000118">
+				<Item class="ModuleScript" referent="RBX000122">
 					<Properties>
 						<string name="Name">SpinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34460,7 +35386,7 @@ return SpinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000119">
+				<Item class="ModuleScript" referent="RBX000123">
 					<Properties>
 						<string name="Name">TitleController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34664,7 +35590,7 @@ return TitleController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000120">
+				<Item class="ModuleScript" referent="RBX000124">
 					<Properties>
 						<string name="Name">TreeController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34804,7 +35730,7 @@ return TreeController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000121">
+				<Item class="ModuleScript" referent="RBX000125">
 					<Properties>
 						<string name="Name">UIController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35222,7 +36148,7 @@ return UIController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000122">
+				<Item class="ModuleScript" referent="RBX000126">
 					<Properties>
 						<string name="Name">WildEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35723,7 +36649,7 @@ return WildEggController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000123">
+			<Item class="ModuleScript" referent="RBX000127">
 				<Properties>
 					<string name="Name">Diagnostics</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -35980,7 +36906,7 @@ return Diagnostics
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="LocalScript" referent="RBX000124">
+			<Item class="LocalScript" referent="RBX000128">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -36043,6 +36969,7 @@ local ORDER = {
 	"AnnounceController",
 	"WildEggController",
 	"RadarController",
+	"CoinController",
 	"InventoryController",
 	"TutorialController",
 	"RegionController",
@@ -36112,16 +37039,16 @@ end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000125">
+			<Item class="Folder" referent="RBX000129">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000126">
+				<Item class="Folder" referent="RBX000130">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000127">
+				<Item class="ModuleScript" referent="RBX000131">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36201,11 +37128,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000128">
+				<Item class="Folder" referent="RBX000132">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000129">
+					<Item class="ModuleScript" referent="RBX000133">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -36372,7 +37299,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000130">
+					<Item class="ModuleScript" referent="RBX000134">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -36791,7 +37718,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000131">
+				<Item class="ModuleScript" referent="RBX000135">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36857,11 +37784,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000132">
+				<Item class="Folder" referent="RBX000136">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000133">
+					<Item class="ModuleScript" referent="RBX000137">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37088,7 +38015,8 @@ function Hud:BuildCash()
 	local row = Kit.frame({ Name = "Secondary", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 1), Size = UDim2.fromScale(1, 0.32), Parent = root })
 	Kit.list(row, "H", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
 	self.PillRow = row
-	self.PillScale = Create("UIScale", { Parent = row }) -- shrinks the row on phones when many pills are lit
+	-- which pills want to be seen (FitPills decides what the width allows)
+	self.Want = { Income = false, Luck = false, Cash = false, Hunt = false, Chain = false }
 	local function smallPill(name: string, icon: string, order: number)
 		local p = Create("TextButton", {
 			Name = name,
@@ -37122,12 +38050,16 @@ function Hud:BuildCash()
 	self.CashBoostPill, self.CashBoostText = smallPill("CashBoost", "Coin", 4)
 	-- egg hunting perks (Egg Magnet / Fast Hatch potions, the Egg Hunter pass): one pill
 	self.HuntPill, self.HuntText = smallPill("Hunt", "Magnet", 5)
+	-- coin chain (CoinController): lit while coins keep being collected
+	self.ChainPill, self.ChainText = smallPill("Chain", "Coin", 6)
+	self.ChainPill.Active = false
+	self.ChainText.TextColor3 = Color3.fromRGB(190, 120, 0)
 	self.LuckText.TextColor3 = Color3.fromRGB(46, 150, 70)
 	self.CashBoostText.TextColor3 = C.AccentDeep
 	self.HuntText.TextColor3 = Color3.fromRGB(214, 112, 40)
-	self.LuckPill.Visible = false
-	self.CashBoostPill.Visible = false
-	self.HuntPill.Visible = false
+	for _, pill in { self.IncomePill, self.LuckPill, self.CashBoostPill, self.HuntPill, self.ChainPill } do
+		pill.Visible = false
+	end
 	for _, pill in { self.LuckPill, self.CashBoostPill, self.HuntPill } do
 		pill.Activated:Connect(function()
 			Kit.hooks.Click()
@@ -37165,16 +38097,49 @@ local function huntText(names: { string }, left: number): string
 	return left < math.huge and (text .. "  " .. mmss(left)) or text
 end
 
--- Many lit pills do not fit on a phone: the row shrinks a little instead of running off the screen.
-local PILL_FIT = { 1, 1, 1, 0.9, 0.8, 0.72 }
+-- The pills under the cash do not all fit on a portrait phone: besides the eggs pill at most
+-- PHONE_PILLS of the others show, in this order of importance (the coin chain only lives a few
+-- seconds, the income is the first to give way). Everywhere else every wanted pill shows.
+local PILL_PRIORITY = { { "Chain", "ChainPill" }, { "Luck", "LuckPill" }, { "Cash", "CashBoostPill" }, { "Hunt", "HuntPill" }, { "Income", "IncomePill" } }
+local PHONE_PILLS = 3
 function Hud:FitPills()
-	local lit = 0
-	for _, pill in { self.EggPill, self.IncomePill, self.LuckPill, self.CashBoostPill, self.HuntPill } do
-		if pill.Visible then
-			lit += 1
+	local budget = (Responsive.Device == "Phone" and Responsive.Portrait) and PHONE_PILLS or math.huge
+	for _, item in PILL_PRIORITY do
+		local show = self.Want[item[1]] == true and budget > 0
+		if show then
+			budget -= 1
 		end
+		self[item[2]].Visible = show
 	end
-	self.PillScale.Scale = Responsive.Device == "Phone" and PILL_FIT[math.clamp(lit, 1, #PILL_FIT)] or 1
+end
+
+local function trimNumber(n: number): string
+	local text = string.format("%.2f", n)
+	text = string.gsub(text, "0+$", "")
+	text = string.gsub(text, "%.$", "")
+	return text
+end
+
+-- Coin chain (CoinController): "CHAIN x2.5  +$1.2K" while coins keep coming, a lone coin shows
+-- just its cash; nil hides the pill.
+function Hud:SetCoinChain(mult: number?, gained: number?, n: number?)
+	if not mult then
+		self.Want.Chain = false
+		self:FitPills()
+		return
+	end
+	local cash = Format.cash(gained or 0)
+	local text
+	if (n or 1) < 2 then
+		text = "+" .. cash
+	elseif Responsive.Device == "Phone" then
+		text = string.format("x%s +%s", trimNumber(mult), cash)
+	else
+		text = string.format("CHAIN x%s  +%s", trimNumber(mult), cash)
+	end
+	self.ChainText.Text = text
+	self.Want.Chain = true
+	self:FitPills()
 end
 
 -- UI Lab: every boost pill with sample text (the longest case), whatever the data says.
@@ -37183,19 +38148,20 @@ function Hud:PreviewBoosts(on: boolean)
 	self:RefreshBoosts()
 	if not on then
 		self:RefreshIncome()
+		self:SetCoinChain(nil)
 	end
 end
 
 function Hud:RefreshBoosts()
 	if self._previewBoosts then
-		self.LuckPill.Visible = true
+		self.Want.Luck = true
 		self.LuckText.Text = boostText("x6", "LUCK", 842)
-		self.CashBoostPill.Visible = true
+		self.Want.Cash = true
 		self.CashBoostText.Text = boostText("x2", "CASH", 581)
-		self.HuntPill.Visible = true
+		self.Want.Hunt = true
 		self.HuntText.Text = huntText({ "HUNTER", "FAST HATCH", "MAGNET" }, 860)
-		self.IncomePill.Visible = true
-		self:FitPills()
+		self.Want.Income = true
+		self:SetCoinChain(2.75, 18400, 8)
 		return
 	end
 	local data = self.Data.all()
@@ -37221,11 +38187,11 @@ function Hud:RefreshBoosts()
 			end
 		end
 	end
-	self.LuckPill.Visible = luck > 1
+	self.Want.Luck = luck > 1
 	if luck > 1 then
 		self.LuckText.Text = boostText("x" .. tostring(math.floor(luck * 10 + 0.5) / 10), "LUCK", luckLeft)
 	end
-	self.CashBoostPill.Visible = cash > 1
+	self.Want.Cash = cash > 1
 	if cash > 1 then
 		self.CashBoostText.Text = boostText("x" .. tostring(cash), "CASH", cashLeft)
 	end
@@ -37245,7 +38211,7 @@ function Hud:RefreshBoosts()
 			table.insert(hunt, 1, "HUNTER")
 		end
 	end
-	self.HuntPill.Visible = #hunt > 0
+	self.Want.Hunt = #hunt > 0
 	if #hunt > 0 then
 		self.HuntText.Text = huntText(hunt, huntLeft)
 	end
@@ -38012,7 +38978,7 @@ function Hud:RefreshIncome()
 		end
 	end
 	self.IncomeText.Text = Format.perSecond(total)
-	self.IncomePill.Visible = total > 0
+	self.Want.Income = total > 0
 	self:FitPills()
 end
 
@@ -38120,7 +39086,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000134">
+					<Item class="ModuleScript" referent="RBX000138">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -38493,7 +39459,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000135">
+				<Item class="ModuleScript" referent="RBX000139">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -38924,7 +39890,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000136">
+				<Item class="ModuleScript" referent="RBX000140">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40258,11 +41224,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000137">
+				<Item class="Folder" referent="RBX000141">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000138">
+					<Item class="ModuleScript" referent="RBX000142">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -40479,7 +41445,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000139">
+					<Item class="ModuleScript" referent="RBX000143">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -40685,7 +41651,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000140">
+					<Item class="ModuleScript" referent="RBX000144">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -40774,7 +41740,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000141">
+				<Item class="ModuleScript" referent="RBX000145">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41032,7 +41998,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000142">
+				<Item class="ModuleScript" referent="RBX000146">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41162,7 +42128,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000143">
+				<Item class="ModuleScript" referent="RBX000147">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41338,11 +42304,11 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000144">
+				<Item class="Folder" referent="RBX000148">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000145">
+					<Item class="ModuleScript" referent="RBX000149">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -41634,7 +42600,7 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000146">
+					<Item class="ModuleScript" referent="RBX000150">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -42964,7 +43930,7 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000147">
+					<Item class="ModuleScript" referent="RBX000151">
 						<Properties>
 							<string name="Name">RaceWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -43430,7 +44396,7 @@ return RaceWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000148">
+					<Item class="ModuleScript" referent="RBX000152">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -43646,7 +44612,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000149">
+					<Item class="ModuleScript" referent="RBX000153">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -44147,7 +45113,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000150">
+					<Item class="ModuleScript" referent="RBX000154">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -44479,7 +45445,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000151">
+					<Item class="ModuleScript" referent="RBX000155">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -44649,7 +45615,7 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000152">
+					<Item class="ModuleScript" referent="RBX000156">
 						<Properties>
 							<string name="Name">TreeWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45194,7 +46160,7 @@ return TreeWindow
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000153">
+	<Item class="Workspace" referent="RBX000157">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -45203,7 +46169,7 @@ return TreeWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000154">
+		<Item class="Terrain" referent="RBX000158">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -45215,7 +46181,7 @@ return TreeWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000155">
+	<Item class="Lighting" referent="RBX000159">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -45227,18 +46193,18 @@ return TreeWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000156">
+	<Item class="SoundService" referent="RBX000160">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000157">
+	<Item class="StarterGui" referent="RBX000161">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000158">
+	<Item class="Players" referent="RBX000162">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>
