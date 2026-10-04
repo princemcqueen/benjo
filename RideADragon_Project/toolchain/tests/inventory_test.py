@@ -13,7 +13,7 @@ import rbx_physics  # noqa: E402
 from rbx_types import CFrame  # noqa: E402
 from sim_runner import boot, run_client_lua, lua_table_to_py, render as ui_render  # noqa: E402
 
-OUT = "/tmp/claude-0/out"
+from paths import OUT  # noqa: E402
 FAIL = []
 
 

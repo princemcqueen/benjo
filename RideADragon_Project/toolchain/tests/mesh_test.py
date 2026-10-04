@@ -19,10 +19,11 @@ from rbx_sim import Sim  # noqa: E402
 from rbx_types import CFrame, Vector3  # noqa: E402
 from sim_runner import PROJECT, client_of  # noqa: E402
 from PIL import Image  # noqa: E402
+import paths  # noqa: E402
 import skin_render  # noqa: E402
 from ride_test import key, Smoothness  # noqa: E402
 
-OUT = "/tmp/claude-0/out"
+from paths import OUT  # noqa: E402
 SMOOTH = Smoothness()
 SKIN = None
 IMGS = None
@@ -64,7 +65,7 @@ def render(sim, player, out, cam_offset=None, size=(1100, 640)):
     global SKIN, IMGS
     if SKIN is None:
         SKIN = skin_render.Skinner()
-        IMGS = [Image.open(f"/home/claude/toolchain/meshgen/out/GreenDrake_{k}.png").convert("RGB")
+        IMGS = [Image.open(f"{paths.MESHGEN_OUT}/GreenDrake_{k}.png").convert("RGB")
                 for k in ("color", "normal", "mr")]
     model = dragon(sim)
     vis = model.find_child("Visual")
@@ -97,7 +98,7 @@ def main(fps=60):
     name, tree = build_place.load_project(PROJECT)
     build_place.load_into_sim(sim, tree)
     import sim_runner as _SR
-    sys.path.insert(0, "/home/claude/toolchain/worldgen")
+    sys.path.insert(0, os.path.join(paths.TOOLCHAIN, "worldgen"))
     import terrain_data as _TD
     _TD.inject_into_sim(sim, _SR._haven_cache())
     skin_render.make_template(sim, "GreenDrake", parent=sim.services["Workspace"])

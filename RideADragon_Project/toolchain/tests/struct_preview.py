@@ -6,6 +6,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import build_place  # noqa: E402
+import paths  # noqa: E402
 import luau_interp as LI  # noqa: E402
 import preview3d  # noqa: E402
 from rbx_sim import Sim  # noqa: E402
@@ -53,4 +54,4 @@ def run(snippet, views, out, target=(0, 8, 0), size=(900, 560), ground=True):
 
 if __name__ == "__main__":
     snippet = open(sys.argv[1]).read()
-    run(snippet, [(30, 20, 60), (210, 25, 60)], "/tmp/claude-0/out/struct.png")
+    run(snippet, [(30, 20, 60), (210, 25, 60)], paths.OUT + "/struct.png")

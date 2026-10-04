@@ -108,12 +108,22 @@ function SettingsWindow:Build()
 		return order
 	end
 
+	local function toggleRow(key: string, label: string, sub: string?)
+		local slot = self:Row(scroll, nextOrder(), label, sub)
+		local t = Kit.toggle({ AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromScale(1, 0.9), Parent = slot })
+		t.Changed:Connect(function(v)
+			self:Set(key, v)
+		end)
+		self.Controls[key] = t
+	end
+
 	self:Section(scroll, nextOrder(), "GRAPHICS")
 	local quality = Kit.segmented({ Options = { "Max", "High", "Medium" }, Value = "Max", Parent = self:Row(scroll, nextOrder(), "Quality", "MAX looks best on gaming PCs") })
 	quality.Changed:Connect(function(v)
 		self:Set("Graphics", v)
 	end)
 	self.Controls.Graphics = quality
+	toggleRow("MenuBlur", "Menu blur", "Soft blur behind menus (off keeps the world sharp)")
 
 	self:Section(scroll, nextOrder(), "AUDIO")
 	local music = Kit.slider({ Value = 0.6, Min = 0, Max = 1, Step = 0.05, Parent = self:Row(scroll, nextOrder(), "Music") })
@@ -133,14 +143,6 @@ function SettingsWindow:Build()
 		self:Set("Sensitivity", v)
 	end)
 	self.Controls.Sensitivity = sens
-	local function toggleRow(key: string, label: string, sub: string?)
-		local slot = self:Row(scroll, nextOrder(), label, sub)
-		local t = Kit.toggle({ AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromScale(1, 0.9), Parent = slot })
-		t.Changed:Connect(function(v)
-			self:Set(key, v)
-		end)
-		self.Controls[key] = t
-	end
 	toggleRow("CameraShake", "Camera shake", "Landings and boosts")
 	toggleRow("SpeedFOV", "Speed effects", "Field of view widens when boosting")
 	toggleRow("MouseLock", "Mouse steering", "Lock the cursor while riding (V)")
@@ -190,6 +192,7 @@ function SettingsWindow:OnOpen()
 	end
 	local s = data.Settings
 	self.Controls.Graphics:Set(s.Graphics)
+	self.Controls.MenuBlur:Set(s.MenuBlur == true)
 	self.Controls.Music:Set(s.Music)
 	self.Controls.SFX:Set(s.SFX)
 	self.Controls.Sensitivity:Set(s.Sensitivity)

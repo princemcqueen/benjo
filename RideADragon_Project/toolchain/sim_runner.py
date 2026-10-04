@@ -4,13 +4,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import paths
 import build_place
 import rbx_sim
 import rbx_api
 import rbx_render
 from rbx_sim import Sim, Device
 
-PROJECT = "/home/claude/RideADragon/default.project.json"
+PROJECT = paths.PROJECT
 
 DEVICES = {
     "1280x720": Device((1280, 720)),
@@ -38,7 +39,7 @@ def _haven_cache():
         hv, lay = LY.build_all() if False else (None, None)
         import haven as HV
         import pickle
-        cache = "/tmp/claude-0/out/haven_layout.pkl"
+        cache = paths.out("haven_layout.pkl")
         if os.path.exists(cache):
             with open(cache, "rb") as f:
                 hv, lay = pickle.load(f)

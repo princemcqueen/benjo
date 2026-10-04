@@ -7,6 +7,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 import preview3d  # noqa: E402
+import paths  # noqa: E402
 from haven import Haven  # noqa: E402
 
 VIEWS = {
@@ -19,7 +20,8 @@ VIEWS = {
 }
 
 
-def render(hv, names=None, out="/tmp/claude-0/out/haven_views.png", size=(800, 480), extra_parts=None):
+def render(hv, names=None, out=None, size=(800, 480), extra_parts=None):
+    out = out or paths.out("haven_views.png")
     terrain = hv.preview_terrain()
     jobs, paths = [], []
     for name in (names or VIEWS.keys()):
@@ -27,7 +29,7 @@ def render(hv, names=None, out="/tmp/claude-0/out/haven_views.png", size=(800, 4
         cam = preview3d.orbit_camera(target, dist, yaw, pitch, fov=55)
         sc = preview3d.make_scene(extra_parts or [], cam, terrain=terrain, fog_density=0.00035,
                                   shadow_center=target, shadow_extent=900)
-        p = f"/tmp/claude-0/out/haven_{name}.png"
+        p = f"{paths.OUT}/haven_{name}.png"
         jobs.append((sc, p, size[0], size[1]))
         paths.append(p)
     preview3d.render_batch(jobs)

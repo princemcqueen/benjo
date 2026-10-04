@@ -11,9 +11,10 @@ import preview3d  # noqa: E402
 from rbx_sim import Sim  # noqa: E402
 from sim_runner import PROJECT, run_client_lua  # noqa: E402
 import skin_render  # noqa: E402
+import paths  # noqa: E402
 import mesh_test as MT  # noqa: E402
 
-OUT = "/tmp/claude-0/out"
+from paths import OUT  # noqa: E402
 
 
 def main(state=None, views=((-26, 9, -20), (26, 6, 4), (0, 24, 14), (-14, 3, 22)), tag="pose"):
@@ -21,7 +22,7 @@ def main(state=None, views=((-26, 9, -20), (26, 6, 4), (0, 24, 14), (-14, 3, 22)
     name, tree = build_place.load_project(PROJECT)
     build_place.load_into_sim(sim, tree)
     import sim_runner as _SR
-    sys.path.insert(0, "/home/claude/toolchain/worldgen")
+    sys.path.insert(0, os.path.join(paths.TOOLCHAIN, "worldgen"))
     import terrain_data as _TD
     _TD.inject_into_sim(sim, _SR._haven_cache())
     skin_render.make_template(sim, "GreenDrake", parent=sim.services["Workspace"])

@@ -17,7 +17,7 @@ def load(species="GreenDrake"):
     return d, imgs
 
 
-def render(species="GreenDrake", out="/tmp/claude-0/out/export_preview.png", views=None, V=None, N=None, T4=None,
+def render(species="GreenDrake", out=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "export_preview.png"), views=None, V=None, N=None, T4=None,
            dist=52, target=(0, 1.5, 4), size=(800, 520), normal=True, hip=6.5, sun=None):
     d, (ic, inn, imr) = load(species)
     V = d["V"] if V is None else V

@@ -15,8 +15,9 @@ from rbx_sim import Sim  # noqa: E402
 from sim_runner import PROJECT, run_client_lua, lua_table_to_py  # noqa: E402
 import skin_render  # noqa: E402
 from PIL import Image  # noqa: E402
+import paths  # noqa: E402
 
-OUT = "/tmp/claude-0/out"
+from paths import OUT  # noqa: E402
 
 
 def main(moods=("Rest", "Sleep", "Ground")):
@@ -62,7 +63,7 @@ shared.PL = r.ok
     perch_models = sorted([m for m in pd.children if m.attrs.get("PlotId") == plot], key=lambda m: m.attrs.get("Slot"))
     print("perch dragons:", [(m.props.get("Name"), m.find_child("Visual") is not None) for m in perch_models])
     skin = skin_render.Skinner()
-    imgs = [Image.open(f"/home/claude/toolchain/meshgen/out/GreenDrake_{k}.png").convert("RGB") for k in ("color", "normal", "mr")]
+    imgs = [Image.open(f"{paths.MESHGEN_OUT}/GreenDrake_{k}.png").convert("RGB") for k in ("color", "normal", "mr")]
     paths = []
     for mood in moods:
         run_client_lua(sim, player, f'''

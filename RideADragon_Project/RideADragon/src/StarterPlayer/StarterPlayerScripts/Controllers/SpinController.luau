@@ -10,7 +10,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Configs = ReplicatedStorage:WaitForChild("Configs")
@@ -388,29 +387,14 @@ function SpinController.ShowPrize(result)
 	elseif prize.Kind == "Boost" then
 		text = "x2 LUCK  " .. tostring(math.floor((prize.Seconds or 600) / 60)) .. " MIN"
 	end
-	local layer = uic.Layers.GameModal and uic.Layers.GameModal.Root
-	if layer then
-		local label = Instance.new("TextLabel")
-		label.Name = "SpinPrize"
-		label.BackgroundTransparency = 1
-		label.AnchorPoint = Vector2.new(0.5, 0.5)
-		label.Position = UDim2.fromScale(0.5, 0.2)
-		label.Size = UDim2.fromScale(0.7, 0.12)
-		label.Font = Enum.Font.GothamBlack
-		label.TextScaled = true
-		label.Text = "YOU WON: " .. text
-		label.TextColor3 = Color3.fromRGB(255, 226, 90)
-		label.TextStrokeTransparency = 0.2
-		label.Parent = layer
-		local scale = Instance.new("UIScale")
-		scale.Scale = 0.3
-		scale.Parent = label
-		TweenService:Create(scale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-		task.delay(2.6, function()
-			label:Destroy()
-		end)
+	-- the Spin panel shows a clean result card above its bar; the toast is only the fallback
+	local seg = SpinConfig.Segments[result.Index]
+	local win = uic.GetWindow and uic.GetWindow("Spin")
+	if win and win.ShowPrize and win.Root.Visible then
+		win:ShowPrize(text, seg and seg.Color or WHITE, seg and seg.Jackpot)
+	else
+		uic.Notify("rare", "Spin Wheel: you won " .. text .. "!")
 	end
-	uic.Notify("rare", "Spin Wheel: you won " .. text .. "!")
 end
 
 function SpinController.Init(reg)

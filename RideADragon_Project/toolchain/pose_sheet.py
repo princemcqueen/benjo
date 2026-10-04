@@ -49,7 +49,7 @@ def pose_parts(species, state, t, params="nil", detail="High", mutation="None", 
     return parts
 
 
-def sheet(species, entries, yaw=35, pitch=18, out="/tmp/claude-0/out/poses.png", dist=34, size=(640, 430),
+def sheet(species, entries, yaw=35, pitch=18, out=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "poses.png"), dist=34, size=(640, 430),
           cols=3, params="nil", static=False, target=(0, 0.5, 1.5)):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     jobs, paths, labels = [], [], []
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         ent.append((s, t or "0"))
     yaw = float(sys.argv[3]) if len(sys.argv) > 3 else 35
     pitch = float(sys.argv[4]) if len(sys.argv) > 4 else 18
-    out = sys.argv[5] if len(sys.argv) > 5 else "/tmp/claude-0/out/poses.png"
+    out = sys.argv[5] if len(sys.argv) > 5 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "poses.png")
     print(sheet(sp, ent, yaw, pitch, out))
 
 

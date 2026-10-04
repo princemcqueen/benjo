@@ -73,4 +73,4 @@ if __name__ == "__main__":
     rig, dm = build()
     tot = len(dm.flesh[1]) + sum(len(p.F) for p in dm.pieces)
     print("pieces", len(dm.pieces), "total faces", tot)
-    print(preview(rig, dm, "/tmp/claude-0/out/dragon_mesh.png"))
+    print(preview(rig, dm, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "dragon_mesh.png")))

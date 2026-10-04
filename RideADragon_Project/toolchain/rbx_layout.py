@@ -9,36 +9,60 @@ from PIL import ImageFont
 from luau_interp import LuaError
 from rbx_types import Vector2, Vector3, UDim2, UDim, Font, EnumItem, E, font_from_enum
 
-FONT_DIR_POP = "/usr/share/fonts/truetype/google-fonts/"
-FONT_DIR_INTER = "/usr/share/fonts/opentype/inter/"
+import os
+
+# Fonts used to emulate Roblox's Gotham metrics when measuring UI text. They live in
+# toolchain/fonts (OFL-licensed Poppins + Inter) so the toolchain is self-contained.
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+_SYSTEM_FALLBACKS = [
+    "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+]
 
 _font_cache = {}
 
 
 def _font_file(font):
-    """Map a Roblox Font to a local TTF with similar metrics."""
+    """Map a Roblox Font to a local font file with similar metrics.
+    Returns (file, width scale, variation axes or None)."""
     fam = font.family.lower() if font is not None else "gothamssm"
     w = font.weight.value if font is not None else 400
     if "gotham" in fam or "montserrat" in fam or "builder" in fam:
         if w >= 800:
-            return FONT_DIR_INTER + "Inter-Black.otf", 1.08
+            return os.path.join(FONT_DIR, "Inter[opsz,wght].ttf"), 1.08, [14, 900]
         if w >= 600:
-            return FONT_DIR_POP + "Poppins-Bold.ttf", 1.0
+            return os.path.join(FONT_DIR, "Poppins-Bold.ttf"), 1.0, None
         if w >= 500:
-            return FONT_DIR_POP + "Poppins-Medium.ttf", 1.0
-        return FONT_DIR_POP + "Poppins-Regular.ttf", 1.0
+            return os.path.join(FONT_DIR, "Poppins-Medium.ttf"), 1.0, None
+        return os.path.join(FONT_DIR, "Poppins-Regular.ttf"), 1.0, None
     if w >= 600:
-        return FONT_DIR_POP + "Poppins-Bold.ttf", 1.0
-    return FONT_DIR_POP + "Poppins-Regular.ttf", 1.0
+        return os.path.join(FONT_DIR, "Poppins-Bold.ttf"), 1.0, None
+    return os.path.join(FONT_DIR, "Poppins-Regular.ttf"), 1.0, None
+
+
+def _load_font(path, isz, axes):
+    try:
+        f = ImageFont.truetype(path, isz)
+        if axes:
+            f.set_variation_by_axes(axes)
+        return f
+    except (OSError, ValueError):
+        for fb in _SYSTEM_FALLBACKS:
+            try:
+                return ImageFont.truetype(fb, isz)
+            except OSError:
+                continue
+        return ImageFont.load_default()
 
 
 def get_pil_font(font, size):
-    path, wscale = _font_file(font)
+    path, wscale, axes = _font_file(font)
     isz = max(1, int(round(size)))
     key = (path, isz)
     f = _font_cache.get(key)
     if f is None:
-        f = ImageFont.truetype(path, isz)
+        f = _load_font(path, isz, axes)
         _font_cache[key] = f
     return f, wscale, isz
 

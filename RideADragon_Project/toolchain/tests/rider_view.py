@@ -1,6 +1,7 @@
 """Renders the dragon with an R15 block rider from outside views (rider pose QA)."""
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import paths
 import ride_test as RT
 from sim_runner import boot, client_of
 import rbx_physics, rbx_api, preview3d
@@ -30,7 +31,7 @@ def main():
         for i, (yaw, pitch) in enumerate(views):
             cam = preview3d.orbit_camera([p[0], p[1] + ty, p[2]], dist, yaw, pitch, fov=40)
             scene = preview3d.make_scene(parts, cam, fog_density=0.001, shadow_center=[p[0], 0, p[2]], shadow_extent=40)
-            path = f"/tmp/claude-0/out/rider_{tag}_{i}.png"
+            path = f"{paths.OUT}/rider_{tag}_{i}.png"
             jobs.append((scene, path, 640, 430))
             outs.append((path, f"{tag} yaw={yaw}"))
     shoot("idle", [(90, 8), (150, 18), (30, 25)])
@@ -42,7 +43,7 @@ def main():
     RT.snapshot(sim, "flying")
     shoot("fly", [(90, 5), (150, 15), (30, 30)], dist=34)
     preview3d.render_batch(jobs)
-    preview3d.contact_sheet([o[0] for o in outs], [o[1] for o in outs], "/tmp/claude-0/out/rider_sheet.png", cols=3)
+    preview3d.contact_sheet([o[0] for o in outs], [o[1] for o in outs], paths.OUT + "/rider_sheet.png", cols=3)
     print("errors", len(sim.errors), sim.errors[:3])
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import luau_interp as LI  # noqa: E402
 import rbx_physics  # noqa: E402
 from sim_runner import boot, run_client_lua, lua_table_to_py, render as ui_render  # noqa: E402
 
-OUT = "/tmp/claude-0/out"
+from paths import OUT  # noqa: E402
 FAIL = []
 
 
@@ -89,6 +89,71 @@ shared.W = { open = w ~= nil and w.Root.Visible, rotor = workspace:FindFirstChil
     check(W["open"], "Spin panel opens")
     check(W["rotor"], "wheel rotor built near the island")
     ui_render(sim, p1, f"{OUT}/spin_window.png", debug=False)
+    # the world behind the wheel must stay sharp: no menu blur over the Spin panel, ever
+    out = run_client_lua(sim, p1, '''
+local lp = game:GetService("Players").LocalPlayer
+local ctrl = lp.PlayerScripts.Controllers
+local uic = require(ctrl.UIController)
+local gfx = require(ctrl.GraphicsController)
+local blur = game:GetService("Lighting"):FindFirstChild("RAD_MenuBlur")
+local default = gfx.MenuBlurEnabled
+local base = blur.Size
+gfx.setMenuBlurEnabled(true)
+task.wait(0.4)
+local spinSize = blur.Size
+uic.Close()
+task.wait(0.4)
+uic.Open("Settings")
+task.wait(0.6)
+local settingsSize = blur.Size
+uic.Close()
+task.wait(0.4)
+gfx.setMenuBlurEnabled(false)
+uic.Open("Settings")
+task.wait(0.6)
+local offSize = blur.Size
+uic.Close()
+task.wait(0.4)
+uic.Open("Spin")
+task.wait(0.8)
+shared.B = { default = default, base = base, spin = spinSize, settings = settingsSize, off = offSize }
+''', max_steps=3000)
+    B = lua_table_to_py(out.get("B"))
+    print("blur", B)
+    check(B["default"] is False and B["base"] == 0, "menu blur is off by default")
+    check(B["spin"] == 0, "no blur over the Spin wheel even when menu blur is enabled")
+    check(B["settings"] > 0, "optional menu blur still works on normal windows")
+    check(B["off"] == 0, "menu blur off keeps every window sharp")
+    # result card above the bar (not over the wheel / sign), no duplicate toast
+    out = run_client_lua(sim, p1, '''
+local lp = game:GetService("Players").LocalPlayer
+local ctrl = lp.PlayerScripts.Controllers
+local spinner = require(ctrl.SpinController)
+local uic = require(ctrl.UIController)
+local w = uic.Windows.Spin
+task.spawn(spinner.play, { Index = 6, Prize = { Kind = "Egg", Egg = "FrostEgg", Count = 1, Label = "FROST EGG" } })
+local card
+for i = 1, 600 do
+	task.wait(0.05)
+	card = w.Root:FindFirstChild("PrizeResult")
+	if card then
+		break
+	end
+end
+task.wait(0.5)
+local bar = w.Bar
+shared.P = {
+	shown = card ~= nil,
+	above = card ~= nil and (card.AbsolutePosition.Y + card.AbsoluteSize.Y) <= bar.AbsolutePosition.Y + 1,
+	text = card and card.Prize.Text or "",
+	caption = card and card.Caption.Text or "",
+}
+''', max_steps=4000)
+    P = lua_table_to_py(out.get("P"))
+    print("prize card", P)
+    check(P["shown"] and P["text"] == "FROST EGG", "result card shows the won prize")
+    check(P["above"], "result card sits above the bottom bar (clear of the wheel)")
+    ui_render(sim, p1, f"{OUT}/spin_result.png", debug=False)
     out = run_client_lua(sim, p1, '''
 local lp = game:GetService("Players").LocalPlayer
 local ctrl = lp.PlayerScripts.Controllers

@@ -2,6 +2,9 @@
 import math
 import pickle
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import paths  # noqa: E402
 
 from PIL import Image, ImageDraw
 
@@ -48,6 +51,6 @@ def draw(hv, lay, path, scale=2):
 if __name__ == "__main__":
     import layout as LY
     hv, lay = LY.build_all()
-    with open("/tmp/claude-0/out/haven_layout.pkl", "wb") as f:
+    with open(paths.out("haven_layout.pkl"), "wb") as f:
         pickle.dump((hv, lay), f)
-    print(draw(hv, lay, "/tmp/claude-0/out/haven_layout.png"))
+    print(draw(hv, lay, paths.out("haven_layout.png")))

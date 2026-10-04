@@ -12047,6 +12047,7 @@ local TEMPLATE = {
 		Sensitivity = 1,
 		InvertY = false,
 		UIScale = 1,
+		MenuBlur = false,
 	},
 	Stats = {
 		EggsFound = 0,
@@ -12723,6 +12724,7 @@ local SCHEMA = {
 	SpeedFOV = Net.check.bool,
 	MouseLock = Net.check.bool,
 	InvertY = Net.check.bool,
+	MenuBlur = Net.check.bool,
 	UIScale = function(v)
 		return Net.check.num(v, 0.8, 1.25)
 	end,
@@ -21882,14 +21884,18 @@ GraphicsController.DragonDetailDistance = 420
 GraphicsController.AnimationDistance = 700
 GraphicsController.Shadows = true
 
+-- Blur is the size of the optional soft menu blur (Settings > Menu blur, off by default).
 local PRESETS = {
-	Max = { Particles = 1, Decor = 950, DragonDetail = 460, Anim = 800, Bloom = true, SunRays = true, DOF = true, Shadows = true, Decoration = true, Blur = 14 },
-	High = { Particles = 0.7, Decor = 650, DragonDetail = 320, Anim = 550, Bloom = true, SunRays = true, DOF = false, Shadows = true, Decoration = true, Blur = 10 },
+	Max = { Particles = 1, Decor = 950, DragonDetail = 460, Anim = 800, Bloom = true, SunRays = true, DOF = true, Shadows = true, Decoration = true, Blur = 8 },
+	High = { Particles = 0.7, Decor = 650, DragonDetail = 320, Anim = 550, Bloom = true, SunRays = true, DOF = false, Shadows = true, Decoration = true, Blur = 6 },
 	Medium = { Particles = 0.4, Decor = 380, DragonDetail = 200, Anim = 350, Bloom = true, SunRays = false, DOF = false, Shadows = false, Decoration = false, Blur = 0 },
 }
 
+GraphicsController.MenuBlurEnabled = false -- opt-in; see Settings > Menu blur
+
 local blur: BlurEffect = nil
 local blurTween: Tween? = nil
+local uiRef = nil
 local particleBase = setmetatable({}, { __mode = "k" }) :: { [ParticleEmitter]: number }
 
 local function applyParticles()
@@ -21935,6 +21941,8 @@ function GraphicsController.setPreset(name: string)
 	GraphicsController.Changed:Fire(GraphicsController.Preset)
 end
 
+-- The blur is opt-in (Settings > Menu blur) and never applied to windows that sit over the
+-- 3D world (NoBackdrop, e.g. the Spin Wheel) - the thing you look at must stay sharp.
 function GraphicsController.setMenuBlur(on: boolean)
 	if not blur then
 		return
@@ -21942,10 +21950,17 @@ function GraphicsController.setMenuBlur(on: boolean)
 	if blurTween then
 		blurTween:Cancel()
 	end
-	local size = on and (GraphicsController.BlurSize or 0) or 0
-	blur.Enabled = true
+	local size = (on and GraphicsController.MenuBlurEnabled) and (GraphicsController.BlurSize or 0) or 0
+	blur.Enabled = size > 0 or blur.Size > 0
 	blurTween = TweenService:Create(blur, TweenInfo.new(on and 0.22 or 0.16, Enum.EasingStyle.Quad), { Size = size })
 	blurTween:Play()
+end
+
+function GraphicsController.setMenuBlurEnabled(on: boolean)
+	GraphicsController.MenuBlurEnabled = on
+	local ui = uiRef
+	local current = ui and ui.Current and ui.Windows[ui.Current] or nil
+	GraphicsController.setMenuBlur(current ~= nil and current.NoBackdrop ~= true)
 end
 
 function GraphicsController.Init(registry)
@@ -21960,9 +21975,10 @@ function GraphicsController.Init(registry)
 		end
 	end)
 	local ui = registry.UIController
+	uiRef = ui
 	if ui then
-		ui.WindowOpened:Connect(function()
-			GraphicsController.setMenuBlur(true)
+		ui.WindowOpened:Connect(function(_name, window)
+			GraphicsController.setMenuBlur(not (window and window.NoBackdrop == true))
 		end)
 		ui.WindowClosed:Connect(function()
 			if not ui.Current then
@@ -23734,6 +23750,9 @@ local function applyAll()
 	if R.GraphicsController and s.Graphics then
 		R.GraphicsController.setPreset(s.Graphics)
 	end
+	if R.GraphicsController and R.GraphicsController.setMenuBlurEnabled then
+		R.GraphicsController.setMenuBlurEnabled(s.MenuBlur == true)
+	end
 	if R.AudioController then
 		R.AudioController.setVolumes(s.Music or 0.6, s.SFX or 0.8)
 	end
@@ -23809,7 +23828,6 @@ return SettingsController
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Configs = ReplicatedStorage:WaitForChild("Configs")
@@ -24187,29 +24205,14 @@ function SpinController.ShowPrize(result)
 	elseif prize.Kind == "Boost" then
 		text = "x2 LUCK  " .. tostring(math.floor((prize.Seconds or 600) / 60)) .. " MIN"
 	end
-	local layer = uic.Layers.GameModal and uic.Layers.GameModal.Root
-	if layer then
-		local label = Instance.new("TextLabel")
-		label.Name = "SpinPrize"
-		label.BackgroundTransparency = 1
-		label.AnchorPoint = Vector2.new(0.5, 0.5)
-		label.Position = UDim2.fromScale(0.5, 0.2)
-		label.Size = UDim2.fromScale(0.7, 0.12)
-		label.Font = Enum.Font.GothamBlack
-		label.TextScaled = true
-		label.Text = "YOU WON: " .. text
-		label.TextColor3 = Color3.fromRGB(255, 226, 90)
-		label.TextStrokeTransparency = 0.2
-		label.Parent = layer
-		local scale = Instance.new("UIScale")
-		scale.Scale = 0.3
-		scale.Parent = label
-		TweenService:Create(scale, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-		task.delay(2.6, function()
-			label:Destroy()
-		end)
+	-- the Spin panel shows a clean result card above its bar; the toast is only the fallback
+	local seg = SpinConfig.Segments[result.Index]
+	local win = uic.GetWindow and uic.GetWindow("Spin")
+	if win and win.ShowPrize and win.Root.Visible then
+		win:ShowPrize(text, seg and seg.Color or WHITE, seg and seg.Jackpot)
+	else
+		uic.Notify("rare", "Spin Wheel: you won " .. text .. "!")
 	end
-	uic.Notify("rare", "Spin Wheel: you won " .. text .. "!")
 end
 
 function SpinController.Init(reg)
@@ -24634,7 +24637,7 @@ function UIController.Open(name: string, args: any?)
 	backdrop.Visible = backdropAllowed
 	fadeState = Fade.capture(w.Root)
 	UIController.sound("Open")
-	UIController.WindowOpened:Fire(name)
+	UIController.WindowOpened:Fire(name, w)
 	animate(Theme.Motion.Open, function(a)
 		local e = 1 - (1 - a) ^ 4 -- quart out
 		if fadeState then
@@ -31368,12 +31371,22 @@ function SettingsWindow:Build()
 		return order
 	end
 
+	local function toggleRow(key: string, label: string, sub: string?)
+		local slot = self:Row(scroll, nextOrder(), label, sub)
+		local t = Kit.toggle({ AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromScale(1, 0.9), Parent = slot })
+		t.Changed:Connect(function(v)
+			self:Set(key, v)
+		end)
+		self.Controls[key] = t
+	end
+
 	self:Section(scroll, nextOrder(), "GRAPHICS")
 	local quality = Kit.segmented({ Options = { "Max", "High", "Medium" }, Value = "Max", Parent = self:Row(scroll, nextOrder(), "Quality", "MAX looks best on gaming PCs") })
 	quality.Changed:Connect(function(v)
 		self:Set("Graphics", v)
 	end)
 	self.Controls.Graphics = quality
+	toggleRow("MenuBlur", "Menu blur", "Soft blur behind menus (off keeps the world sharp)")
 
 	self:Section(scroll, nextOrder(), "AUDIO")
 	local music = Kit.slider({ Value = 0.6, Min = 0, Max = 1, Step = 0.05, Parent = self:Row(scroll, nextOrder(), "Music") })
@@ -31393,14 +31406,6 @@ function SettingsWindow:Build()
 		self:Set("Sensitivity", v)
 	end)
 	self.Controls.Sensitivity = sens
-	local function toggleRow(key: string, label: string, sub: string?)
-		local slot = self:Row(scroll, nextOrder(), label, sub)
-		local t = Kit.toggle({ AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromScale(1, 0.9), Parent = slot })
-		t.Changed:Connect(function(v)
-			self:Set(key, v)
-		end)
-		self.Controls[key] = t
-	end
 	toggleRow("CameraShake", "Camera shake", "Landings and boosts")
 	toggleRow("SpeedFOV", "Speed effects", "Field of view widens when boosting")
 	toggleRow("MouseLock", "Mouse steering", "Lock the cursor while riding (V)")
@@ -31450,6 +31455,7 @@ function SettingsWindow:OnOpen()
 	end
 	local s = data.Settings
 	self.Controls.Graphics:Set(s.Graphics)
+	self.Controls.MenuBlur:Set(s.MenuBlur == true)
 	self.Controls.Music:Set(s.Music)
 	self.Controls.SFX:Set(s.SFX)
 	self.Controls.Sensitivity:Set(s.Sensitivity)
@@ -32119,6 +32125,56 @@ function SpinWindow:Refresh()
 		self.Rows[i].Text = Format.percent(p)
 	end
 	self.LuckTag.Text = luck > 1 and string.format("x%s LUCK", tostring(luck)) or ""
+end
+
+-- Result card: a white HUD card that sits just above the bottom bar (never over the wheel or
+-- its sign), pops in, holds and shrinks away. Replaces the old giant text over the scene.
+function SpinWindow:ShowPrize(text: string, color: Color3, jackpot: boolean?)
+	if self.PrizeCard then
+		self.PrizeCard:Destroy()
+		self.PrizeCard = nil
+	end
+	local phone = Responsive.Device == "Phone"
+	local margin = Responsive.px(phone and 10 or 18)
+	local barH = math.floor(self.Root.AbsoluteSize.Y * self.Bar.Size.Y.Scale)
+	local card = whitePanel({
+		Name = "PrizeResult",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -(margin * 2 + barH)),
+		Size = phone and UDim2.fromScale(0.62, 0.17) or UDim2.fromScale(0.3, 0.115),
+		ZIndex = 5,
+		Parent = self.Root,
+	})
+	self.PrizeCard = card
+	if jackpot then
+		Kit.stroke(card, C.Accent, Theme.Stroke.Bold, 0)
+	end
+	local dot = Kit.frame({
+		Name = "Dot",
+		BackgroundTransparency = 0,
+		BackgroundColor3 = color,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0.05, 0.5),
+		Size = UDim2.fromScale(0.62, 0.62),
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
+		Parent = card,
+	})
+	Kit.corner(dot, 999)
+	Kit.text({ Name = "Caption", Text = jackpot and "JACKPOT!" or "YOU WON", Role = "Micro", Scaled = true, Color = jackpot and C.AccentDeep or H.TextMuted, Position = UDim2.fromScale(0.27, 0.12), Size = UDim2.fromScale(0.68, 0.24), Parent = card })
+	Kit.text({ Name = "Prize", Text = text, Role = "Display", Scaled = true, Font = Theme.Fonts.Number, Color = H.Text, Position = UDim2.fromScale(0.27, 0.36), Size = UDim2.fromScale(0.68, 0.52), Parent = card })
+	local scale = Create("UIScale", { Scale = 0.6, Parent = card })
+	TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(2.8, function()
+		if self.PrizeCard == card then
+			TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0 }):Play()
+			task.delay(0.22, function()
+				card:Destroy()
+				if self.PrizeCard == card then
+					self.PrizeCard = nil
+				end
+			end)
+		end
+	end)
 end
 
 function SpinWindow:Spin()

@@ -204,7 +204,7 @@ function UIController.Open(name: string, args: any?)
 	backdrop.Visible = backdropAllowed
 	fadeState = Fade.capture(w.Root)
 	UIController.sound("Open")
-	UIController.WindowOpened:Fire(name)
+	UIController.WindowOpened:Fire(name, w)
 	animate(Theme.Motion.Open, function(a)
 		local e = 1 - (1 - a) ^ 4 -- quart out
 		if fadeState then

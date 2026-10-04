@@ -291,7 +291,7 @@ async def _render(scene, out_path, w, h):
         pg = await b.new_page(viewport={"width": w, "height": h})
         if len(html) > 4_000_000:
             import tempfile
-            tmp = tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, dir="/tmp/claude-0")
+            tmp = tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out"))
             tmp.write(html)
             tmp.close()
             await pg.goto("file://" + tmp.name, timeout=300000)
@@ -344,7 +344,7 @@ async def _render_batch(jobs):
             pg = await b.new_page(viewport={"width": w, "height": h})
             if len(html) > 4_000_000:
                 import tempfile
-                tmp = tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, dir="/tmp/claude-0")
+                tmp = tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out"))
                 tmp.write(html)
                 tmp.close()
                 await pg.goto("file://" + tmp.name, timeout=300000)
@@ -385,8 +385,8 @@ def contact_sheet(paths, labels, out_path, cols=3, label_h=28):
     sheet = Image.new("RGB", (w * cols, (h + label_h) * rows), (20, 20, 24))
     dr = ImageDraw.Draw(sheet)
     try:
-        from rbx_layout import FONT_DIR_POP
-        font = ImageFont.truetype(FONT_DIR_POP + "Poppins-Bold.ttf", 18)
+        from rbx_layout import FONT_DIR
+        font = ImageFont.truetype(os.path.join(FONT_DIR, "Poppins-Bold.ttf"), 18)
     except Exception:
         font = ImageFont.load_default()
     for i, (im, lab) in enumerate(zip(ims, labels)):

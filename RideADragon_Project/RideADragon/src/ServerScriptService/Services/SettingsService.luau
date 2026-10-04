@@ -27,6 +27,7 @@ local SCHEMA = {
 	SpeedFOV = Net.check.bool,
 	MouseLock = Net.check.bool,
 	InvertY = Net.check.bool,
+	MenuBlur = Net.check.bool,
 	UIScale = function(v)
 		return Net.check.num(v, 0.8, 1.25)
 	end,

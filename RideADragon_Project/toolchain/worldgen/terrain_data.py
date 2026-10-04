@@ -10,6 +10,8 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, ".."))
+import paths  # noqa: E402
 from noise import hash01  # noqa: E402
 import haven as HV  # noqa: E402
 
@@ -123,7 +125,7 @@ class Reference:
 
 if __name__ == "__main__":
     hv = HV.Haven().build()
-    out = "/home/claude/RideADragon/src/ServerScriptService/World/HavenTerrainData.luau"
+    out = os.path.join(paths.WORLD_SRC, "HavenTerrainData.luau")
     n = write_luau(hv, out)
     print("wrote", out, f"{n / 1024:.0f} KB")
 

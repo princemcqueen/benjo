@@ -317,4 +317,4 @@ class Haven:
 if __name__ == "__main__":
     hv = Haven().build()
     print("height range", hv.H.min(), hv.H.max())
-    print(hv.topdown("/tmp/claude-0/out/haven_top.png"))
+    print(hv.topdown(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "haven_top.png")))

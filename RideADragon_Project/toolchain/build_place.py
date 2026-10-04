@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from xml.sax.saxutils import escape
+import paths  # noqa: E402
 
 SCRIPT_SUFFIX = [(".server.luau", "Script"), (".client.luau", "LocalScript"), (".luau", "ModuleScript"),
                  (".server.lua", "Script"), (".client.lua", "LocalScript"), (".lua", "ModuleScript")]
@@ -212,7 +213,7 @@ def load_into_sim(sim, tree):
             inst.props["Name"] = node.name
         if node.source is not None:
             inst.props["Source"] = node.source
-            inst.extra["source_path"] = os.path.relpath(node.path, "/home/claude/RideADragon") if node.path else node.name
+            inst.extra["source_path"] = os.path.relpath(node.path, paths.GAME) if node.path else node.name
         for k, v in node.props.items():
             val = explicit_value(v)
             if isinstance(val, tuple) and val and val[0] == "__enum__":

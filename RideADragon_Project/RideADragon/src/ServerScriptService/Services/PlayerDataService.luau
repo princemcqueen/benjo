@@ -64,6 +64,7 @@ local TEMPLATE = {
 		Sensitivity = 1,
 		InvertY = false,
 		UIScale = 1,
+		MenuBlur = false,
 	},
 	Stats = {
 		EggsFound = 0,

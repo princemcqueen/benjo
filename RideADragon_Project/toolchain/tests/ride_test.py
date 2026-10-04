@@ -4,6 +4,7 @@ flight, landing, dismount. Prints a timeline and checks for runtime errors.
 Optionally renders a frame from the riding camera."""
 import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import paths
 from sim_runner import boot, client_of
 import rbx_physics
 import rbx_api
@@ -56,7 +57,7 @@ RENDER_SIM = {}
 def snapshot(sim, label):
     SMOOTH.label = label
     if label in RENDER_AT and RENDER_SIM.get("player") is not None:
-        render_frame(sim, RENDER_SIM["player"], "/tmp/claude-0/out/ride_" + label.replace(" ", "_").replace("(", "").replace(")", "") + ".png")
+        render_frame(sim, RENDER_SIM["player"], paths.OUT + "/ride_" + label.replace(" ", "_").replace("(", "").replace(")", "") + ".png")
     ws = sim.services["Workspace"]
     folder = ws.find_child("Dragons")
     model = folder.find_child("Dragon_1001") if folder else None
@@ -206,7 +207,7 @@ def main(render=False, fps=60):
     run(1, sim, dt)
     snapshot(sim, "landed?")
     if render:
-        render_frame(sim, player, "/tmp/claude-0/out/ride_ground.png")
+        render_frame(sim, player, paths.OUT + "/ride_ground.png")
     # dismount
     key(sim, player, "R", True)
     run(0.1, sim, dt)

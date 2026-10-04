@@ -65,4 +65,4 @@ def render(entries, views, out, size=(900, 600), target=(0, 1, 2), fov=45):
 if __name__ == "__main__":
     state = sys.argv[1] if len(sys.argv) > 1 else "Idle"
     print(render([("GreenDrake", "None", state, 0.4, 0)], [(150, 12, 46), (90, 8, 44), (210, 24, 40), (30, 35, 48)],
-                 f"/tmp/claude-0/out/brick_{state}.png"))
+                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", f"brick_{state}.png")))

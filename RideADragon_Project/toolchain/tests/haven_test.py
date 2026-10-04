@@ -14,8 +14,9 @@ import rbx_physics  # noqa: E402
 from rbx_sim import Sim  # noqa: E402
 from sim_runner import PROJECT  # noqa: E402
 import terrain_data  # noqa: E402
+import paths  # noqa: E402
 
-OUT = "/tmp/claude-0/out"
+from paths import OUT  # noqa: E402
 
 VIEWS = {
     "hub": ((0, 40, 0), 190, 20, 30),
@@ -73,13 +74,13 @@ def render(sim, names, out, size=(960, 560)):
     return out
 
 
-def prop_entries(target, radius, layout_mod="/home/claude/RideADragon/src/ServerScriptService/World/HavenLayout.luau"):
+def prop_entries(target, radius, layout_mod=os.path.join(paths.WORLD_SRC, "HavenLayout.luau")):
     """Textured meshes of trees/bushes/rocks around target (merged per prop)."""
     import pickle
     import re
     import numpy as np
     from export_dragon import tangents
-    props = pickle.load(open("/home/claude/toolchain/meshgen/out/props.pkl", "rb"))
+    props = pickle.load(open(os.path.join(paths.MESHGEN_OUT, "props.pkl"), "rb"))
     byname = {p[0]: p for p in props}
     src = open(layout_mod).read()
 

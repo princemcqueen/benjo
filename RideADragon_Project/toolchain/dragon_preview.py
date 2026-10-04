@@ -14,7 +14,7 @@ m.Parent = workspace
 shared.parts = m:GetAttribute("Parts")
 '''
 
-def build_and_render(species="GreenDrake", detail="High", mutation="None", out_prefix="/tmp/claude-0/out/drake",
+def build_and_render(species="GreenDrake", detail="High", mutation="None", out_prefix=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "drake"),
                      views=((35, 18), (125, 12), (215, 25), (300, 60)), pose_lua="", dist=None, size=(900, 600)):
     sim = boot()
     ctx = sim.server_ctx

@@ -202,6 +202,56 @@ function SpinWindow:Refresh()
 	self.LuckTag.Text = luck > 1 and string.format("x%s LUCK", tostring(luck)) or ""
 end
 
+-- Result card: a white HUD card that sits just above the bottom bar (never over the wheel or
+-- its sign), pops in, holds and shrinks away. Replaces the old giant text over the scene.
+function SpinWindow:ShowPrize(text: string, color: Color3, jackpot: boolean?)
+	if self.PrizeCard then
+		self.PrizeCard:Destroy()
+		self.PrizeCard = nil
+	end
+	local phone = Responsive.Device == "Phone"
+	local margin = Responsive.px(phone and 10 or 18)
+	local barH = math.floor(self.Root.AbsoluteSize.Y * self.Bar.Size.Y.Scale)
+	local card = whitePanel({
+		Name = "PrizeResult",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -(margin * 2 + barH)),
+		Size = phone and UDim2.fromScale(0.62, 0.17) or UDim2.fromScale(0.3, 0.115),
+		ZIndex = 5,
+		Parent = self.Root,
+	})
+	self.PrizeCard = card
+	if jackpot then
+		Kit.stroke(card, C.Accent, Theme.Stroke.Bold, 0)
+	end
+	local dot = Kit.frame({
+		Name = "Dot",
+		BackgroundTransparency = 0,
+		BackgroundColor3 = color,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0.05, 0.5),
+		Size = UDim2.fromScale(0.62, 0.62),
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
+		Parent = card,
+	})
+	Kit.corner(dot, 999)
+	Kit.text({ Name = "Caption", Text = jackpot and "JACKPOT!" or "YOU WON", Role = "Micro", Scaled = true, Color = jackpot and C.AccentDeep or H.TextMuted, Position = UDim2.fromScale(0.27, 0.12), Size = UDim2.fromScale(0.68, 0.24), Parent = card })
+	Kit.text({ Name = "Prize", Text = text, Role = "Display", Scaled = true, Font = Theme.Fonts.Number, Color = H.Text, Position = UDim2.fromScale(0.27, 0.36), Size = UDim2.fromScale(0.68, 0.52), Parent = card })
+	local scale = Create("UIScale", { Scale = 0.6, Parent = card })
+	TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(2.8, function()
+		if self.PrizeCard == card then
+			TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0 }):Play()
+			task.delay(0.22, function()
+				card:Destroy()
+				if self.PrizeCard == card then
+					self.PrizeCard = nil
+				end
+			end)
+		end
+	end)
+end
+
 function SpinWindow:Spin()
 	if self.Busy then
 		return

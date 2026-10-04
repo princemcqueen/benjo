@@ -23,14 +23,18 @@ GraphicsController.DragonDetailDistance = 420
 GraphicsController.AnimationDistance = 700
 GraphicsController.Shadows = true
 
+-- Blur is the size of the optional soft menu blur (Settings > Menu blur, off by default).
 local PRESETS = {
-	Max = { Particles = 1, Decor = 950, DragonDetail = 460, Anim = 800, Bloom = true, SunRays = true, DOF = true, Shadows = true, Decoration = true, Blur = 14 },
-	High = { Particles = 0.7, Decor = 650, DragonDetail = 320, Anim = 550, Bloom = true, SunRays = true, DOF = false, Shadows = true, Decoration = true, Blur = 10 },
+	Max = { Particles = 1, Decor = 950, DragonDetail = 460, Anim = 800, Bloom = true, SunRays = true, DOF = true, Shadows = true, Decoration = true, Blur = 8 },
+	High = { Particles = 0.7, Decor = 650, DragonDetail = 320, Anim = 550, Bloom = true, SunRays = true, DOF = false, Shadows = true, Decoration = true, Blur = 6 },
 	Medium = { Particles = 0.4, Decor = 380, DragonDetail = 200, Anim = 350, Bloom = true, SunRays = false, DOF = false, Shadows = false, Decoration = false, Blur = 0 },
 }
 
+GraphicsController.MenuBlurEnabled = false -- opt-in; see Settings > Menu blur
+
 local blur: BlurEffect = nil
 local blurTween: Tween? = nil
+local uiRef = nil
 local particleBase = setmetatable({}, { __mode = "k" }) :: { [ParticleEmitter]: number }
 
 local function applyParticles()
@@ -76,6 +80,8 @@ function GraphicsController.setPreset(name: string)
 	GraphicsController.Changed:Fire(GraphicsController.Preset)
 end
 
+-- The blur is opt-in (Settings > Menu blur) and never applied to windows that sit over the
+-- 3D world (NoBackdrop, e.g. the Spin Wheel) - the thing you look at must stay sharp.
 function GraphicsController.setMenuBlur(on: boolean)
 	if not blur then
 		return
@@ -83,10 +89,17 @@ function GraphicsController.setMenuBlur(on: boolean)
 	if blurTween then
 		blurTween:Cancel()
 	end
-	local size = on and (GraphicsController.BlurSize or 0) or 0
-	blur.Enabled = true
+	local size = (on and GraphicsController.MenuBlurEnabled) and (GraphicsController.BlurSize or 0) or 0
+	blur.Enabled = size > 0 or blur.Size > 0
 	blurTween = TweenService:Create(blur, TweenInfo.new(on and 0.22 or 0.16, Enum.EasingStyle.Quad), { Size = size })
 	blurTween:Play()
+end
+
+function GraphicsController.setMenuBlurEnabled(on: boolean)
+	GraphicsController.MenuBlurEnabled = on
+	local ui = uiRef
+	local current = ui and ui.Current and ui.Windows[ui.Current] or nil
+	GraphicsController.setMenuBlur(current ~= nil and current.NoBackdrop ~= true)
 end
 
 function GraphicsController.Init(registry)
@@ -101,9 +114,10 @@ function GraphicsController.Init(registry)
 		end
 	end)
 	local ui = registry.UIController
+	uiRef = ui
 	if ui then
-		ui.WindowOpened:Connect(function()
-			GraphicsController.setMenuBlur(true)
+		ui.WindowOpened:Connect(function(_name, window)
+			GraphicsController.setMenuBlur(not (window and window.NoBackdrop == true))
 		end)
 		ui.WindowClosed:Connect(function()
 			if not ui.Current then

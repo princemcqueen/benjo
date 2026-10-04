@@ -15,7 +15,7 @@ shared.qa = { window = w or "", issues = issues }
 '''
 
 
-def run(screens, devices=None, outdir="/tmp/claude-0/out/qa", setup=None, verbose=False):
+def run(screens, devices=None, outdir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "qa"), setup=None, verbose=False):
     os.makedirs(outdir, exist_ok=True)
     devices = devices or list(DEVICES.keys())
     sim = boot(verbose=verbose)

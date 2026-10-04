@@ -32,8 +32,8 @@ if __name__ == "__main__":
         cam = preview3d.orbit_camera(list(tgt), dist, yaw, pitch, fov=50)
         sc = preview3d.make_scene([ground], cam, fog_density=0.0006, shadow_center=list(tgt), shadow_extent=90)
         sc["texMeshes"] = ents
-        p = f"/tmp/claude-0/out/props_{i}.png"
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", f"props_{i}.png")
         jobs.append((sc, p, 1100, 560)); paths.append(p)
     preview3d.render_batch(jobs)
-    preview3d.contact_sheet(paths, ["all props", "oaks + pines", "bushes + rocks"], "/tmp/claude-0/out/props_sheet.png", cols=1)
+    preview3d.contact_sheet(paths, ["all props", "oaks + pines", "bushes + rocks"], os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "props_sheet.png"), cols=1)
     print("ok")

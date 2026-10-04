@@ -20,6 +20,9 @@ local function applyAll()
 	if R.GraphicsController and s.Graphics then
 		R.GraphicsController.setPreset(s.Graphics)
 	end
+	if R.GraphicsController and R.GraphicsController.setMenuBlurEnabled then
+		R.GraphicsController.setMenuBlurEnabled(s.MenuBlur == true)
+	end
 	if R.AudioController then
 		R.AudioController.setVolumes(s.Music or 0.6, s.SFX or 0.8)
 	end

@@ -9,6 +9,8 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, ".."))
+import paths  # noqa: E402
 import haven as HV  # noqa: E402
 from noise import catmull, polyline_distance, fbm2, hash01  # noqa: E402
 
@@ -321,5 +323,5 @@ if __name__ == "__main__":
     hv, lay = build_all()
     print(f"buildings {len(lay.buildings)} (cottages {sum(b['kind'] == 'cottage' for b in lay.buildings)}), lamps {len(lay.lamps)}, "
           f"bridges {len(lay.bridges)}, trees {len(lay.trees)}, bushes {len(lay.bushes)}, rocks {len(lay.rocks)}, eggs {len(lay.eggs)}")
-    n = write_luau(lay, "/home/claude/RideADragon/src/ServerScriptService/World/HavenLayout.luau")
+    n = write_luau(lay, os.path.join(paths.WORLD_SRC, "HavenLayout.luau"))
     print("layout module", n // 1024, "KB")
