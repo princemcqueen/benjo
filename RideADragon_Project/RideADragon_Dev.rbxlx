@@ -7767,6 +7767,64 @@ return CombatConfig
 			</Item>
 			<Item class="ModuleScript" referent="RBX000036">
 				<Properties>
+					<string name="Name">DailyConfig</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	DailyConfig
+	The daily reward calendar (DailyService / DailyWindow). One reward a day (UTC days); claiming on
+	consecutive days builds a streak that walks through the 7 days of the calendar and starts again.
+	Missing a whole day resets the streak. Every full week adds 10% to the cash of the calendar
+	(at most +100%).
+
+	A day lists any of:
+	  Cash   = { Seconds, Min }       worth that many seconds of the player's income (at least Min)
+	  Spins  = n                      spin tickets
+	  Boost  = { Id, Seconds }        a timed boost (MonetizationConfig.Boosts)
+	  Egg    = { Type, Luck }         an egg straight into the bag (never refused)
+]]
+
+local DailyConfig = {}
+
+DailyConfig.Cycle = 7
+DailyConfig.WeekBonus = 0.1 -- per completed week
+DailyConfig.MaxBonus = 1.0
+
+DailyConfig.Days = {
+	{ Cash = { Seconds = 120, Min = 1000 } },
+	{ Spins = 2 },
+	{ Boost = { Id = "Luck", Seconds = 300 } },
+	{ Cash = { Seconds = 300, Min = 3000 } },
+	{ Spins = 3, Cash = { Seconds = 120, Min = 1500 } },
+	{ Egg = { Type = "GoldenEgg", Luck = 5 } },
+	{ Cash = { Seconds = 900, Min = 10000 }, Spins = 5, Egg = { Type = "CelestialEgg", Luck = 10 } },
+}
+
+DailyConfig.SecondsPerDay = 86400
+
+-- UTC day number of a time stamp.
+function DailyConfig.dayOf(t: number): number
+	return math.floor(t / DailyConfig.SecondsPerDay)
+end
+
+-- Cash multiplier of the streak (1 + 10% per completed week).
+function DailyConfig.bonus(streak: number): number
+	return 1 + math.min(DailyConfig.MaxBonus, math.floor(math.max(0, streak) / DailyConfig.Cycle) * DailyConfig.WeekBonus)
+end
+
+-- Cash of one calendar day for a given income and streak.
+function DailyConfig.cash(day: number, incomePerSecond: number, streak: number): number
+	local def = DailyConfig.Days[day]
+	if not def or not def.Cash then
+		return 0
+	end
+	return math.floor(math.max(def.Cash.Min, incomePerSecond * def.Cash.Seconds) * DailyConfig.bonus(streak) + 0.5)
+end
+
+return DailyConfig
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000037">
+				<Properties>
 					<string name="Name">DragonConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	DragonConfig
@@ -8256,7 +8314,7 @@ return table.freeze(DragonConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000037">
+			<Item class="ModuleScript" referent="RBX000038">
 				<Properties>
 					<string name="Name">EconomyConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8404,7 +8462,7 @@ return table.freeze(EconomyConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000038">
+			<Item class="ModuleScript" referent="RBX000039">
 				<Properties>
 					<string name="Name">EggConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8852,7 +8910,7 @@ return table.freeze(EggConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000039">
+			<Item class="ModuleScript" referent="RBX000040">
 				<Properties>
 					<string name="Name">GameConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8985,7 +9043,7 @@ return table.freeze(GameConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000040">
+			<Item class="ModuleScript" referent="RBX000041">
 				<Properties>
 					<string name="Name">HatchConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9031,7 +9089,119 @@ return table.freeze(HatchConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000041">
+			<Item class="ModuleScript" referent="RBX000042">
+				<Properties>
+					<string name="Name">IndexConfig</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	IndexConfig
+	The Dragon Index (collection book): which species a player has found (data.Index, filled by
+	DragonService when a dragon is added) and the rewards for collecting them (IndexService).
+
+	data.Index = { [speciesId] = { First, Count }, ["speciesId:Mutation"] = { First, Count } }
+	data.IndexClaims = { [tostring(count)] = true }   milestones already paid
+
+	Robux exclusives (DragonConfig Exclusive = true) are shown in the book but not counted: the
+	book can be completed by hatching alone.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
+local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
+
+local IndexConfig = {}
+
+-- Count = species found; a reward is any of Cash { Seconds, Min }, Spins, Boost { Id, Seconds }, Egg { Type, Luck }.
+IndexConfig.Milestones = {
+	{ Count = 5, Cash = { Seconds = 300, Min = 5000 } },
+	{ Count = 10, Spins = 5 },
+	{ Count = 15, Cash = { Seconds = 900, Min = 25000 }, Boost = { Id = "Luck", Seconds = 900 } },
+	{ Count = 20, Egg = { Type = "GoldenEgg", Luck = 10 } },
+	{ Count = 25, Cash = { Seconds = 3600, Min = 100000 }, Spins = 10 },
+	{ Count = 30, Cash = { Seconds = 14400, Min = 500000 }, Egg = { Type = "RainbowEgg", Luck = 50 } },
+}
+
+-- Species that count for the collection, in book order.
+function IndexConfig.collectable(): { string }
+	local list = {}
+	for _, id in DragonConfig.speciesList() do
+		if not DragonConfig.Species[id].Exclusive then
+			table.insert(list, id)
+		end
+	end
+	return list
+end
+
+-- Exclusives, shown after the collection.
+function IndexConfig.exclusives(): { string }
+	local list = {}
+	for _, id in DragonConfig.speciesList() do
+		if DragonConfig.Species[id].Exclusive then
+			table.insert(list, id)
+		end
+	end
+	return list
+end
+
+-- Mutations that can be collected per species (everything except "None"; Omni is Robux-only).
+function IndexConfig.mutations(): { string }
+	local list = {}
+	for _, id in MutationConfig.Order do
+		if id ~= "None" and id ~= "Omni" then
+			table.insert(list, id)
+		end
+	end
+	return list
+end
+
+-- How many collectable species the index holds.
+function IndexConfig.found(index): number
+	local n = 0
+	for _, id in IndexConfig.collectable() do
+		if index and index[id] then
+			n += 1
+		end
+	end
+	return n
+end
+
+-- Mutations found for one species.
+function IndexConfig.mutationsFound(index, speciesId: string): number
+	local n = 0
+	for _, m in IndexConfig.mutations() do
+		if index and index[speciesId .. ":" .. m] then
+			n += 1
+		end
+	end
+	return n
+end
+
+-- All different mutated dragons found.
+function IndexConfig.totalMutations(index): number
+	local n = 0
+	for _, id in IndexConfig.collectable() do
+		n += IndexConfig.mutationsFound(index, id)
+	end
+	return n
+end
+
+-- The milestone table with the last one tied to the real size of the collection.
+function IndexConfig.milestones()
+	local total = #IndexConfig.collectable()
+	local list = {}
+	for _, m in IndexConfig.Milestones do
+		if m.Count <= total then
+			table.insert(list, m)
+		end
+	end
+	return list
+end
+
+return IndexConfig
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000043">
 				<Properties>
 					<string name="Name">LeaderboardConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9185,7 +9355,7 @@ return table.freeze(LeaderboardConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000042">
+			<Item class="ModuleScript" referent="RBX000044">
 				<Properties>
 					<string name="Name">MonetizationConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9604,7 +9774,7 @@ return MonetizationConfig
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000043">
+			<Item class="ModuleScript" referent="RBX000045">
 				<Properties>
 					<string name="Name">MutationConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9710,7 +9880,7 @@ return table.freeze(MutationConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000044">
+			<Item class="ModuleScript" referent="RBX000046">
 				<Properties>
 					<string name="Name">QuestConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9752,7 +9922,7 @@ return table.freeze(QuestConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000045">
+			<Item class="ModuleScript" referent="RBX000047">
 				<Properties>
 					<string name="Name">RaceConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10026,7 +10196,7 @@ return RaceConfig
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000046">
+			<Item class="ModuleScript" referent="RBX000048">
 				<Properties>
 					<string name="Name">RegionConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10129,7 +10299,7 @@ return table.freeze(RegionConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000047">
+			<Item class="ModuleScript" referent="RBX000049">
 				<Properties>
 					<string name="Name">SpinConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10209,7 +10379,7 @@ return table.freeze(SpinConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000048">
+			<Item class="ModuleScript" referent="RBX000050">
 				<Properties>
 					<string name="Name">TreeConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10420,7 +10590,7 @@ return table.freeze(TreeConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000049">
+			<Item class="ModuleScript" referent="RBX000051">
 				<Properties>
 					<string name="Name">WildEggConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10479,7 +10649,7 @@ return table.freeze(WildEggConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000050">
+			<Item class="ModuleScript" referent="RBX000052">
 				<Properties>
 					<string name="Name">WorldConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10661,42 +10831,42 @@ return WorldConfig
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000051">
+		<Item class="Folder" referent="RBX000053">
 			<Properties>
 				<string name="Name">Remotes</string>
 			</Properties>
-			<Item class="RemoteFunction" referent="RBX000052">
+			<Item class="RemoteFunction" referent="RBX000054">
 				<Properties>
 					<string name="Name">Request</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000053">
+			<Item class="RemoteEvent" referent="RBX000055">
 				<Properties>
 					<string name="Name">DataSync</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000054">
+			<Item class="RemoteEvent" referent="RBX000056">
 				<Properties>
 					<string name="Name">Notify</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000055">
+			<Item class="RemoteEvent" referent="RBX000057">
 				<Properties>
 					<string name="Name">Signal</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000056">
+			<Item class="RemoteEvent" referent="RBX000058">
 				<Properties>
 					<string name="Name">ClientEvent</string>
 				</Properties>
 			</Item>
 		</Item>
 	</Item>
-	<Item class="ReplicatedFirst" referent="RBX000057">
+	<Item class="ReplicatedFirst" referent="RBX000059">
 		<Properties>
 			<string name="Name">ReplicatedFirst</string>
 		</Properties>
-		<Item class="LocalScript" referent="RBX000058">
+		<Item class="LocalScript" referent="RBX000060">
 			<Properties>
 				<string name="Name">LoadingScreen</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -10879,11 +11049,11 @@ gui:Destroy()
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="ServerScriptService" referent="RBX000059">
+	<Item class="ServerScriptService" referent="RBX000061">
 		<Properties>
 			<string name="Name">ServerScriptService</string>
 		</Properties>
-		<Item class="Script" referent="RBX000060">
+		<Item class="Script" referent="RBX000062">
 			<Properties>
 				<string name="Name">Main</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -10923,6 +11093,7 @@ local ORDER = {
 	"MonetizationService",
 	"QuestService",
 	"DailyService",
+	"IndexService",
 	"RegionService",
 	"LevelService",
 	"LeaderstatsService",
@@ -11013,11 +11184,11 @@ ReplicatedStorage:SetAttribute("ServerReady", true)
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="Folder" referent="RBX000061">
+		<Item class="Folder" referent="RBX000063">
 			<Properties>
 				<string name="Name">Services</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000062">
+			<Item class="ModuleScript" referent="RBX000064">
 				<Properties>
 					<string name="Name">BondService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11366,7 +11537,7 @@ return BondService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000063">
+			<Item class="ModuleScript" referent="RBX000065">
 				<Properties>
 					<string name="Name">BoostService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11499,7 +11670,7 @@ return BoostService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000064">
+			<Item class="ModuleScript" referent="RBX000066">
 				<Properties>
 					<string name="Name">CoinService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11701,7 +11872,7 @@ return CoinService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000065">
+			<Item class="ModuleScript" referent="RBX000067">
 				<Properties>
 					<string name="Name">CombatService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12294,7 +12465,203 @@ return CombatService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000066">
+			<Item class="ModuleScript" referent="RBX000068">
+				<Properties>
+					<string name="Name">DailyService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	DailyService
+	Daily rewards with a streak (DailyConfig). Data: data.Daily = { LastClaim = unix time, Streak = n }.
+
+	  * a day is a UTC day; a reward can be claimed once per day
+	  * claimed yesterday or today = the streak lives; a whole day missed = it starts again at 1
+	  * the streak decides which day of the 7-day calendar pays (day = (streak - 1) % 7 + 1)
+
+	Net (domain "Daily"):
+	  State {} -> { CanClaim, Streak, Day, ClaimedToday, SecondsLeft, Days = { { Cash, Spins, Boost, Egg, State } x7 } }
+	    Day = the calendar day that pays on the next claim (or paid today); Days[i].State = "Done" | "Today" | "Next" | "Later"
+	  Claim {} -> { Day, Streak, Cash, Spins, Boost, Egg }
+	Signal "DailyReady" {} to a player who joins with a reward waiting.
+	Test hook: DailyService.Status(player, now).
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local DailyConfig = require(Configs:WaitForChild("DailyConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
+
+local DailyService = {}
+
+local Data
+local Services
+
+local function now(): number
+	return os.time()
+end
+
+-- Where the player stands: can they claim, which day pays, how long until the next day.
+function DailyService.Status(player: Player, t: number?)
+	local data = Data.Get(player)
+	if not data then
+		return nil
+	end
+	local time = t or now()
+	local daily = data.Daily or { LastClaim = 0, Streak = 0 }
+	local today = DailyConfig.dayOf(time)
+	local last = daily.LastClaim or 0
+	local lastDay = last > 0 and DailyConfig.dayOf(last) or -100
+	local alive = today - lastDay <= 1
+	local streak = alive and (daily.Streak or 0) or 0
+	local claimedToday = lastDay == today
+	local cycle = DailyConfig.Cycle
+	local day
+	if claimedToday then
+		day = (math.max(1, streak) - 1) % cycle + 1 -- the day that paid today
+	else
+		day = streak % cycle + 1 -- the day that pays now
+	end
+	return {
+		CanClaim = not claimedToday,
+		ClaimedToday = claimedToday,
+		Streak = streak,
+		Day = day,
+		SecondsLeft = claimedToday and ((today + 1) * DailyConfig.SecondsPerDay - time) or 0,
+	}
+end
+
+local function rewardOf(player: Player, day: number, streak: number)
+	local def = DailyConfig.Days[day]
+	local income = Services.EconomyService.IncomeRate(player)
+	local reward = {}
+	if def.Cash then
+		reward.Cash = DailyConfig.cash(day, income, streak)
+	end
+	if def.Spins then
+		reward.Spins = def.Spins
+	end
+	if def.Boost then
+		reward.Boost = { Id = def.Boost.Id, Seconds = def.Boost.Seconds }
+	end
+	if def.Egg then
+		reward.Egg = { Type = def.Egg.Type, Luck = def.Egg.Luck }
+	end
+	return reward
+end
+
+local function handleState(player: Player)
+	local st = DailyService.Status(player)
+	if not st then
+		return false, "NOT_LOADED"
+	end
+	-- the completed streak the day's cash bonus follows (before today's claim)
+	local before = math.max(0, st.ClaimedToday and st.Streak - 1 or st.Streak)
+	local days = {}
+	for i = 1, DailyConfig.Cycle do
+		local entry = rewardOf(player, i, before)
+		if i < st.Day or (i == st.Day and st.ClaimedToday) then
+			entry.State = "Done"
+		elseif i == st.Day then
+			entry.State = "Today"
+		elseif i == st.Day + 1 then
+			entry.State = "Next"
+		else
+			entry.State = "Later"
+		end
+		days[i] = entry
+	end
+	return true, {
+		CanClaim = st.CanClaim,
+		Streak = st.Streak,
+		Day = st.Day,
+		ClaimedToday = st.ClaimedToday,
+		SecondsLeft = st.SecondsLeft,
+		Bonus = DailyConfig.bonus(before),
+		Days = days,
+	}
+end
+
+local function handleClaim(player: Player)
+	local data = Data.Get(player)
+	local st = DailyService.Status(player)
+	if not data or not st then
+		return false, "NOT_LOADED"
+	end
+	if not st.CanClaim then
+		return false, "ALREADY_CLAIMED", "You already took today's reward. Come back tomorrow!"
+	end
+	local newStreak = st.Streak + 1
+	local day = (newStreak - 1) % DailyConfig.Cycle + 1
+	local reward = rewardOf(player, day, st.Streak)
+	Data.Set(player, { "Daily" }, { LastClaim = now(), Streak = newStreak })
+	local parts = {}
+	if reward.Cash then
+		Services.EconomyService.Earn(player, reward.Cash, "Daily")
+		table.insert(parts, Format.cash(reward.Cash))
+	end
+	if reward.Spins then
+		Services.SpinService.AddTickets(player, reward.Spins)
+		table.insert(parts, string.format("%d spin%s", reward.Spins, reward.Spins == 1 and "" or "s"))
+	end
+	if reward.Boost then
+		Services.BoostService.Add(player, reward.Boost.Id, reward.Boost.Seconds)
+		table.insert(parts, string.format("%d min boost", reward.Boost.Seconds // 60))
+	end
+	if reward.Egg then
+		local ok = Services.EggService.GiveEgg(player, reward.Egg.Type, reward.Egg.Luck, true)
+		local def = EggConfig.Eggs[reward.Egg.Type]
+		if ok then
+			table.insert(parts, string.format("%s x%d", def and def.Name or "egg", reward.Egg.Luck))
+		end
+	end
+	Net.notify(player, "rare", string.format("DAILY REWARD  day %d  (streak %d):  %s", day, newStreak, table.concat(parts, "  +  ")))
+	return true, { Day = day, Streak = newStreak, Cash = reward.Cash, Spins = reward.Spins, Boost = reward.Boost, Egg = reward.Egg }
+end
+
+function DailyService.Init(services)
+	Services = services
+	Data = services.PlayerDataService
+	Net.handle("Daily", "State", handleState, { Burst = 6, PerSecond = 2 })
+	Net.handle("Daily", "Claim", handleClaim, { Burst = 3, PerSecond = 1 })
+end
+
+function DailyService.Start()
+	-- a reward is waiting: the HUD lights the DAILY button
+	Data.Loaded:Connect(function(player)
+		task.delay(3, function()
+			local st = player.Parent and DailyService.Status(player)
+			if st and st.CanClaim then
+				Net.signal(player, "DailyReady", {})
+			end
+		end)
+	end)
+	-- ...and again when the day turns over for players who stay online
+	task.spawn(function()
+		local lastDay = DailyConfig.dayOf(now())
+		while true do
+			task.wait(30)
+			local today = DailyConfig.dayOf(now())
+			if today ~= lastDay then
+				lastDay = today
+				for _, player in Players:GetPlayers() do
+					local st = DailyService.Status(player)
+					if st and st.CanClaim then
+						Net.signal(player, "DailyReady", {})
+					end
+				end
+			end
+		end
+	end)
+end
+
+return DailyService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000069">
 				<Properties>
 					<string name="Name">DevService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12466,7 +12833,7 @@ return DevService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000067">
+			<Item class="ModuleScript" referent="RBX000070">
 				<Properties>
 					<string name="Name">DragonAssetService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12566,7 +12933,7 @@ return DragonAssetService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000068">
+			<Item class="ModuleScript" referent="RBX000071">
 				<Properties>
 					<string name="Name">DragonService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13284,7 +13651,7 @@ return DragonService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000069">
+			<Item class="ModuleScript" referent="RBX000072">
 				<Properties>
 					<string name="Name">EconomyService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13456,7 +13823,7 @@ return EconomyService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000070">
+			<Item class="ModuleScript" referent="RBX000073">
 				<Properties>
 					<string name="Name">EggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14287,7 +14654,98 @@ return EggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000071">
+			<Item class="ModuleScript" referent="RBX000074">
+				<Properties>
+					<string name="Name">IndexService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	IndexService
+	Pays the Dragon Index milestones (IndexConfig): 5, 10, 15, 20, 25 and all 30 species found.
+
+	Net (domain "Index"):
+	  Claim { Count } -> { Count, Cash?, Spins?, Boost?, Egg? }
+	Errors: BAD_REQUEST, NOT_LOADED, NO_SUCH_MILESTONE, NOT_ENOUGH, ALREADY_CLAIMED
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local IndexConfig = require(Configs:WaitForChild("IndexConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
+
+local IndexService = {}
+
+local Data
+local Services
+
+local function handleClaim(player: Player, p)
+	if not Net.check.int(p.Count, 1, 1000) then
+		return false, "BAD_REQUEST"
+	end
+	local data = Data.Get(player)
+	if not data then
+		return false, "NOT_LOADED"
+	end
+	local milestone
+	for _, m in IndexConfig.milestones() do
+		if m.Count == p.Count then
+			milestone = m
+		end
+	end
+	if not milestone then
+		return false, "NO_SUCH_MILESTONE"
+	end
+	if IndexConfig.found(data.Index) < milestone.Count then
+		return false, "NOT_ENOUGH", "Find more dragons first."
+	end
+	local key = tostring(milestone.Count)
+	if data.IndexClaims and data.IndexClaims[key] then
+		return false, "ALREADY_CLAIMED", "You already took this reward."
+	end
+	Data.Set(player, { "IndexClaims", key }, true)
+	local out = { Count = milestone.Count }
+	local parts = {}
+	if milestone.Cash then
+		local income = Services.EconomyService.IncomeRate(player)
+		out.Cash = math.floor(math.max(milestone.Cash.Min, income * milestone.Cash.Seconds) + 0.5)
+		Services.EconomyService.Earn(player, out.Cash, "Index")
+		table.insert(parts, Format.cash(out.Cash))
+	end
+	if milestone.Spins then
+		Services.SpinService.AddTickets(player, milestone.Spins)
+		out.Spins = milestone.Spins
+		table.insert(parts, string.format("%d spins", milestone.Spins))
+	end
+	if milestone.Boost then
+		Services.BoostService.Add(player, milestone.Boost.Id, milestone.Boost.Seconds)
+		out.Boost = milestone.Boost
+		table.insert(parts, string.format("%d min boost", milestone.Boost.Seconds // 60))
+	end
+	if milestone.Egg then
+		local ok = Services.EggService.GiveEgg(player, milestone.Egg.Type, milestone.Egg.Luck, true)
+		local def = EggConfig.Eggs[milestone.Egg.Type]
+		if ok then
+			out.Egg = milestone.Egg
+			table.insert(parts, string.format("%s x%d", def and def.Name or "egg", milestone.Egg.Luck))
+		end
+	end
+	Net.notify(player, "rare", string.format("COLLECTION %d DRAGONS!  %s", milestone.Count, table.concat(parts, "  +  ")))
+	return true, out
+end
+
+function IndexService.Init(services)
+	Services = services
+	Data = services.PlayerDataService
+	Net.handle("Index", "Claim", handleClaim, { Burst = 4, PerSecond = 1 })
+end
+
+return IndexService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000075">
 				<Properties>
 					<string name="Name">LeaderboardService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14885,7 +15343,7 @@ return LeaderboardService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000072">
+			<Item class="ModuleScript" referent="RBX000076">
 				<Properties>
 					<string name="Name">LeaderstatsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14975,7 +15433,7 @@ return LeaderstatsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000073">
+			<Item class="ModuleScript" referent="RBX000077">
 				<Properties>
 					<string name="Name">LevelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15167,7 +15625,7 @@ return LevelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000074">
+			<Item class="ModuleScript" referent="RBX000078">
 				<Properties>
 					<string name="Name">MonetizationService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15447,7 +15905,7 @@ return MonetizationService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000075">
+			<Item class="ModuleScript" referent="RBX000079">
 				<Properties>
 					<string name="Name">MountService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -16085,7 +16543,7 @@ return MountService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000076">
+			<Item class="ModuleScript" referent="RBX000080">
 				<Properties>
 					<string name="Name">PhysicsGroups</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -16171,7 +16629,7 @@ return PhysicsGroups
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000077">
+			<Item class="ModuleScript" referent="RBX000081">
 				<Properties>
 					<string name="Name">PlayerDataService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -16228,6 +16686,7 @@ local TEMPLATE = {
 	Upgrades = { EggStorage = 0, DragonStorage = 0, HatchLuck = 0, Radar = 0 },
 	Tree = {}, -- Great Tree levels { [branchId] = level }, see TreeConfig
 	Index = {},
+	IndexClaims = {}, -- Dragon Index milestones already paid, see IndexConfig
 	Regions = { Haven = true },
 	Quests = { Active = {}, Completed = 0, Serial = 0 },
 	Tutorial = { Step = 1, Done = false },
@@ -16638,7 +17097,7 @@ return PlayerDataService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000078">
+			<Item class="ModuleScript" referent="RBX000082">
 				<Properties>
 					<string name="Name">RaceService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17575,7 +18034,7 @@ return RaceService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000079">
+			<Item class="ModuleScript" referent="RBX000083">
 				<Properties>
 					<string name="Name">SanctuaryService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17837,7 +18296,7 @@ return SanctuaryService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000080">
+			<Item class="ModuleScript" referent="RBX000084">
 				<Properties>
 					<string name="Name">SettingsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17895,7 +18354,7 @@ return SettingsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000081">
+			<Item class="ModuleScript" referent="RBX000085">
 				<Properties>
 					<string name="Name">ShopService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17949,7 +18408,7 @@ return ShopService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000082">
+			<Item class="ModuleScript" referent="RBX000086">
 				<Properties>
 					<string name="Name">SpinService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18248,7 +18707,7 @@ return SpinService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000083">
+			<Item class="ModuleScript" referent="RBX000087">
 				<Properties>
 					<string name="Name">TravelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18371,7 +18830,7 @@ return TravelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000084">
+			<Item class="ModuleScript" referent="RBX000088">
 				<Properties>
 					<string name="Name">TreeService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18493,7 +18952,7 @@ return TreeService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000085">
+			<Item class="ModuleScript" referent="RBX000089">
 				<Properties>
 					<string name="Name">WildEggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18731,7 +19190,7 @@ return WildEggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000086">
+			<Item class="ModuleScript" referent="RBX000090">
 				<Properties>
 					<string name="Name">WorldService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18888,11 +19347,11 @@ return WorldService
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000087">
+		<Item class="Folder" referent="RBX000091">
 			<Properties>
 				<string name="Name">World</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000088">
+			<Item class="ModuleScript" referent="RBX000092">
 				<Properties>
 					<string name="Name">GreatTree</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19093,7 +19552,7 @@ return GreatTree
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000089">
+			<Item class="ModuleScript" referent="RBX000093">
 				<Properties>
 					<string name="Name">Haven</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19259,7 +19718,7 @@ return Haven
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000090">
+			<Item class="ModuleScript" referent="RBX000094">
 				<Properties>
 					<string name="Name">HavenLayout</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/layout.py - do not edit by hand.
@@ -23645,7 +24104,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000091">
+			<Item class="ModuleScript" referent="RBX000095">
 				<Properties>
 					<string name="Name">HavenTerrainData</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/terrain_data.py - do not edit by hand.
@@ -23696,7 +24155,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000092">
+			<Item class="ModuleScript" referent="RBX000096">
 				<Properties>
 					<string name="Name">Kit</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24042,7 +24501,7 @@ return Kit
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000093">
+			<Item class="ModuleScript" referent="RBX000097">
 				<Properties>
 					<string name="Name">Landmarks</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24404,7 +24863,7 @@ return Landmarks
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000094">
+			<Item class="ModuleScript" referent="RBX000098">
 				<Properties>
 					<string name="Name">Props</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24600,7 +25059,7 @@ return Props
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000095">
+			<Item class="ModuleScript" referent="RBX000099">
 				<Properties>
 					<string name="Name">RaceIsland</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -25036,7 +25495,7 @@ return RaceIsland
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000096">
+			<Item class="ModuleScript" referent="RBX000100">
 				<Properties>
 					<string name="Name">Sanctuaries</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -25424,7 +25883,7 @@ return Sanctuaries
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000097">
+			<Item class="ModuleScript" referent="RBX000101">
 				<Properties>
 					<string name="Name">TerrainWriter</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -25838,7 +26297,7 @@ return TerrainWriter
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000098">
+			<Item class="ModuleScript" referent="RBX000102">
 				<Properties>
 					<string name="Name">Village</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -26252,7 +26711,7 @@ return Village
 			</Item>
 		</Item>
 	</Item>
-	<Item class="StarterPlayer" referent="RBX000099">
+	<Item class="StarterPlayer" referent="RBX000103">
 		<Properties>
 			<string name="Name">StarterPlayer</string>
 			<bool name="EnableMouseLockOption">false</bool>
@@ -26260,15 +26719,15 @@ return Village
 			<float name="CameraMinZoomDistance">6.0</float>
 			<float name="CharacterWalkSpeed">20.0</float>
 		</Properties>
-		<Item class="StarterPlayerScripts" referent="RBX000100">
+		<Item class="StarterPlayerScripts" referent="RBX000104">
 			<Properties>
 				<string name="Name">StarterPlayerScripts</string>
 			</Properties>
-			<Item class="Folder" referent="RBX000101">
+			<Item class="Folder" referent="RBX000105">
 				<Properties>
 					<string name="Name">Controllers</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000102">
+				<Item class="ModuleScript" referent="RBX000106">
 					<Properties>
 						<string name="Name">AnimationController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26873,7 +27332,7 @@ return AnimationController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000103">
+				<Item class="ModuleScript" referent="RBX000107">
 					<Properties>
 						<string name="Name">AnnounceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27137,7 +27596,7 @@ return AnnounceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000104">
+				<Item class="ModuleScript" referent="RBX000108">
 					<Properties>
 						<string name="Name">AudioController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27310,7 +27769,7 @@ return AudioController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000105">
+				<Item class="ModuleScript" referent="RBX000109">
 					<Properties>
 						<string name="Name">BondController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27638,7 +28097,7 @@ return BondController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000106">
+				<Item class="ModuleScript" referent="RBX000110">
 					<Properties>
 						<string name="Name">CameraController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28008,7 +28467,7 @@ return CameraController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000107">
+				<Item class="ModuleScript" referent="RBX000111">
 					<Properties>
 						<string name="Name">CoinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28443,7 +28902,7 @@ return CoinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000108">
+				<Item class="ModuleScript" referent="RBX000112">
 					<Properties>
 						<string name="Name">CombatController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29283,7 +29742,69 @@ return CombatController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000109">
+				<Item class="ModuleScript" referent="RBX000113">
+					<Properties>
+						<string name="Name">DailyController</string>
+						<ProtectedString name="Source"><![CDATA[--[[
+	DailyController
+	Lights the DAILY button of the HUD while a daily reward is waiting (server signal "DailyReady",
+	and once at start in case the signal came before this controller was running). The Daily window
+	calls DailyController.clear() after a claim.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
+
+local DailyController = {}
+
+local registry
+local ready = false
+
+local function show(on: boolean)
+	ready = on
+	local hud = registry and registry.Hud
+	if hud and hud.SetBadge then
+		hud:SetBadge("Daily", on and 1 or nil)
+	end
+end
+
+function DailyController.clear()
+	show(false)
+end
+
+function DailyController.isReady(): boolean
+	return ready
+end
+
+function DailyController.Init(reg)
+	registry = reg
+end
+
+function DailyController.Start()
+	Net.onSignal("DailyReady", function()
+		show(true)
+	end)
+	task.spawn(function()
+		-- the HUD is built after the controllers start: wait for it, then ask what is waiting
+		for _ = 1, 40 do
+			if registry.Hud then
+				break
+			end
+			task.wait(0.5)
+		end
+		local res = Net.request("Daily", "State", {})
+		if res.ok and res.data and res.data.CanClaim then
+			show(true)
+		end
+	end)
+end
+
+return DailyController
+]]></ProtectedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX000114">
 					<Properties>
 						<string name="Name">DataController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29414,7 +29935,7 @@ return DataController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000110">
+				<Item class="ModuleScript" referent="RBX000115">
 					<Properties>
 						<string name="Name">DragonController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30063,7 +30584,7 @@ return DragonController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000111">
+				<Item class="ModuleScript" referent="RBX000116">
 					<Properties>
 						<string name="Name">EggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30378,7 +30899,7 @@ return EggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000112">
+				<Item class="ModuleScript" referent="RBX000117">
 					<Properties>
 						<string name="Name">GraphicsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30515,7 +31036,7 @@ return GraphicsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000113">
+				<Item class="ModuleScript" referent="RBX000118">
 					<Properties>
 						<string name="Name">HatchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31867,7 +32388,7 @@ return HatchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000114">
+				<Item class="ModuleScript" referent="RBX000119">
 					<Properties>
 						<string name="Name">HeldEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32264,7 +32785,7 @@ return HeldEggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000115">
+				<Item class="ModuleScript" referent="RBX000120">
 					<Properties>
 						<string name="Name">InputController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32487,7 +33008,7 @@ return InputController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000116">
+				<Item class="ModuleScript" referent="RBX000121">
 					<Properties>
 						<string name="Name">InteractionController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32550,7 +33071,7 @@ return InteractionController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000117">
+				<Item class="ModuleScript" referent="RBX000122">
 					<Properties>
 						<string name="Name">PerchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -33014,7 +33535,7 @@ return PerchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000118">
+				<Item class="ModuleScript" referent="RBX000123">
 					<Properties>
 						<string name="Name">RaceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34048,7 +34569,7 @@ return RaceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000119">
+				<Item class="ModuleScript" referent="RBX000124">
 					<Properties>
 						<string name="Name">RadarController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34361,7 +34882,7 @@ return RadarController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000120">
+				<Item class="ModuleScript" referent="RBX000125">
 					<Properties>
 						<string name="Name">SanctuaryController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34870,7 +35391,7 @@ return SanctuaryController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000121">
+				<Item class="ModuleScript" referent="RBX000126">
 					<Properties>
 						<string name="Name">SettingsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34958,7 +35479,7 @@ return SettingsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000122">
+				<Item class="ModuleScript" referent="RBX000127">
 					<Properties>
 						<string name="Name">SpinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35386,7 +35907,7 @@ return SpinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000123">
+				<Item class="ModuleScript" referent="RBX000128">
 					<Properties>
 						<string name="Name">TitleController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35590,7 +36111,7 @@ return TitleController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000124">
+				<Item class="ModuleScript" referent="RBX000129">
 					<Properties>
 						<string name="Name">TreeController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35730,7 +36251,7 @@ return TreeController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000125">
+				<Item class="ModuleScript" referent="RBX000130">
 					<Properties>
 						<string name="Name">UIController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36148,7 +36669,7 @@ return UIController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000126">
+				<Item class="ModuleScript" referent="RBX000131">
 					<Properties>
 						<string name="Name">WildEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36649,7 +37170,7 @@ return WildEggController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000127">
+			<Item class="ModuleScript" referent="RBX000132">
 				<Properties>
 					<string name="Name">Diagnostics</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -36906,7 +37427,7 @@ return Diagnostics
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="LocalScript" referent="RBX000128">
+			<Item class="LocalScript" referent="RBX000133">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -36970,6 +37491,7 @@ local ORDER = {
 	"WildEggController",
 	"RadarController",
 	"CoinController",
+	"DailyController",
 	"InventoryController",
 	"TutorialController",
 	"RegionController",
@@ -37039,16 +37561,16 @@ end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000129">
+			<Item class="Folder" referent="RBX000134">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000130">
+				<Item class="Folder" referent="RBX000135">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000131">
+				<Item class="ModuleScript" referent="RBX000136">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37128,11 +37650,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000132">
+				<Item class="Folder" referent="RBX000137">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000133">
+					<Item class="ModuleScript" referent="RBX000138">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37299,7 +37821,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000134">
+					<Item class="ModuleScript" referent="RBX000139">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37718,7 +38240,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000135">
+				<Item class="ModuleScript" referent="RBX000140">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37784,11 +38306,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000136">
+				<Item class="Folder" referent="RBX000141">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000137">
+					<Item class="ModuleScript" referent="RBX000142">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -39086,7 +39608,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000138">
+					<Item class="ModuleScript" referent="RBX000143">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -39459,7 +39981,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000139">
+				<Item class="ModuleScript" referent="RBX000144">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39890,7 +40412,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000140">
+				<Item class="ModuleScript" referent="RBX000145">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41224,11 +41746,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000141">
+				<Item class="Folder" referent="RBX000146">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000142">
+					<Item class="ModuleScript" referent="RBX000147">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -41445,7 +41967,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000143">
+					<Item class="ModuleScript" referent="RBX000148">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -41651,7 +42173,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000144">
+					<Item class="ModuleScript" referent="RBX000149">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -41740,7 +42262,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000145">
+				<Item class="ModuleScript" referent="RBX000150">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41998,7 +42520,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000146">
+				<Item class="ModuleScript" referent="RBX000151">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -42128,7 +42650,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000147">
+				<Item class="ModuleScript" referent="RBX000152">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -42304,11 +42826,280 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000148">
+				<Item class="Folder" referent="RBX000153">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000149">
+					<Item class="ModuleScript" referent="RBX000154">
+						<Properties>
+							<string name="Name">DailyWindow</string>
+							<ProtectedString name="Source"><![CDATA[--[[
+	DailyWindow
+	The daily reward calendar (DailyService / DailyConfig): seven day cards, the streak, a CLAIM
+	button for today's reward and a countdown to the next one. Server decides everything.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
+local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
+
+local UI = script.Parent.Parent
+local Theme = require(UI.Theme)
+local Responsive = require(UI.Responsive)
+local Kit = require(UI.Kit)
+local Icons = require(UI.Icons)
+local WindowBase = require(UI.WindowBase)
+
+local C = Theme.Colors
+
+local DailyWindow = {}
+DailyWindow.__index = DailyWindow
+setmetatable(DailyWindow, { __index = WindowBase })
+
+local GOLD = Color3.fromRGB(255, 196, 48)
+local GREEN = Color3.fromRGB(110, 208, 104)
+
+function DailyWindow.new(ui, registry)
+	local self = WindowBase.new({
+		Name = "Daily",
+		Title = "Daily Reward",
+		Subtitle = "Come back every day",
+		Icon = "Gift",
+		Spec = {
+			Desktop = { Width = 0.7, Height = 0.66, Aspect = 2.0 },
+			Tablet = { Width = 0.92, Height = 0.78, Aspect = 1.7 },
+			Phone = { Width = 0.96, Height = 1 },
+			PhonePortrait = { Width = 0.96, Height = 1 },
+		},
+	})
+	setmetatable(self, DailyWindow)
+	self.UIC = ui
+	self.Registry = registry
+	self.Cards = {}
+	self.State = nil
+	self.Busy = false
+	self.SnapshotAt = 0
+	self:Build()
+	return self
+end
+
+-- ============================================================== build
+function DailyWindow:Build()
+	local content = self.Content
+
+	-- streak banner
+	local banner = Kit.surface({ Name = "Banner", StrokeColor = GOLD, StrokeTransparency = 0.5, Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(1, 0.17), Parent = content })
+	self.Banner = banner
+	self.StreakNumber = Kit.text({ Name = "Streak", Text = "0", Role = "Display", Scaled = true, Color = GOLD, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.02, 0.08), Size = UDim2.fromScale(0.1, 0.84), Parent = banner })
+	self.StreakCaption = Kit.text({ Name = "StreakCaption", Text = "DAY STREAK", Role = "Heading", Scaled = true, Position = UDim2.fromScale(0.13, 0.12), Size = UDim2.fromScale(0.34, 0.42), Parent = banner })
+	self.StreakHint = Kit.text({ Name = "StreakHint", Text = "", Role = "Caption", Scaled = true, Color = C.TextMuted, Position = UDim2.fromScale(0.13, 0.55), Size = UDim2.fromScale(0.5, 0.34), Truncate = true, Parent = banner })
+	self.BonusBadge = Kit.badge({ Name = "Bonus", Text = "+0% CASH", Color = GREEN, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(0.98, 0.5), Size = UDim2.fromScale(0.22, 0.52), Parent = banner })
+
+	-- the seven days
+	local grid = Kit.frame({ Name = "Days", Position = UDim2.fromScale(0, 0.2), Size = UDim2.fromScale(1, 0.62), Parent = content })
+	self.Grid = grid
+	self.GridLayout = Instance.new("UIGridLayout")
+	self.GridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	self.GridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	self.GridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+	self.GridLayout.Parent = grid
+	for i = 1, 7 do
+		self:BuildCard(i, grid)
+	end
+
+	-- claim / countdown
+	local bottom = Kit.frame({ Name = "Bottom", Position = UDim2.fromScale(0, 0.85), Size = UDim2.fromScale(1, 0.15), Parent = content })
+	self.ClaimButton = Kit.button({ Name = "Claim", Text = "CLAIM", Style = "Success", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.34, 0.9), Parent = bottom })
+	self.Countdown = Kit.text({ Name = "Countdown", Text = "", Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Color = C.TextMuted, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.7, 0.8), Parent = bottom })
+	self.Countdown.Visible = false
+	self.ClaimButton.Activated:Connect(function()
+		self:Claim()
+	end)
+end
+
+function DailyWindow:BuildCard(i: number, parent: Instance)
+	local card = Kit.surface({ Name = "Day" .. i, LayoutOrder = i, StrokeColor = GOLD, StrokeTransparency = 0.7, Parent = parent })
+	local day = Kit.text({ Name = "DayLabel", Text = "DAY " .. i, Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Color = C.TextMuted, Position = UDim2.fromScale(0.05, 0.05), Size = UDim2.fromScale(0.9, 0.15), Parent = card })
+	local disc = Kit.frame({ Name = "IconDisc", BackgroundTransparency = 0, BackgroundColor3 = GOLD, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.22), Size = UDim2.fromScale(0.44, 0.44), SizeConstraint = Enum.SizeConstraint.RelativeXX, Parent = card })
+	Kit.corner(disc, 999)
+	local iconBox = Kit.frame({ Name = "IconBox", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.64, 0.64), Parent = disc })
+	local text = Kit.text({ Name = "Reward", Text = "", Role = "Label", Scaled = true, Wrapped = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.04, 0.64), Size = UDim2.fromScale(0.92, 0.32), Parent = card })
+	local mark = Kit.frame({ Name = "DoneMark", BackgroundTransparency = 0.35, BackgroundColor3 = Color3.fromRGB(20, 40, 24), Size = UDim2.fromScale(1, 1), ZIndex = 5, Visible = false, Parent = card })
+	Kit.corner(mark, "Card")
+	local check = Kit.text({ Name = "Check", Text = "CLAIMED", Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Color = GREEN, Position = UDim2.fromScale(0.05, 0.4), Size = UDim2.fromScale(0.9, 0.2), ZIndex = 6, Parent = mark })
+	self.Cards[i] = { Card = card, Day = day, Disc = disc, IconBox = iconBox, Text = text, Mark = mark, Check = check, Icon = nil, IconName = "" }
+end
+
+-- ============================================================== layout
+function DailyWindow:ApplyLayout()
+	local R = Responsive
+	local phone = R.Device == "Phone"
+	local portrait = phone and R.Portrait
+	local cols = portrait and 4 or 7
+	local rows = math.ceil(7 / cols)
+	local gap = R.px(portrait and 6 or 8)
+	if self.GridLayout then
+		self.GridLayout.CellPadding = UDim2.fromOffset(gap, gap)
+		self.GridLayout.CellSize = UDim2.new(1 / cols, -math.ceil(gap * (cols - 1) / cols) - 1, 1 / rows, -math.ceil(gap * (rows - 1) / rows) - 1)
+	end
+	if self.Banner then
+		self.Banner.Size = UDim2.fromScale(1, portrait and 0.15 or 0.17)
+		self.Grid.Position = UDim2.fromScale(0, portrait and 0.18 or 0.2)
+		self.Grid.Size = UDim2.fromScale(1, portrait and 0.64 or 0.62)
+	end
+end
+
+-- ============================================================== data
+local function icon(entry): string
+	if entry.Egg then
+		return "Egg"
+	elseif entry.Boost then
+		local b = MonetizationConfig.Boosts[entry.Boost.Id]
+		return b and b.Icon or "Clover"
+	elseif entry.Spins then
+		return "Star"
+	end
+	return "Coin"
+end
+
+local function lines(entry): string
+	local out = {}
+	if entry.Cash then
+		table.insert(out, Format.cash(entry.Cash))
+	end
+	if entry.Spins then
+		table.insert(out, string.format("%d SPIN%s", entry.Spins, entry.Spins == 1 and "" or "S"))
+	end
+	if entry.Boost then
+		local b = MonetizationConfig.Boosts[entry.Boost.Id]
+		table.insert(out, string.format("%s %dM", b and b.Name or "BOOST", entry.Boost.Seconds // 60))
+	end
+	if entry.Egg then
+		local def = EggConfig.Eggs[entry.Egg.Type]
+		table.insert(out, string.format("%s x%d", string.upper(def and def.Name or "EGG"), entry.Egg.Luck))
+	end
+	return table.concat(out, "\n")
+end
+
+local function clockText(seconds: number): string
+	seconds = math.max(0, math.floor(seconds))
+	return string.format("%02d:%02d:%02d", seconds // 3600, seconds % 3600 // 60, seconds % 60)
+end
+
+function DailyWindow:Render()
+	local st = self.State
+	if not st then
+		return
+	end
+	self.StreakNumber.Text = tostring(st.Streak)
+	self.StreakCaption.Text = st.Streak == 1 and "DAY STREAK" or "DAYS STREAK"
+	self.StreakHint.Text = st.CanClaim and "Take today's reward to keep it going!" or "Streak is safe. Come back tomorrow."
+	local bonus = math.floor((st.Bonus - 1) * 100 + 0.5)
+	local badgeLabel = self.BonusBadge:FindFirstChild("Label")
+	if badgeLabel then
+		badgeLabel.Text = string.format("+%d%% CASH", bonus)
+	end
+	for i, view in self.Cards do
+		local entry = st.Days[i]
+		if entry then
+			view.Text.Text = lines(entry)
+			local name = icon(entry)
+			if view.IconName ~= name then
+				if view.Icon then
+					view.Icon:Destroy()
+				end
+				view.Icon = Icons.make(name, { Color = C.Ink, Accent = C.Text, Ink = GOLD })
+				view.Icon.Parent = view.IconBox
+				view.IconName = name
+			end
+			local today = entry.State == "Today"
+			local done = entry.State == "Done"
+			view.Mark.Visible = done
+			view.Day.TextColor3 = today and GOLD or C.TextMuted
+			view.Card.BackgroundColor3 = today and Color3.fromRGB(70, 56, 24) or C.Surface
+			local stroke = view.Card:FindFirstChildOfClass("UIStroke")
+			if stroke then
+				stroke.Color = today and GOLD or C.Gold
+				stroke.Transparency = today and 0.05 or 0.72
+				stroke.Thickness = today and 3 or 1
+			end
+			view.Disc.BackgroundColor3 = (done or entry.State == "Later") and Color3.fromRGB(150, 140, 120) or GOLD
+		end
+	end
+	self.ClaimButton:SetVisible(st.CanClaim)
+	self.Countdown.Visible = not st.CanClaim
+	self:Tick()
+end
+
+function DailyWindow:Tick()
+	local st = self.State
+	if not st or st.CanClaim then
+		return
+	end
+	local left = st.SecondsLeft - (os.clock() - self.SnapshotAt)
+	self.Countdown.Text = "NEXT REWARD IN  " .. clockText(left)
+end
+
+function DailyWindow:Refresh()
+	local res = Net.request("Daily", "State", {})
+	if res.ok and res.data then
+		self.State = res.data
+		self.SnapshotAt = os.clock()
+		self:Render()
+	end
+end
+
+function DailyWindow:Claim()
+	if self.Busy or not self.State or not self.State.CanClaim then
+		return
+	end
+	self.Busy = true
+	self.ClaimButton:SetBusy(true)
+	task.spawn(function()
+		local res = Net.request("Daily", "Claim", {})
+		self.Busy = false
+		self.ClaimButton:SetBusy(false)
+		if res.ok then
+			local controller = self.Registry and self.Registry.DailyController
+			if controller then
+				controller.clear()
+			end
+			self:Refresh()
+		else
+			self.UIC.HandleResult(res)
+			self:Refresh()
+		end
+	end)
+end
+
+function DailyWindow:OnOpen()
+	self.Shown = true
+	task.spawn(function()
+		self:Refresh()
+	end)
+	task.spawn(function()
+		-- the countdown runs while the window is open
+		while self.Shown and self.Root.Parent do
+			self:Tick()
+			task.wait(0.5)
+		end
+	end)
+end
+
+function DailyWindow:OnHidden()
+	self.Shown = false
+end
+
+return DailyWindow
+]]></ProtectedString>
+						</Properties>
+					</Item>
+					<Item class="ModuleScript" referent="RBX000155">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -42600,7 +43391,457 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000150">
+					<Item class="ModuleScript" referent="RBX000156">
+						<Properties>
+							<string name="Name">IndexWindow</string>
+							<ProtectedString name="Source"><![CDATA[--[[
+	IndexWindow
+	The Dragon Index (collection book): every species as a card (3D preview when found, a "?" when
+	not), how many were found and which mutations, milestone rewards for the number of species found
+	(paid by IndexService) and a detail panel per species. Data: data.Index / data.IndexClaims.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("DragonVisual"))
+local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
+local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
+local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
+local IndexConfig = require(Configs:WaitForChild("IndexConfig"))
+
+local UI = script.Parent.Parent
+local Theme = require(UI.Theme)
+local Responsive = require(UI.Responsive)
+local Create = require(UI.Create)
+local Kit = require(UI.Kit)
+local WindowBase = require(UI.WindowBase)
+
+local C = Theme.Colors
+
+local IndexWindow = {}
+IndexWindow.__index = IndexWindow
+setmetatable(IndexWindow, { __index = WindowBase })
+
+local GOLD = Color3.fromRGB(255, 196, 48)
+local GREEN = Color3.fromRGB(110, 208, 104)
+
+-- ============================================================== 3D previews
+local function buildPreview(speciesId: string)
+	local ok, model = pcall(function()
+		local m = DragonVisual.build(speciesId, { Saddle = false, Detail = "Medium" })
+		local pose = Animator.samplePose(m, "Idle", 0.35)
+		DragonVisual.pose(m, pose, CFrame.Angles(0, math.rad(150), 0))
+		for _, d in m:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.CastShadow = false
+			end
+		end
+		return m
+	end)
+	return ok and model or nil
+end
+
+local function frameCamera(cam: Camera, model: Model, tightness: number)
+	local cf, size = model:GetBoundingBox()
+	local radius = math.max(size.X, size.Y, size.Z) * 0.5 * tightness
+	local dist = radius / math.tan(math.rad(cam.FieldOfView) * 0.5)
+	cam.CFrame = CFrame.lookAt(cf.Position + Vector3.new(dist * 0.35, size.Y * 0.18 + dist * 0.12, dist), cf.Position + Vector3.new(0, -size.Y * 0.04, 0))
+end
+
+-- (a couple of models per frame, so opening the book never stalls)
+local queue: { () -> () } = {}
+local conn: RBXScriptConnection? = nil
+local function enqueue(job: () -> ())
+	table.insert(queue, job)
+	if not conn then
+		conn = RunService.Heartbeat:Connect(function()
+			for _ = 1, 2 do
+				local next = table.remove(queue, 1)
+				if not next then
+					break
+				end
+				next()
+			end
+			if #queue == 0 and conn then
+				conn:Disconnect()
+				conn = nil
+			end
+		end)
+	end
+end
+
+local function viewport(parent: Instance, size: UDim2, position: UDim2): (ViewportFrame, Camera)
+	local vp = Create("ViewportFrame", {
+		Name = "Preview",
+		BackgroundTransparency = 1,
+		Position = position,
+		Size = size,
+		Ambient = Color3.fromRGB(150, 146, 140),
+		LightColor = Color3.fromRGB(255, 244, 226),
+		LightDirection = Vector3.new(-0.5, -1, -0.7),
+		Parent = parent,
+	})
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = 30
+	cam.Parent = vp
+	vp.CurrentCamera = cam
+	return vp, cam
+end
+
+local function dateText(t: number?): string
+	local ok, text = pcall(os.date, "!%d.%m.%Y", t or 0)
+	return ok and text or "?"
+end
+
+-- ============================================================== window
+function IndexWindow.new(ui, registry)
+	local self = WindowBase.new({
+		Name = "Index",
+		Title = "Dragon Index",
+		Subtitle = "Collect them all",
+		Icon = "Book",
+		Spec = {
+			Desktop = { Width = 0.74, Height = 0.82, Aspect = 1.5 },
+			Tablet = { Width = 0.94, Height = 0.86, Aspect = 1.4 },
+			Phone = { Width = 0.98, Height = 1 },
+			PhonePortrait = { Width = 0.98, Height = 1 },
+		},
+	})
+	setmetatable(self, IndexWindow)
+	self.UIC = ui
+	self.Registry = registry
+	self.Cards = {}
+	self.Filter = "All"
+	self.DetailOpen = false
+	self:Build()
+	self.OnBack = function()
+		if self.DetailOpen then
+			self:CloseDetail()
+			return true
+		end
+		return false
+	end
+	return self
+end
+
+function IndexWindow:Data()
+	local dc = self.Registry and self.Registry.DataController
+	return dc and dc.all() or nil
+end
+
+function IndexWindow:Build()
+	local content = self.Content
+
+	-- top: progress and filter
+	local top = Kit.frame({ Name = "Top", Size = UDim2.fromScale(1, 0.13), Parent = content })
+	self.Top = top
+	self.CountText = Kit.text({ Name = "Count", Text = "0 / 0", Role = "Display", Scaled = true, Color = GOLD, Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(0.22, 0.62), Parent = top })
+	self.CountCaption = Kit.text({ Name = "CountCaption", Text = "FOUND", Role = "Caption", Scaled = true, Color = C.TextMuted, Position = UDim2.fromScale(0, 0.62), Size = UDim2.fromScale(0.22, 0.3), Parent = top })
+	self.Bar = Kit.progress({ Name = "Bar", Color = GOLD, Color2 = GREEN, Position = UDim2.fromScale(0.24, 0.3), Size = UDim2.fromScale(0.38, 0.22), Parent = top })
+	self.MutText = Kit.text({ Name = "Mutations", Text = "", Role = "Caption", Scaled = true, Color = C.TextMuted, Position = UDim2.fromScale(0.24, 0.58), Size = UDim2.fromScale(0.38, 0.3), Truncate = true, Parent = top })
+	self.Seg = Kit.segmented({ Name = "Filter", Options = { "All", "Found", "Missing" }, Labels = { "ALL", "FOUND", "MISSING" }, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromScale(0.36, 0.7), Parent = top })
+	self.Seg.Changed:Connect(function(value)
+		self.Filter = value
+		self:ApplyFilter()
+	end)
+
+	-- milestones
+	local miles = Kit.frame({ Name = "Milestones", Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.13), Parent = content })
+	self.Miles = miles
+	local list = Instance.new("UIListLayout")
+	list.FillDirection = Enum.FillDirection.Horizontal
+	list.Padding = UDim.new(0, 6)
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	list.Parent = miles
+	self.MileCards = {}
+	local all = IndexConfig.milestones()
+	for i, m in all do
+		self:BuildMilestone(i, m, #all)
+	end
+
+	-- the book
+	local scroll = Kit.scroll({ Name = "Book", Position = UDim2.fromScale(0, 0.29), Size = UDim2.fromScale(1, 0.71), Parent = content })
+	self.Scroll = scroll
+	Kit.padding(scroll, 2, 6, 6, 2)
+	self.GridLayout = Instance.new("UIGridLayout")
+	self.GridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	self.GridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	self.GridLayout.Parent = scroll
+	local order = 0
+	for _, id in IndexConfig.collectable() do
+		order += 1
+		self:BuildCard(id, order, scroll)
+	end
+	for _, id in IndexConfig.exclusives() do
+		order += 1
+		self:BuildCard(id, order, scroll)
+	end
+
+	-- detail panel (above everything)
+	self:BuildDetail()
+end
+
+function IndexWindow:BuildMilestone(i: number, m, count: number)
+	local card = Kit.surface({ Name = "Mile" .. m.Count, LayoutOrder = i, StrokeColor = GOLD, StrokeTransparency = 0.6, Size = UDim2.new(1 / count, -6, 1, 0), Parent = self.Miles })
+	local number = Kit.text({ Name = "Number", Text = tostring(m.Count), Role = "Display", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.05, 0.04), Size = UDim2.fromScale(0.9, 0.5), Parent = card })
+	local label = Kit.text({ Name = "State", Text = "", Role = "Caption", Scaled = true, XAlign = Enum.TextXAlignment.Center, Color = C.TextMuted, Position = UDim2.fromScale(0.04, 0.56), Size = UDim2.fromScale(0.92, 0.38), Truncate = true, Parent = card })
+	local button = Create("TextButton", { Name = "Hit", BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 5, Parent = card })
+	button.Activated:Connect(function()
+		self:ClaimMilestone(m)
+	end)
+	self.MileCards[m.Count] = { Card = card, Number = number, State = label, Milestone = m }
+end
+
+-- What a milestone pays, short enough for a small card (the full list is in IndexConfig).
+local function rewardText(m): string
+	local kinds = 0
+	local last = ""
+	if m.Cash then
+		kinds += 1
+		last = "CASH"
+	end
+	if m.Spins then
+		kinds += 1
+		last = "SPINS"
+	end
+	if m.Boost then
+		kinds += 1
+		last = "BOOST"
+	end
+	if m.Egg then
+		kinds += 1
+		last = "EGG"
+	end
+	return kinds > 1 and "GIFTS" or last
+end
+
+function IndexWindow:BuildCard(id: string, order: number, parent: Instance)
+	local def = DragonConfig.Species[id]
+	local rarity = DragonConfig.Rarities[def.Rarity]
+	local card = Kit.surface({ Name = id, LayoutOrder = order, StrokeColor = rarity.Color, StrokeTransparency = 0.55, Parent = parent })
+	local holder = Kit.frame({ Name = "Holder", Position = UDim2.fromScale(0.03, 0.03), Size = UDim2.fromScale(0.94, 0.58), Parent = card })
+	local mark = Kit.text({ Name = "Unknown", Text = "?", Role = "Display", Scaled = true, XAlign = Enum.TextXAlignment.Center, Color = C.TextDim, Size = UDim2.fromScale(1, 1), Parent = holder })
+	local name = Kit.text({ Name = "Name", Text = "???", Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.04, 0.62), Size = UDim2.fromScale(0.92, 0.17), Truncate = true, Parent = card })
+	local sub = Kit.text({ Name = "Sub", Text = string.upper(def.Rarity), Role = "Caption", Scaled = true, XAlign = Enum.TextXAlignment.Center, Color = rarity.Color, Position = UDim2.fromScale(0.04, 0.8), Size = UDim2.fromScale(0.92, 0.15), Truncate = true, Parent = card })
+	local badge = Kit.badge({ Name = "Mut", Text = "0/16", Color = C.Panel, Transparency = 0.15, Size = UDim2.fromScale(0.42, 0.1), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(0.96, 0.04), Parent = card })
+	badge.Visible = false
+	local hit = Create("TextButton", { Name = "Hit", BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 6, Parent = card })
+	hit.Activated:Connect(function()
+		self:OpenDetail(id)
+	end)
+	self.Cards[id] = { Card = card, Holder = holder, Mark = mark, Name = name, Sub = sub, Badge = badge, Species = id, Viewport = nil, Built = false, Found = false }
+end
+
+function IndexWindow:BuildDetail()
+	local overlay = self.Overlay
+	local dim = Create("TextButton", { Name = "DetailDim", BackgroundColor3 = Color3.fromRGB(8, 10, 20), BackgroundTransparency = 0.35, Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), Visible = false, ZIndex = 50, Parent = overlay })
+	dim.Activated:Connect(function()
+		self:CloseDetail()
+	end)
+	self.Dim = dim
+	local panel = Kit.surface({ Name = "DetailPanel", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.86, 0.86), StrokeColor = GOLD, StrokeTransparency = 0.3, Color = Color3.fromRGB(26, 28, 44), Transparency = 0.02, Parent = dim })
+	panel.ZIndex = 51
+	self.Panel = panel
+	local pv = Kit.frame({ Name = "PreviewBox", Position = UDim2.fromScale(0.02, 0.04), Size = UDim2.fromScale(0.4, 0.92), Parent = panel })
+	self.DetailView = { Box = pv }
+	self.DetailName = Kit.text({ Name = "Title", Text = "", Role = "Display", Scaled = true, Position = UDim2.fromScale(0.44, 0.04), Size = UDim2.fromScale(0.52, 0.13), Truncate = true, Parent = panel })
+	self.DetailSub = Kit.text({ Name = "Sub", Text = "", Role = "Label", Scaled = true, Color = C.TextMuted, Position = UDim2.fromScale(0.44, 0.17), Size = UDim2.fromScale(0.52, 0.07), Truncate = true, Parent = panel })
+	self.DetailDesc = Kit.text({ Name = "Desc", Text = "", Role = "Caption", Scaled = true, Wrapped = true, Color = C.Text, YAlign = Enum.TextYAlignment.Top, Position = UDim2.fromScale(0.44, 0.25), Size = UDim2.fromScale(0.52, 0.17), Parent = panel })
+	self.DetailStats = Kit.text({ Name = "Stats", Text = "", Role = "Caption", Scaled = true, Color = C.TextMuted, Position = UDim2.fromScale(0.44, 0.43), Size = UDim2.fromScale(0.52, 0.07), Truncate = true, Parent = panel })
+	Kit.text({ Name = "MutTitle", Text = "MUTATIONS", Role = "Heading", Scaled = true, Position = UDim2.fromScale(0.44, 0.52), Size = UDim2.fromScale(0.52, 0.07), Parent = panel })
+	local grid = Kit.frame({ Name = "Mutations", Position = UDim2.fromScale(0.44, 0.6), Size = UDim2.fromScale(0.54, 0.38), Parent = panel })
+	local layout = Instance.new("UIGridLayout")
+	layout.CellPadding = UDim2.fromOffset(4, 4)
+	layout.CellSize = UDim2.new(0.25, -4, 0.25, -4)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = grid
+	self.MutChips = {}
+	for i, m in IndexConfig.mutations() do
+		local chip = Kit.surface({ Name = m, LayoutOrder = i, StrokeColor = MutationConfig.Mutations[m].Color, StrokeTransparency = 0.5, Parent = grid })
+		local label = Kit.text({ Name = "Label", Text = "???", Role = "Micro", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.04, 0.05), Size = UDim2.fromScale(0.92, 0.9), Truncate = true, Parent = chip })
+		self.MutChips[m] = { Chip = chip, Label = label }
+	end
+	local close = Kit.button({ Name = "DetailClose", Text = "BACK", Style = "Primary", AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(0.985, 0.025), Size = UDim2.fromScale(0.14, 0.09), Parent = panel })
+	close.Instance.ZIndex = 52
+	close.Activated:Connect(function()
+		self:CloseDetail()
+	end)
+end
+
+-- ============================================================== layout
+function IndexWindow:ApplyLayout()
+	local R = Responsive
+	local phone = R.Device == "Phone"
+	local portrait = phone and R.Portrait
+	local cols = portrait and 3 or (R.Device == "Tablet" and 5 or 6)
+	local gap = R.px(8)
+	if self.GridLayout then
+		local rowH = R.px(portrait and 150 or (phone and 150 or 172))
+		self.GridLayout.CellPadding = UDim2.fromOffset(gap, gap)
+		self.GridLayout.CellSize = UDim2.new(1 / cols, -math.ceil(gap * (cols - 1) / cols) - 1, 0, rowH)
+	end
+end
+
+-- ============================================================== data
+function IndexWindow:Render()
+	local data = self:Data()
+	if not data then
+		return
+	end
+	local index = data.Index or {}
+	local total = #IndexConfig.collectable()
+	local found = IndexConfig.found(index)
+	self.CountText.Text = string.format("%d / %d", found, total)
+	self.Bar:SetValue(total > 0 and found / total or 0, false)
+	self.MutText.Text = string.format("%d MUTATIONS FOUND", IndexConfig.totalMutations(index))
+	for id, view in self.Cards do
+		local entry = index[id]
+		local def = DragonConfig.Species[id]
+		view.Found = entry ~= nil
+		view.Name.Text = entry and string.upper(def.Name) or "???"
+		view.Mark.Visible = entry == nil
+		local muts = IndexConfig.mutationsFound(index, id)
+		view.Badge.Visible = entry ~= nil and muts > 0
+		local label = view.Badge:FindFirstChild("Label")
+		if label then
+			label.Text = string.format("%d/%d", muts, #IndexConfig.mutations())
+		end
+		view.Sub.Text = entry and string.format("%s  -  x%d", string.upper(def.Rarity), entry.Count or 1) or string.upper(def.Rarity)
+		if entry and not view.Built then
+			view.Built = true
+			enqueue(function()
+				if not view.Holder.Parent then
+					return
+				end
+				local model = buildPreview(id)
+				if not model then
+					return
+				end
+				local vp, cam = viewport(view.Holder, UDim2.fromScale(1, 1), UDim2.new())
+				model.Parent = vp
+				frameCamera(cam, model, 0.66)
+				view.Viewport = vp
+				view.Mark.Visible = false
+			end)
+		end
+	end
+	local claims = data.IndexClaims or {}
+	for count, view in self.MileCards do
+		local claimed = claims[tostring(count)] == true
+		local ready = not claimed and found >= count
+		view.State.Text = claimed and "CLAIMED" or (ready and "CLAIM!" or rewardText(view.Milestone))
+		view.State.TextColor3 = claimed and GREEN or (ready and GOLD or C.TextMuted)
+		view.Number.TextColor3 = claimed and GREEN or (ready and GOLD or C.Text)
+		local stroke = view.Card:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Color = ready and GOLD or (claimed and GREEN or C.Gold)
+			stroke.Transparency = ready and 0.05 or 0.6
+			stroke.Thickness = ready and 3 or 1
+		end
+	end
+	self:ApplyFilter()
+end
+
+function IndexWindow:ApplyFilter()
+	for _, view in self.Cards do
+		local show = self.Filter == "All" or (self.Filter == "Found" and view.Found) or (self.Filter == "Missing" and not view.Found)
+		view.Card.Visible = show
+	end
+end
+
+function IndexWindow:ClaimMilestone(m)
+	local data = self:Data()
+	if not data then
+		return
+	end
+	local claimed = data.IndexClaims and data.IndexClaims[tostring(m.Count)]
+	if claimed or IndexConfig.found(data.Index) < m.Count then
+		self.UIC.Notify("info", string.format("Find %d different dragons to take this reward.", m.Count))
+		return
+	end
+	task.spawn(function()
+		local res = Net.request("Index", "Claim", { Count = m.Count })
+		if not res.ok then
+			self.UIC.HandleResult(res)
+		end
+		task.wait(0.3)
+		self:Render()
+	end)
+end
+
+-- ============================================================== detail
+function IndexWindow:OpenDetail(id: string)
+	local data = self:Data()
+	local index = data and data.Index or {}
+	local entry = index[id]
+	local def = DragonConfig.Species[id]
+	local rarity = DragonConfig.Rarities[def.Rarity]
+	self.DetailOpen = true
+	self.Dim.Visible = true
+	self.DetailName.Text = entry and string.upper(def.Name) or "???"
+	self.DetailSub.Text = entry and string.format("%s  -  FOUND x%d  -  FIRST %s", string.upper(def.Rarity), entry.Count or 1, dateText(entry.First)) or (string.upper(def.Rarity) .. "  -  NOT FOUND YET")
+	self.DetailSub.TextColor3 = rarity.Color
+	self.DetailDesc.Text = entry and def.Description or "Hatch eggs to find this dragon."
+	self.DetailStats.Text = entry and string.format("BASE  SPEED %s   FLIGHT %s   INCOME %s", Format.abbreviate(def.Speed), Format.abbreviate(def.FlightSpeed), Format.perSecond(def.Income)) or ""
+	for m, chip in self.MutChips do
+		local seen = index[id .. ":" .. m] ~= nil
+		chip.Label.Text = seen and string.upper(MutationConfig.Mutations[m].Name) or "???"
+		chip.Label.TextColor3 = seen and MutationConfig.Mutations[m].Color or C.TextDim
+	end
+	-- the big preview
+	local box = self.DetailView.Box
+	if self.DetailView.Viewport then
+		self.DetailView.Viewport:Destroy()
+		self.DetailView.Viewport = nil
+	end
+	if entry then
+		enqueue(function()
+			if not self.DetailOpen then
+				return
+			end
+			local model = buildPreview(id)
+			if not model then
+				return
+			end
+			local vp, cam = viewport(box, UDim2.fromScale(1, 1), UDim2.new())
+			vp.ZIndex = 52
+			model.Parent = vp
+			frameCamera(cam, model, 0.62)
+			self.DetailView.Viewport = vp
+		end)
+	end
+	self.DetailView.Species = id
+end
+
+function IndexWindow:CloseDetail()
+	self.DetailOpen = false
+	self.Dim.Visible = false
+	if self.DetailView.Viewport then
+		self.DetailView.Viewport:Destroy()
+		self.DetailView.Viewport = nil
+	end
+end
+
+function IndexWindow:OnOpen()
+	self:CloseDetail()
+	self:Render()
+end
+
+function IndexWindow:OnHidden()
+	self:CloseDetail()
+end
+
+return IndexWindow
+]]></ProtectedString>
+						</Properties>
+					</Item>
+					<Item class="ModuleScript" referent="RBX000157">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -43930,7 +45171,7 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000151">
+					<Item class="ModuleScript" referent="RBX000158">
 						<Properties>
 							<string name="Name">RaceWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -44396,7 +45637,7 @@ return RaceWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000152">
+					<Item class="ModuleScript" referent="RBX000159">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -44612,7 +45853,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000153">
+					<Item class="ModuleScript" referent="RBX000160">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45113,7 +46354,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000154">
+					<Item class="ModuleScript" referent="RBX000161">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45445,7 +46686,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000155">
+					<Item class="ModuleScript" referent="RBX000162">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45615,7 +46856,7 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000156">
+					<Item class="ModuleScript" referent="RBX000163">
 						<Properties>
 							<string name="Name">TreeWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -46160,7 +47401,7 @@ return TreeWindow
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000157">
+	<Item class="Workspace" referent="RBX000164">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -46169,7 +47410,7 @@ return TreeWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000158">
+		<Item class="Terrain" referent="RBX000165">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -46181,7 +47422,7 @@ return TreeWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000159">
+	<Item class="Lighting" referent="RBX000166">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -46193,18 +47434,18 @@ return TreeWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000160">
+	<Item class="SoundService" referent="RBX000167">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000161">
+	<Item class="StarterGui" referent="RBX000168">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000162">
+	<Item class="Players" referent="RBX000169">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>
