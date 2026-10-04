@@ -30,7 +30,7 @@ end
 
 -- Visible window of `g`: the intersection of EVERY clipping ancestor (nested scroll frames
 -- clip each other). nil when nothing clips it; width/height <= 0 when nothing is visible.
-local function clipRect(g: GuiObject, origin: Vector2, k: number): (number, number, number, number)?
+local function clipRect(g: GuiObject, origin: Vector2, k: number): (number?, number?, number?, number?)
 	local x0, y0, x1, y1 = -math.huge, -math.huge, math.huge, math.huge
 	local found = false
 	local node = g.Parent

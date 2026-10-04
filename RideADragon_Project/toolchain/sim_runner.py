@@ -51,10 +51,23 @@ def _haven_cache():
     return _HAVEN[0]
 
 
+def find_node(node, name):
+    """First node called `name` in a build_place tree (for patch_tree hooks)."""
+    if node.name == name:
+        return node
+    for ch in node.children:
+        hit = find_node(ch, name)
+        if hit:
+            return hit
+    return None
+
+
 def boot(extra_server=None, extra_client=None, instant_tweens=True, verbose=False, datastore=None,
-         signal_behavior="Deferred", project=PROJECT, inject_terrain=True):
+         signal_behavior="Deferred", project=PROJECT, inject_terrain=True, patch_tree=None):
     sim = Sim(verbose=verbose, instant_tweens=instant_tweens, datastore=datastore, signal_behavior=signal_behavior)
     name, tree = build_place.load_project(project)
+    if patch_tree:
+        patch_tree(tree)  # tests: swap script sources (fault injection)
     build_place.load_into_sim(sim, tree)
     if inject_terrain:
         # Dragon Haven terrain as the exact analytic column function (the Luau

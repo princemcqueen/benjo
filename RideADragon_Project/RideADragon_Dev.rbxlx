@@ -9544,9 +9544,14 @@ gui:Destroy()
 	Server bootstrap. Requires every service in dependency order, runs Init
 	(synchronous wiring) for all of them, opens the network layer, then Start
 	(loops and listeners).
+
+	Every step runs in its own protected call: a service that fails is reported (Output, and
+	in Studio the ReplicatedStorage attributes ServerBootErrors / ServerErrors that the client's
+	Diagnostics panel shows) and the other services keep running.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
 
 local ServicesFolder = script.Parent:WaitForChild("Services")
@@ -9579,27 +9584,79 @@ local ORDER = {
 	"DevService",
 }
 
+-- ============================================================== failures
+local bootErrors: { string } = {}
+
+local function try(stage: string, name: string, fn: any, ...: any): (boolean, any)
+	local ok, result = xpcall(fn, function(e)
+		return tostring(e) .. "\n" .. debug.traceback("", 2)
+	end, ...)
+	if not ok then
+		local text = string.format("%s %s: %s", stage, name, tostring(result))
+		table.insert(bootErrors, text)
+		warn("[Boot] " .. text)
+		return false, nil
+	end
+	return true, result
+end
+
 local services = {}
 for _, name in ORDER do
 	local module = ServicesFolder:FindFirstChild(name)
 	if module then
-		services[name] = require(module)
+		local ok, service = try("require", name, require, module)
+		if ok then
+			services[name] = service
+		end
 	end
 end
 
 for _, name in ORDER do
 	local service = services[name]
 	if service and service.Init then
-		service.Init(services)
+		try("Init", name, service.Init, services)
 	end
 end
 
-Net.start()
+try("start", "Net", Net.start)
 
 for _, name in ORDER do
 	local service = services[name]
 	if service and service.Start then
-		task.spawn(service.Start)
+		task.spawn(try, "Start", name, service.Start)
+	end
+end
+
+-- Studio: publish the errors so the client can show them on screen (see Diagnostics)
+if RunService:IsStudio() then
+	if #bootErrors > 0 then
+		ReplicatedStorage:SetAttribute("ServerBootErrors", table.concat(bootErrors, "\n---\n"))
+	end
+	local okContext, scriptContext = pcall(function()
+		return game:GetService("ScriptContext")
+	end)
+	if okContext and scriptContext then
+		local seen: { [string]: boolean } = {}
+		local list: { string } = {}
+		local lastPublish = 0
+		pcall(function()
+			scriptContext.Error:Connect(function(message, _trace, source)
+				local text = (source and (source.Name .. ": ") or "") .. tostring(message)
+				local key = string.match(text, "^[^\n]*") or text
+				if seen[key] then
+					return
+				end
+				seen[key] = true
+				table.insert(list, text)
+				if #list > 8 then
+					table.remove(list, 1)
+				end
+				if os.clock() - lastPublish > 1 or #list <= 2 then
+					lastPublish = os.clock()
+					ReplicatedStorage:SetAttribute("ServerErrors", table.concat(list, "\n---\n"))
+				end
+			end)
+		end)
 	end
 end
 
@@ -29879,16 +29936,300 @@ return WildEggController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="LocalScript" referent="RBX000115">
+			<Item class="ModuleScript" referent="RBX000115">
+				<Properties>
+					<string name="Name">Diagnostics</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	Diagnostics
+	Test-build helper: script errors show up ON SCREEN (Roblox Studio only) so a tester can
+	take a screenshot instead of digging in the Output window. Nothing is drawn while there
+	is no error, and nothing at all in a live game.
+
+	  Diagnostics.report(stage, name, err)   a failed boot step (Main.client): listed + warn()
+	  Diagnostics.start()                    also lists client runtime errors (ScriptContext.Error)
+	                                         and the errors the server published
+	                                         (ReplicatedStorage attributes ServerBootErrors /
+	                                         ServerErrors, written by Main.server)
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Diagnostics = {}
+
+local MAX_ROWS = 7
+local MAX_LENGTH = 230
+
+local entries: { { Key: string, Text: string, Count: number, Source: string } } = {}
+local byKey: { [string]: any } = {}
+local gui: ScreenGui? = nil
+local body: Frame? = nil
+local header: TextLabel? = nil
+local dirty = false
+local started = false
+local hidden = false
+
+local function enabled(): boolean
+	return RunService:IsStudio()
+end
+
+local function firstLine(text: string): string
+	local line = string.match(text, "^[^\n]*") or text
+	if #line > MAX_LENGTH then
+		line = string.sub(line, 1, MAX_LENGTH) .. "..."
+	end
+	return line
+end
+
+local function add(source: string, text: string)
+	local line = firstLine(text)
+	local key = source .. "|" .. line
+	local found = byKey[key]
+	if found then
+		found.Count += 1
+	else
+		found = { Key = key, Text = line, Count = 1, Source = source }
+		byKey[key] = found
+		table.insert(entries, found)
+		if #entries > 40 then
+			local old = table.remove(entries, 1)
+			byKey[old.Key] = nil
+		end
+	end
+	dirty = true
+end
+
+-- ============================================================== panel
+local function build()
+	if gui and gui.Parent then
+		return
+	end
+	local player = Players.LocalPlayer
+	local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
+	if not playerGui then
+		return
+	end
+	local screen = Instance.new("ScreenGui")
+	screen.Name = "Diagnostics"
+	screen.ResetOnSpawn = false
+	screen.IgnoreGuiInset = true
+	screen.DisplayOrder = 1000
+	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screen.Parent = playerGui
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.AnchorPoint = Vector2.new(0, 1)
+	panel.Position = UDim2.new(0, 8, 1, -8)
+	panel.Size = UDim2.new(0.62, 0, 0, 0)
+	panel.AutomaticSize = Enum.AutomaticSize.Y
+	panel.BackgroundColor3 = Color3.fromRGB(40, 8, 12)
+	panel.BackgroundTransparency = 0.12
+	panel.BorderSizePixel = 0
+	panel.Parent = screen
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = panel
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 90, 90)
+	stroke.Thickness = 2
+	stroke.Parent = panel
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop, pad.PaddingBottom = UDim.new(0, 6), UDim.new(0, 6)
+	pad.PaddingLeft, pad.PaddingRight = UDim.new(0, 10), UDim.new(0, 10)
+	pad.Parent = panel
+	local list = Instance.new("UIListLayout")
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Padding = UDim.new(0, 3)
+	list.Parent = panel
+	local head = Instance.new("TextButton")
+	head.Name = "Header"
+	head.LayoutOrder = 0
+	head.BackgroundTransparency = 1
+	head.AutoButtonColor = false
+	head.Size = UDim2.new(1, 0, 0, 20)
+	head.Font = Enum.Font.GothamBlack
+	head.TextSize = 15
+	head.TextColor3 = Color3.fromRGB(255, 140, 140)
+	head.TextXAlignment = Enum.TextXAlignment.Left
+	head.Text = ""
+	head.Parent = panel
+	head.Activated:Connect(function()
+		-- tap the header: clear the list
+		table.clear(entries)
+		table.clear(byKey)
+		dirty = true
+	end)
+	local rows = Instance.new("Frame")
+	rows.Name = "Rows"
+	rows.LayoutOrder = 1
+	rows.BackgroundTransparency = 1
+	rows.Size = UDim2.new(1, 0, 0, 0)
+	rows.AutomaticSize = Enum.AutomaticSize.Y
+	rows.Parent = panel
+	local rowList = Instance.new("UIListLayout")
+	rowList.SortOrder = Enum.SortOrder.LayoutOrder
+	rowList.Padding = UDim.new(0, 2)
+	rowList.Parent = rows
+	gui, body, header = screen, rows, head
+end
+
+local function refresh()
+	dirty = false
+	if not enabled() then
+		return
+	end
+	if #entries == 0 then
+		if gui then
+			gui.Enabled = false
+		end
+		return
+	end
+	build()
+	if not gui or not body or not header then
+		return
+	end
+	gui.Enabled = not hidden
+	local total = 0
+	for _, e in entries do
+		total += e.Count
+	end
+	header.Text = string.format("SCRIPT ERRORS (%d) - take a screenshot and send it  |  tap here to clear", total)
+	for _, child in body:GetChildren() do
+		if child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+	local first = math.max(1, #entries - MAX_ROWS + 1)
+	for i = first, #entries do
+		local e = entries[i]
+		local row = Instance.new("TextLabel")
+		row.Name = "Row" .. i
+		row.LayoutOrder = i
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, 0)
+		row.AutomaticSize = Enum.AutomaticSize.Y
+		row.Font = Enum.Font.Code
+		row.TextSize = 13
+		row.TextWrapped = true
+		row.TextXAlignment = Enum.TextXAlignment.Left
+		row.TextYAlignment = Enum.TextYAlignment.Top
+		row.TextColor3 = e.Source == "server" and Color3.fromRGB(255, 220, 140) or Color3.fromRGB(255, 255, 255)
+		row.Text = string.format("[%s]%s %s", e.Source, e.Count > 1 and (" x" .. e.Count) or "", e.Text)
+		row.Parent = body
+	end
+end
+
+-- ============================================================== api
+function Diagnostics.report(stage: string, name: string, err: any)
+	add("client", string.format("%s %s: %s", stage, name, tostring(err)))
+end
+
+-- Errors collected so far (for tests / tools).
+function Diagnostics.count(): number
+	local n = 0
+	for _, e in entries do
+		n += e.Count
+	end
+	return n
+end
+
+function Diagnostics.entries()
+	return entries
+end
+
+function Diagnostics.start()
+	if started then
+		return
+	end
+	started = true
+	-- client runtime errors
+	local ok, scriptContext = pcall(function()
+		return game:GetService("ScriptContext")
+	end)
+	if ok and scriptContext then
+		pcall(function()
+			scriptContext.Error:Connect(function(message, _trace, source)
+				add("client", (source and (source.Name .. ": ") or "") .. tostring(message))
+			end)
+		end)
+	end
+	-- what the server reports
+	local function readServer()
+		for _, attr in { "ServerBootErrors", "ServerErrors" } do
+			local text = ReplicatedStorage:GetAttribute(attr)
+			if type(text) == "string" and text ~= "" then
+				for chunk in string.gmatch(text .. "\n---\n", "(.-)\n%-%-%-\n") do
+					if chunk ~= "" then
+						local key = "server|" .. firstLine(chunk)
+						if not byKey[key] then
+							add("server", chunk)
+						end
+					end
+				end
+			end
+		end
+	end
+	readServer()
+	for _, attr in { "ServerBootErrors", "ServerErrors" } do
+		ReplicatedStorage:GetAttributeChangedSignal(attr):Connect(readServer)
+	end
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			if dirty then
+				local fine, err = pcall(refresh)
+				if not fine then
+					warn("[Diagnostics] " .. tostring(err))
+				end
+			end
+		end
+	end)
+	-- first paint (boot errors reported before start())
+	pcall(refresh)
+end
+
+return Diagnostics
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="LocalScript" referent="RBX000116">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	Client bootstrap. Requires controllers in dependency order, wires the UI
 	(windows + HUD), then starts everything.
+
+	Every step runs in its own protected call: a controller or window that fails is reported
+	(Output + the red error panel of Diagnostics in Studio) and everything else keeps working -
+	one broken script must never take the whole client down.
 ]]
 
 local Controllers = script.Parent:WaitForChild("Controllers")
 local UI = script.Parent:WaitForChild("UI")
+
+local okDiagnostics, Diagnostics = pcall(function()
+	return require(script.Parent:WaitForChild("Diagnostics"))
+end)
+
+local function fail(stage: string, name: string, err: any)
+	warn(string.format("[Boot] %s %s failed: %s", stage, name, tostring(err)))
+	if okDiagnostics then
+		pcall(Diagnostics.report, stage, name, err)
+	end
+end
+
+-- Runs fn(...) protected. Returns ok, first result.
+local function try(stage: string, name: string, fn: any, ...: any): (boolean, any)
+	local ok, result = xpcall(fn, function(e)
+		return tostring(e) .. "\n" .. debug.traceback("", 2)
+	end, ...)
+	if not ok then
+		fail(stage, name, result)
+		return false, nil
+	end
+	return true, result
+end
 
 local ORDER = {
 	"DataController",
@@ -29923,53 +30264,74 @@ local registry = {}
 for _, name in ORDER do
 	local module = Controllers:FindFirstChild(name)
 	if module then
-		registry[name] = require(module)
+		local ok, controller = try("require", name, require, module)
+		if ok then
+			registry[name] = controller
+		end
 	end
 end
 
 for _, name in ORDER do
 	local controller = registry[name]
 	if controller and controller.Init then
-		controller.Init(registry)
+		try("Init", name, controller.Init, registry)
 	end
 end
 
 -- Windows (built lazily on first open)
 local uic = registry.UIController
 local Windows = UI:WaitForChild("Windows")
-for _, module in Windows:GetChildren() do
-	if module:IsA("ModuleScript") then
-		local name = string.gsub(module.Name, "Window$", "")
-		uic.RegisterWindow(name, require(module))
+if uic then
+	for _, module in Windows:GetChildren() do
+		if module:IsA("ModuleScript") then
+			local name = string.gsub(module.Name, "Window$", "")
+			local ok, window = try("require", module.Name, require, module)
+			if ok then
+				try("RegisterWindow", module.Name, uic.RegisterWindow, name, window)
+			end
+		end
 	end
 end
 
 -- HUD
-local Hud = require(UI:WaitForChild("Hud"):WaitForChild("Hud"))
-registry.Hud = Hud.new(uic, registry)
+local okHud, Hud = try("require", "Hud", function()
+	return require(UI:WaitForChild("Hud"):WaitForChild("Hud"))
+end)
+if okHud and Hud and uic then
+	local ok, hud = try("new", "Hud", Hud.new, uic, registry)
+	if ok then
+		registry.Hud = hud
+	end
+end
 
 -- Developer UI test harness (Studio / owner only)
-require(UI:WaitForChild("Dev"):WaitForChild("UILab")).Init(uic, registry)
+try("Init", "UILab", function()
+	require(UI:WaitForChild("Dev"):WaitForChild("UILab")).Init(uic, registry)
+end)
 
 for _, name in ORDER do
 	local controller = registry[name]
 	if controller and controller.Start then
-		task.spawn(controller.Start)
+		task.spawn(try, "Start", name, controller.Start)
 	end
+end
+
+if okDiagnostics then
+	pcall(Diagnostics.start)
 end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000116">
+			<Item class="Folder" referent="RBX000117">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000117">
+				<Item class="Folder" referent="RBX000118">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000118">
+				<Item class="ModuleScript" referent="RBX000119">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30049,11 +30411,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000119">
+				<Item class="Folder" referent="RBX000120">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000120">
+					<Item class="ModuleScript" referent="RBX000121">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -30088,7 +30450,7 @@ end
 
 -- Visible window of `g`: the intersection of EVERY clipping ancestor (nested scroll frames
 -- clip each other). nil when nothing clips it; width/height <= 0 when nothing is visible.
-local function clipRect(g: GuiObject, origin: Vector2, k: number): (number, number, number, number)?
+local function clipRect(g: GuiObject, origin: Vector2, k: number): (number?, number?, number?, number?)
 	local x0, y0, x1, y1 = -math.huge, -math.huge, math.huge, math.huge
 	local found = false
 	local node = g.Parent
@@ -30220,7 +30582,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000121">
+					<Item class="ModuleScript" referent="RBX000122">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -30569,7 +30931,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000122">
+				<Item class="ModuleScript" referent="RBX000123">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30635,11 +30997,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000123">
+				<Item class="Folder" referent="RBX000124">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000124">
+					<Item class="ModuleScript" referent="RBX000125">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -31797,7 +32159,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000125">
+					<Item class="ModuleScript" referent="RBX000126">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -32136,7 +32498,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000126">
+				<Item class="ModuleScript" referent="RBX000127">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32534,7 +32896,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000127">
+				<Item class="ModuleScript" referent="RBX000128">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -33868,11 +34230,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000128">
+				<Item class="Folder" referent="RBX000129">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000129">
+					<Item class="ModuleScript" referent="RBX000130">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -34089,7 +34451,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000130">
+					<Item class="ModuleScript" referent="RBX000131">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -34295,7 +34657,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000131">
+					<Item class="ModuleScript" referent="RBX000132">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -34384,7 +34746,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000132">
+				<Item class="ModuleScript" referent="RBX000133">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34642,7 +35004,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000133">
+				<Item class="ModuleScript" referent="RBX000134">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34772,7 +35134,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000134">
+				<Item class="ModuleScript" referent="RBX000135">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34948,11 +35310,11 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000135">
+				<Item class="Folder" referent="RBX000136">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000136">
+					<Item class="ModuleScript" referent="RBX000137">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -35244,7 +35606,7 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000137">
+					<Item class="ModuleScript" referent="RBX000138">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -36574,7 +36936,7 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000138">
+					<Item class="ModuleScript" referent="RBX000139">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -36790,7 +37152,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000139">
+					<Item class="ModuleScript" referent="RBX000140">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37236,7 +37598,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000140">
+					<Item class="ModuleScript" referent="RBX000141">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37568,7 +37930,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000141">
+					<Item class="ModuleScript" referent="RBX000142">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37737,7 +38099,7 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000142">
+					<Item class="ModuleScript" referent="RBX000143">
 						<Properties>
 							<string name="Name">TreeWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -38282,7 +38644,7 @@ return TreeWindow
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000143">
+	<Item class="Workspace" referent="RBX000144">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -38291,7 +38653,7 @@ return TreeWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000144">
+		<Item class="Terrain" referent="RBX000145">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -38303,7 +38665,7 @@ return TreeWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000145">
+	<Item class="Lighting" referent="RBX000146">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -38315,18 +38677,18 @@ return TreeWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000146">
+	<Item class="SoundService" referent="RBX000147">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000147">
+	<Item class="StarterGui" referent="RBX000148">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000148">
+	<Item class="Players" referent="RBX000149">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>

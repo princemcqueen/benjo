@@ -608,9 +608,12 @@ class Parser:
             break
 
     def parse_simple_type_with_suffix(self):
-        self.parse_simple_type()
-        while self.accept_op("?"):
-            pass
+        kind = self.parse_simple_type()
+        while self.is_op("?"):
+            if kind == "pack":
+                # real Luau: '(number, number)?' is a syntax error (a pack cannot be optional)
+                self.err("Expected identifier when parsing expression, got '?' (a type pack cannot be optional)")
+            self.p += 1
 
     def parse_simple_type(self):
         t = self.tok
@@ -640,8 +643,7 @@ class Parser:
                 self.parse_table_type()
                 return
             if t.value == "(" or t.value == "<":
-                self.parse_function_or_paren_type()
-                return
+                return self.parse_function_or_paren_type()
         self.err("type expected")
 
     def parse_type_params(self):
@@ -664,11 +666,15 @@ class Parser:
         self.expect_op(">")
 
     def parse_function_or_paren_type(self, pack_ok=False):
-        if self.accept_op("<"):
+        # returns "pack" for a bare '(A, B)' / '()' list (not a function type, not a grouped type)
+        generic = self.accept_op("<")
+        if generic:
             self.parse_generic_list()
         self.expect_op("(")
+        count = 0
         if not self.is_op(")"):
             while True:
+                count += 1
                 if self.accept_op("..."):
                     self.parse_type()
                 elif self.tok.kind == "name" and self.peek().kind == "op" and self.peek().value == ":":
@@ -683,6 +689,8 @@ class Parser:
         self.expect_op(")")
         if self.accept_op("->"):
             self.parse_return_type()
+            return "function"
+        return "pack" if count != 1 else "type"
 
     def parse_table_type(self):
         self.expect_op("{")
