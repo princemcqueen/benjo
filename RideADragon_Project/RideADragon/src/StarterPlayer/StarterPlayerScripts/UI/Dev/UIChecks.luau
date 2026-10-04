@@ -108,7 +108,7 @@ function UIChecks.run(roots: { Frame }, opts: { [string]: any })
 						add("ClippedText", string.format("%s text '%s' does not fit (%dx%d)", name, string.sub(text, 1, 24), w, h))
 					end
 					local size = d.TextScaled and d.TextBounds.Y or d.TextSize
-					if size > 0 and size < 9 then
+					if size > 0 and size < 9 and not string.find(name, ".Icon_", 1, true) then -- icon glyphs are graphics
 						add("TinyText", string.format("%s text size %d px", name, size))
 					end
 				end

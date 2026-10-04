@@ -24,8 +24,8 @@
 	  BoostRegen     x(1+b) boost refill speed                    Locomotion (client stats)
 	  RunSpeed       x(1+b) ground run speed                      MountService / DragonController
 	  HatchSpeed     eggs incubate b faster                       EggService.Place
-	  EggBag         +b egg bag slots                             EggService (+ UI)
-	  EggMagnet      x(1+b) egg pickup range                      EggController / EggService
+	  EggBag         +b egg bag slots                             EggService (+ UI)  (Egg Hunter pass: +3 more)
+	  EggMagnet      x(1+b) egg pickup range                      EggReach.bonus (+ boost + pass)
 	  EggRespawn     new eggs appear b faster                     EggService
 	  BondGrowth     x(1+b) bond points                           BondService
 	  QuickFeathers  bond ability cooldowns -b                    BondService / BondController
@@ -33,6 +33,7 @@
 ]]
 
 local EconomyConfig = require(script.Parent:WaitForChild("EconomyConfig"))
+local MonetizationConfig = require(script.Parent:WaitForChild("MonetizationConfig"))
 
 local TreeConfig = {}
 
@@ -139,10 +140,13 @@ function TreeConfig.bonus(data, id: string): number
 	return branch.Levels[math.min(lvl, #branch.Levels)].Bonus
 end
 
--- Egg bag capacity: Egg Storage upgrade + Deep Pockets (the one formula everybody uses).
+-- Egg bag capacity: Egg Storage upgrade + Deep Pockets + pass slots (Egg Hunter) - the one
+-- formula everybody uses.
 function TreeConfig.eggCapacity(data): number
 	local level = data and data.Upgrades and tonumber(data.Upgrades.EggStorage) or 0
-	return EconomyConfig.upgradeValue("EggStorage", level) + math.floor(TreeConfig.bonus(data, "EggBag") + 0.5)
+	return EconomyConfig.upgradeValue("EggStorage", level)
+		+ math.floor(TreeConfig.bonus(data, "EggBag") + 0.5)
+		+ MonetizationConfig.passSlots(data)
 end
 
 -- Seconds of the dragon's income refunded when it is released (Gentle Goodbye).

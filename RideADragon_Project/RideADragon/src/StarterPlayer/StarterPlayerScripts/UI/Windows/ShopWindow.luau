@@ -1,7 +1,8 @@
 --[[
 	ShopWindow
-	ROBUX tab: the Owner Dragon game pass (featured, 3D preview) + potions and
-	cash packs (developer products). UPGRADES tab: cash upgrades (Forge).
+	ROBUX tab: the exclusive dragon game passes (featured, 3D preview), the Egg Hunter pass
+	(featured, with an egg), then POTIONS, EGG HUNTING and CASH & SPINS (developer products).
+	UPGRADES tab: cash upgrades (Forge).
 
 	Buying: real items prompt MarketplaceService; items whose Id is still 0
 	are free TEST purchases in Studio (server grants them), "coming soon"
@@ -21,6 +22,7 @@ local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("DragonVisual"))
+local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
 
 local UI = script.Parent.Parent
@@ -115,6 +117,7 @@ end
 -- ============================================================== robux tab
 function ShopWindow:BuildRobux(page: Instance)
 	local scroll = Kit.scroll({ Name = "Scroll", Size = UDim2.fromScale(1, 1), Parent = page })
+	self.RobuxScroll = scroll
 	Kit.padding(scroll, 2, 10, 6, 2)
 	Kit.list(scroll, "V", 12, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
 
@@ -125,61 +128,43 @@ function ShopWindow:BuildRobux(page: Instance)
 		self:BuildPassCard(scroll, itemId, order)
 	end
 
-	-- potions & packs
-	local header = Kit.text({ Name = "PotionsHeader", Text = "POTIONS & PACKS", Role = "Heading", Color = C.Gold, LayoutOrder = 20, Parent = scroll })
-	Responsive.bind(header, "Size", function(R)
-		return UDim2.new(1, 0, 0, R.px(26))
-	end)
-	local gridHost = Kit.frame({ Name = "Products", LayoutOrder = 21, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.fromScale(1, 0), Parent = scroll })
-	local grid = Instance.new("UIGridLayout")
-	grid.SortOrder = Enum.SortOrder.LayoutOrder
-	grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	grid.Parent = gridHost
-	Responsive.bind(grid, "CellSize", function(R)
-		local cols = R.Device == "Phone" and (R.Portrait and 2 or 3) or 4
-		return UDim2.new(1 / cols, -R.px(10), 0, R.px(R.Device == "Phone" and 200 or 196))
-	end)
-	Responsive.bind(grid, "CellPadding", function(R)
-		return UDim2.fromOffset(R.px(10), R.px(10))
-	end)
-	for i, itemId in MonetizationConfig.ProductOrder do
-		local def = MonetizationConfig.Products[itemId]
-		local cell = Kit.surface({ Name = itemId, LayoutOrder = i, StrokeColor = def.Color, StrokeTransparency = 0.5, Parent = gridHost })
-		iconDisc(cell, def.Icon, def.Color, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.06), Size = UDim2.fromScale(0.3, 0.3) })
-		Kit.text({ Name = "Name", Text = string.upper(def.Name), Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.05, 0.38), Size = UDim2.fromScale(0.9, 0.12), Parent = cell })
-		Kit.text({
-			Name = "Desc",
-			Text = def.Description,
-			Role = "Caption",
-			Color = C.TextMuted,
-			Wrapped = true,
-			Scaled = true,
-			XAlign = Enum.TextXAlignment.Center,
-			Position = UDim2.fromScale(0.06, 0.51),
-			Size = UDim2.fromScale(0.88, 0.22),
-			Parent = cell,
-		})
-		local b = Kit.button({
-			Name = "Buy",
-			Text = robux(def.Price),
-			Style = "Success",
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.fromScale(0.5, 0.95),
-			Size = UDim2.fromScale(0.8, 0.17),
-			Parent = cell,
-		})
-		b.Activated:Connect(function()
-			self:Buy(itemId)
-		end)
+	-- products, one header + grid per section (potions, egg hunting, cash and spins)
+	self.Cards = self.Cards or {}
+	local order = 20
+	for _, section in MonetizationConfig.Sections do
+		local ids = MonetizationConfig.sectionProducts(section.Id)
+		if #ids > 0 then
+			local header = Kit.text({ Name = section.Id .. "Header", Text = section.Title, Role = "Heading", Color = C.Gold, LayoutOrder = order, Parent = scroll })
+			Responsive.bind(header, "Size", function(R)
+				return UDim2.new(1, 0, 0, R.px(26))
+			end)
+			self.Cards[section.Id] = header
+			local gridHost = Kit.frame({ Name = section.Id, LayoutOrder = order + 1, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.fromScale(1, 0), Parent = scroll })
+			local grid = Instance.new("UIGridLayout")
+			grid.SortOrder = Enum.SortOrder.LayoutOrder
+			grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			grid.Parent = gridHost
+			Responsive.bind(grid, "CellSize", function(R)
+				local cols = R.Device == "Phone" and (R.Portrait and 2 or 3) or 4
+				return UDim2.new(1 / cols, -R.px(10), 0, R.px(R.Device == "Phone" and 200 or 196))
+			end)
+			Responsive.bind(grid, "CellPadding", function(R)
+				return UDim2.fromOffset(R.px(10), R.px(10))
+			end)
+			for i, itemId in ids do
+				self:BuildProductCell(gridHost, itemId, i)
+			end
+			order += 2
+		end
 	end
 	local note = Kit.text({
 		Name = "Note",
-		Text = "Potions stack time when bought again. Level and Mutation potions apply to your equipped dragon.",
+		Text = "Boosts stack time when bought again. Level and Mutation potions apply to your equipped dragon.",
 		Role = "Caption",
 		Color = C.TextDim,
 		Wrapped = true,
 		XAlign = Enum.TextXAlignment.Center,
-		LayoutOrder = 22,
+		LayoutOrder = order,
 		Parent = scroll,
 	})
 	Responsive.bind(note, "Size", function(R)
@@ -187,18 +172,54 @@ function ShopWindow:BuildRobux(page: Instance)
 	end)
 end
 
+function ShopWindow:BuildProductCell(parent: Instance, itemId: string, order: number)
+	local def = MonetizationConfig.Products[itemId]
+	local cell = Kit.surface({ Name = itemId, LayoutOrder = order, StrokeColor = def.Color, StrokeTransparency = 0.5, Parent = parent })
+	iconDisc(cell, def.Icon, def.Color, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.06), Size = UDim2.fromScale(0.3, 0.3) })
+	Kit.text({ Name = "Name", Text = string.upper(def.Name), Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.05, 0.38), Size = UDim2.fromScale(0.9, 0.12), Parent = cell })
+	Kit.text({
+		Name = "Desc",
+		Text = def.Description,
+		Role = "Caption",
+		Color = C.TextMuted,
+		Wrapped = true,
+		Scaled = true,
+		XAlign = Enum.TextXAlignment.Center,
+		Position = UDim2.fromScale(0.06, 0.51),
+		Size = UDim2.fromScale(0.88, 0.22),
+		Parent = cell,
+	})
+	local b = Kit.button({
+		Name = "Buy",
+		Text = robux(def.Price),
+		Style = "Success",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.fromScale(0.5, 0.95),
+		Size = UDim2.fromScale(0.8, 0.17),
+		Parent = cell,
+	})
+	b.Activated:Connect(function()
+		self:Buy(itemId)
+	end)
+	self.Cards[itemId] = cell
+end
+
 function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: number)
 	local pass = MonetizationConfig.GamePasses[itemId]
 	local rarity = DragonConfig.Rarities.Exclusive
+	local tool = pass.Kind == "Tool" -- a toolkit instead of a dragon (the preview is an egg)
 	local top = (pass.Price or 0) >= 5000
-	local accent = top and Color3.fromRGB(255, 205, 60) or rarity.Color
-	local card = Kit.surface({ Name = itemId, LayoutOrder = order, StrokeColor = accent, StrokeTransparency = 0.1, Color = Color3.fromRGB(34, 20, 26), Transparency = 0.02, Parent = parent })
+	local accent = pass.Accent or (top and Color3.fromRGB(255, 205, 60) or rarity.Color)
+	self.Cards = self.Cards or {}
+	local card = Kit.surface({ Name = itemId, LayoutOrder = order, StrokeColor = accent, StrokeTransparency = 0.1, Color = tool and Color3.fromRGB(30, 24, 18) or Color3.fromRGB(34, 20, 26), Transparency = 0.02, Parent = parent })
+	self.Cards[itemId] = card
 	Responsive.bind(card, "Size", function(R)
 		return UDim2.new(1, 0, 0, R.px(R.Device == "Phone" and (R.Portrait and 330 or 230) or 250))
 	end)
 	Create("UIGradient", {
 		Rotation = 0,
-		Color = top and ColorSequence.new(Color3.fromRGB(110, 70, 20), Color3.fromRGB(40, 24, 60)) or ColorSequence.new(Color3.fromRGB(90, 30, 30), Color3.fromRGB(30, 22, 40)),
+		Color = tool and ColorSequence.new(Color3.fromRGB(110, 60, 14), Color3.fromRGB(30, 26, 46))
+			or (top and ColorSequence.new(Color3.fromRGB(110, 70, 20), Color3.fromRGB(40, 24, 60)) or ColorSequence.new(Color3.fromRGB(90, 30, 30), Color3.fromRGB(30, 22, 40))),
 		Parent = card,
 	})
 	local pv = Kit.frame({ Name = "PreviewBox", Position = UDim2.fromScale(0.01, 0.04), Size = UDim2.fromScale(0.4, 0.92), Parent = card })
@@ -221,7 +242,7 @@ function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: numbe
 	cam.FieldOfView = 30
 	cam.Parent = vp
 	vp.CurrentCamera = cam
-	self.PassViews[itemId] = { Viewport = vp, Camera = cam, Species = pass.Grants, Mutation = pass.Mutation or "None" }
+	self.PassViews[itemId] = { Viewport = vp, Camera = cam, Species = pass.Grants, Mutation = pass.Mutation or "None", Egg = tool and pass.Egg or nil }
 
 	local info = Kit.frame({ Name = "Info", Position = UDim2.fromScale(0.43, 0.06), Size = UDim2.fromScale(0.55, 0.88), Parent = card })
 	local tags = Kit.frame({ Name = "Tags", Size = UDim2.fromScale(1, 0.12), Parent = info })
@@ -231,13 +252,18 @@ function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: numbe
 		Kit.badge({ Text = text, Color = Color3.fromRGB(255, 190, 40), LayoutOrder = nextBadge, Parent = tags })
 		nextBadge += 1
 	end
-	Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = nextBadge, Parent = tags })
-	Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
-	if pass.Mutation == "Omni" then
-		Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = nextBadge + 2, Parent = tags })
+	if tool then
+		Kit.badge({ Text = "PERMANENT", Color = accent, LayoutOrder = nextBadge, Parent = tags })
+		Kit.badge({ Text = "EGG HUNTING", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
+	else
+		Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = nextBadge, Parent = tags })
+		Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
+		if pass.Mutation == "Omni" then
+			Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = nextBadge + 2, Parent = tags })
+		end
 	end
-	local title = Kit.text({ Name = "Title", Text = string.upper(pass.Name) .. (pass.Grants == "OwnerDragon" and "" or " DRAGON"), Role = "Display", Scaled = true, Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.2), Parent = info })
-	Create("UIGradient", { Rotation = 90, Color = top and ColorSequence.new(Color3.fromRGB(255, 245, 190), Color3.fromRGB(255, 180, 40)) or ColorSequence.new(rarity.Glow, rarity.Color), Parent = title })
+	local title = Kit.text({ Name = "Title", Text = string.upper(pass.Name) .. ((tool or pass.Grants == "OwnerDragon") and "" or " DRAGON"), Role = "Display", Scaled = true, Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.2), Parent = info })
+	Create("UIGradient", { Rotation = 90, Color = (top or tool) and ColorSequence.new(Color3.fromRGB(255, 245, 190), tool and accent or Color3.fromRGB(255, 180, 40)) or ColorSequence.new(rarity.Glow, rarity.Color), Parent = title })
 	local perks = Kit.frame({ Name = "Perks", Position = UDim2.fromScale(0, 0.37), Size = UDim2.fromScale(1, 0.4), Parent = info })
 	Kit.list(perks, "V", 2, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top)
 	for i, perk in pass.Perks do
@@ -269,6 +295,10 @@ function ShopWindow:BuildPassPreviews()
 	for _, view in self.PassViews do
 		task.defer(function()
 			local ok, model = pcall(function()
+				if view.Egg then
+					-- a toolkit pass: the egg of its package, standing on end and glittering
+					return EggVisual.build(view.Egg, { Scale = 2, Sparkles = true })
+				end
 				local m = DragonVisual.build(view.Species, { Saddle = false, Detail = "Medium", Mutation = view.Mutation })
 				local pose = Animator.samplePose(m, "Roar", 0.85)
 				DragonVisual.pose(m, pose, CFrame.Angles(0, math.rad(150), 0))
@@ -279,7 +309,8 @@ function ShopWindow:BuildPassPreviews()
 			end
 			model.Parent = view.Viewport
 			local cf, size = model:GetBoundingBox()
-			local radius = math.max(size.X, size.Y, size.Z) * 0.5 * 0.62
+			-- a dragon fills the frame (wing tips may leave it); an egg is shown whole with a margin
+			local radius = math.max(size.X, size.Y, size.Z) * 0.5 * (view.Egg and 1.12 or 0.62)
 			local dist = radius / math.tan(math.rad(view.Camera.FieldOfView) * 0.5)
 			view.Camera.CFrame = CFrame.lookAt(cf.Position + Vector3.new(dist * 0.35, size.Y * 0.2, dist), cf.Position)
 		end)
@@ -426,10 +457,29 @@ function ShopWindow:Refresh()
 	end
 end
 
+-- Scrolls the ROBUX tab so that a pass card / product section is in view (args.Focus = item or section id).
+function ShopWindow:FocusCard(id: string)
+	local card = self.Cards and self.Cards[id]
+	local scroll = self.RobuxScroll
+	if not card or not scroll then
+		return
+	end
+	task.defer(function()
+		task.wait()
+		if card.Parent and scroll.Parent then
+			local y = card.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
+			scroll.CanvasPosition = Vector2.new(0, math.max(0, y - 4))
+		end
+	end)
+end
+
 function ShopWindow:OnOpen(args)
 	self:BuildPassPreviews()
 	self:ShowTab(args and args.Tab == "Upgrades" and "Upgrades" or "Robux")
 	self:Refresh()
+	if args and args.Focus then
+		self:FocusCard(args.Focus)
+	end
 	if not self._observing and self.Data then
 		self._observing = true
 		for _, key in { "Flags", "Upgrades", "Cash" } do

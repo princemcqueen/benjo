@@ -25,7 +25,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 local WildEggConfig = require(Configs:WaitForChild("WildEggConfig"))
 
 local UI = script.Parent.Parent:WaitForChild("UI")
@@ -391,7 +391,7 @@ local function step(dt: number)
 	if preview or pending or clock - lastClaim < WildEggConfig.ClaimThrottle then
 		return
 	end
-	local range = WildEggConfig.PickupRange * (1 + TreeConfig.bonus(registry.DataController.all(), "EggMagnet")) + slack
+	local range = EggReach.range(registry.DataController.all(), WildEggConfig.PickupRange, Workspace:GetServerTimeNow()) + slack
 	for _, p in positions do
 		if (p - info.Position).Magnitude <= range then
 			tryClaim()

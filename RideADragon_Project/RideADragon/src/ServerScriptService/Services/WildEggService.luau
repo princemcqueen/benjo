@@ -26,7 +26,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local Signal = require(Shared:WaitForChild("Util"):WaitForChild("Signal"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 local WildEggConfig = require(Configs:WaitForChild("WildEggConfig"))
 
 local WildEggService = {}
@@ -171,7 +171,7 @@ local function handleClaim(player: Player)
 	if model then
 		slack = (model:GetAttribute("BodyRadius") or 0) * 0.5
 	end
-	local reach = WildEggConfig.PickupRange * (1 + TreeConfig.bonus(data, "EggMagnet")) + slack
+	local reach = EggReach.range(data, WildEggConfig.PickupRange) + slack
 	if Services.EggService.DistanceTo(player, egg.Position) > reach then
 		return false, "TOO_FAR"
 	end

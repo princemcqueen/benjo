@@ -221,6 +221,8 @@ function Hud:BuildCash()
 	-- secondary row: eggs + income
 	local row = Kit.frame({ Name = "Secondary", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 1), Size = UDim2.fromScale(1, 0.32), Parent = root })
 	Kit.list(row, "H", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
+	self.PillRow = row
+	self.PillScale = Create("UIScale", { Parent = row }) -- shrinks the row on phones when many pills are lit
 	local function smallPill(name: string, icon: string, order: number)
 		local p = Create("TextButton", {
 			Name = name,
@@ -252,11 +254,15 @@ function Hud:BuildCash()
 	-- active boosts (Owner pass luck, potions): tap to open the shop
 	self.LuckPill, self.LuckText = smallPill("Luck", "Clover", 3)
 	self.CashBoostPill, self.CashBoostText = smallPill("CashBoost", "Coin", 4)
+	-- egg hunting perks (Egg Magnet / Fast Hatch potions, the Egg Hunter pass): one pill
+	self.HuntPill, self.HuntText = smallPill("Hunt", "Magnet", 5)
 	self.LuckText.TextColor3 = Color3.fromRGB(46, 150, 70)
 	self.CashBoostText.TextColor3 = C.AccentDeep
+	self.HuntText.TextColor3 = Color3.fromRGB(214, 112, 40)
 	self.LuckPill.Visible = false
 	self.CashBoostPill.Visible = false
-	for _, pill in { self.LuckPill, self.CashBoostPill } do
+	self.HuntPill.Visible = false
+	for _, pill in { self.LuckPill, self.CashBoostPill, self.HuntPill } do
 		pill.Activated:Connect(function()
 			Kit.hooks.Click()
 			self.UI.Open("Shop")
@@ -272,7 +278,60 @@ local function mmss(seconds: number): string
 	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
+-- Phones have little width: the icon already says "luck" / "cash", so the word is dropped there.
+local function boostText(value: string, word: string, left: number): string
+	local text = Responsive.Device == "Phone" and value or (value .. " " .. word)
+	return left < math.huge and (text .. "  " .. mmss(left)) or text
+end
+
+-- "HUNTER + FAST HATCH + MAGNET" on a wide screen, "HUNTER +2" on a phone with three perks.
+local function huntText(names: { string }, left: number): string
+	local text
+	if Responsive.Device == "Phone" then
+		if #names > 2 then
+			text = names[1] .. " +" .. tostring(#names - 1)
+		else
+			text = table.concat(names, " + "):gsub("FAST HATCH", "HATCH")
+		end
+	else
+		text = table.concat(names, " + ")
+	end
+	return left < math.huge and (text .. "  " .. mmss(left)) or text
+end
+
+-- Many lit pills do not fit on a phone: the row shrinks a little instead of running off the screen.
+local PILL_FIT = { 1, 1, 1, 0.9, 0.8, 0.72 }
+function Hud:FitPills()
+	local lit = 0
+	for _, pill in { self.EggPill, self.IncomePill, self.LuckPill, self.CashBoostPill, self.HuntPill } do
+		if pill.Visible then
+			lit += 1
+		end
+	end
+	self.PillScale.Scale = Responsive.Device == "Phone" and PILL_FIT[math.clamp(lit, 1, #PILL_FIT)] or 1
+end
+
+-- UI Lab: every boost pill with sample text (the longest case), whatever the data says.
+function Hud:PreviewBoosts(on: boolean)
+	self._previewBoosts = on
+	self:RefreshBoosts()
+	if not on then
+		self:RefreshIncome()
+	end
+end
+
 function Hud:RefreshBoosts()
+	if self._previewBoosts then
+		self.LuckPill.Visible = true
+		self.LuckText.Text = boostText("x6", "LUCK", 842)
+		self.CashBoostPill.Visible = true
+		self.CashBoostText.Text = boostText("x2", "CASH", 581)
+		self.HuntPill.Visible = true
+		self.HuntText.Text = huntText({ "HUNTER", "FAST HATCH", "MAGNET" }, 860)
+		self.IncomePill.Visible = true
+		self:FitPills()
+		return
+	end
 	local data = self.Data.all()
 	if not data then
 		return
@@ -298,12 +357,33 @@ function Hud:RefreshBoosts()
 	end
 	self.LuckPill.Visible = luck > 1
 	if luck > 1 then
-		self.LuckText.Text = string.format("x%s LUCK", tostring(math.floor(luck * 10 + 0.5) / 10)) .. (luckLeft < math.huge and ("  " .. mmss(luckLeft)) or "")
+		self.LuckText.Text = boostText("x" .. tostring(math.floor(luck * 10 + 0.5) / 10), "LUCK", luckLeft)
 	end
 	self.CashBoostPill.Visible = cash > 1
 	if cash > 1 then
-		self.CashBoostText.Text = string.format("x%s CASH  %s", tostring(cash), mmss(cashLeft))
+		self.CashBoostText.Text = boostText("x" .. tostring(cash), "CASH", cashLeft)
 	end
+	-- egg hunting: what is running (the radar has its own chip), the shortest timer
+	local hunt, huntLeft = {}, math.huge
+	for id, t in data.Boosts or {} do
+		local def = MonetizationConfig.Boosts[id]
+		local left = (tonumber(t) or 0) - now
+		if def and left > 0 and (def.Magnet or def.HatchFactor) then
+			table.insert(hunt, def.Magnet and "MAGNET" or "FAST HATCH")
+			huntLeft = math.min(huntLeft, left)
+		end
+	end
+	table.sort(hunt)
+	for id, pass in MonetizationConfig.GamePasses do
+		if pass.Kind == "Tool" and MonetizationConfig.ownsPass(data, id) then
+			table.insert(hunt, 1, "HUNTER")
+		end
+	end
+	self.HuntPill.Visible = #hunt > 0
+	if #hunt > 0 then
+		self.HuntText.Text = huntText(hunt, huntLeft)
+	end
+	self:FitPills()
 end
 
 function Hud:PopCash(delta: number)
@@ -896,6 +976,10 @@ function Hud:Layout()
 	self.CashRoot.Position = UDim2.new(0.5, 0, 0, phone and (portrait and top + math.floor(S * 0.12) or math.floor(S * 0.03)) or math.floor(S * 0.022))
 	shortSize(self.CashRoot, phone and 0.6 or 0.5, phone and 0.15 or 0.105)
 
+	-- pills under the cash: on a portrait phone nothing else is at that height, so they may use the full width
+	self.PillRow.Size = (phone and portrait) and UDim2.new(0, R.Width - 2 * margin, 0.32, 0) or UDim2.fromScale(1, 0.32)
+	self:FitPills()
+
 	-- side buttons
 	local btnH = phone and 0.15 or 0.074
 	local gap = math.floor(S * (phone and 0.02 or 0.012))
@@ -1063,6 +1147,7 @@ function Hud:RefreshIncome()
 	end
 	self.IncomeText.Text = Format.perSecond(total)
 	self.IncomePill.Visible = total > 0
+	self:FitPills()
 end
 
 function Hud:RefreshEggs()

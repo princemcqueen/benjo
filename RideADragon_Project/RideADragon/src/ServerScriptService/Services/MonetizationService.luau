@@ -20,6 +20,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 
 local MonetizationService = {}
@@ -64,7 +65,7 @@ function MonetizationService.GrantPass(player: Player, itemId: string): (boolean
 	end
 	local text
 	if fresh then
-		text = string.format("%s unlocked! x%s LUCK on every roll, forever.", string.upper(pass.Name), tostring(pass.Luck or 1))
+		text = pass.UnlockText or string.format("%s unlocked! x%s LUCK on every roll, forever.", string.upper(pass.Name), tostring(pass.Luck or 1))
 	end
 	return true, text
 end
@@ -103,6 +104,34 @@ function MonetizationService.GrantProduct(player: Player, itemId: string): (bool
 			return true, "Your dragon is max level - you got a Luck Potion instead!"
 		end
 		return true, string.format("%s gained %d levels!", record and record.Name or "Your dragon", gained)
+	elseif kind == "LuckyEggs" then
+		-- eggs with big luck appear around the player (only for them), for a few minutes
+		local n = Services.EggService.SpawnBonusEggs(player, product.Count or 3, product.Luck, product.Lifetime or 300)
+		if n <= 0 then
+			Services.EconomyService.Earn(player, 25000, "Purchase")
+			return true, "No room for the eggs right now - you got $25K instead."
+		end
+		return true, string.format("%d lucky eggs appeared around you! Find them before they vanish.", n)
+	elseif kind == "Eggs" then
+		-- eggs straight into the bag (it may overflow: paid eggs are never lost)
+		local given, lost = 0, 0
+		for _ = 1, product.Count or 1 do
+			local ok = Services.EggService.GiveEgg(player, product.Egg, product.Luck or 1, true)
+			if ok then
+				given += 1
+			else
+				lost += 1
+			end
+		end
+		local def = EggConfig.Eggs[product.Egg]
+		local text = string.format("+%d %s with x%d luck in your bag!", given, def and def.Name or "Egg", product.Luck or 1)
+		if lost > 0 then
+			-- cannot happen with a valid egg id; pay the rest out instead of losing it
+			local cash = 100000 * lost
+			Services.EconomyService.Earn(player, cash, "Purchase")
+			text ..= string.format(" %d eggs could not be added and were paid out as %s.", lost, Format.cash(cash))
+		end
+		return true, text
 	elseif kind == "DragonMutation" then
 		local uid = Services.DragonService.PotionTarget(player)
 		local mutation = uid and Services.DragonService.UpgradeMutation(player, uid)

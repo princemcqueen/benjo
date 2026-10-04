@@ -22,6 +22,9 @@
 	  Hatch  { Slot }           -> { Dragon = record, New = bool, Egg = type }
 	  BuyIncubator { Slot }     -> { Unlocked }
 	Signals to the owner: "Eggs" { List }, "EggAdded" egg, "EggRemoved" { Key }
+
+	Robux items use EggService.GiveEgg(.., force) (the bag may overflow - paid eggs are never
+	lost) and EggService.SpawnBonusEggs (Lucky Egg Call: lucky eggs near the player for a while).
 ]]
 
 local Players = game:GetService("Players")
@@ -39,6 +42,8 @@ local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
 local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 local HatchConfig = require(Configs:WaitForChild("HatchConfig"))
+local WildEggConfig = require(Configs:WaitForChild("WildEggConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 
 local EggService = {}
 EggService.PickedUp = Signal.new() -- (player, eggType)
@@ -156,10 +161,13 @@ local function spawnOne(player: Player): boolean
 	return true
 end
 
+-- Eggs of the normal respawn cycle (bonus eggs from Robux items do not count).
 local function activeCount(st): number
 	local n = 0
-	for _ in st.Active do
-		n += 1
+	for _, e in st.Active do
+		if not e.Bonus then
+			n += 1
+		end
 	end
 	return n
 end
@@ -372,8 +380,9 @@ end
 -- ============================================================== giving eggs
 -- Puts a new egg in the player's bag (capacity checked) and - when the hand is free - in
 -- the hand. Used by pickups and by world events (Lucky Wild Eggs).
+-- `force` (paid items) lets the bag overflow instead of refusing.
 -- Returns ok, id | errorCode, inHand
-function EggService.GiveEgg(player: Player, eggType: string, luck: number?): (boolean, string, boolean?)
+function EggService.GiveEgg(player: Player, eggType: string, luck: number?, force: boolean?): (boolean, string, boolean?)
 	local data = Data.Get(player)
 	if not data then
 		return false, "NOT_LOADED"
@@ -381,7 +390,7 @@ function EggService.GiveEgg(player: Player, eggType: string, luck: number?): (bo
 	if not EggConfig.Eggs[eggType] then
 		return false, "BAD_EGG"
 	end
-	if #data.Eggs >= capacity(data) then
+	if #data.Eggs >= capacity(data) and not force then
 		return false, "EGG_STORAGE_FULL"
 	end
 	local id = Data.NextId(player, "EggSerial", "E")
@@ -412,6 +421,84 @@ function EggService.FindSpot(area): Vector3?
 	return findSpot(area)
 end
 
+-- Resting spot on the terrain around a point (for eggs that appear next to the player).
+local function findSpotNear(center: Vector3, minRadius: number, maxRadius: number): Vector3?
+	local exclude = {}
+	local world = Workspace:FindFirstChild("World")
+	for _, name in { "Nature", "EggSpots" } do
+		local folder = world and world:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, name in { "Dragons", "MyEggs", "HeldEggs" } do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, p in Players:GetPlayers() do
+		if p.Character then
+			table.insert(exclude, p.Character)
+		end
+	end
+	rayParams.FilterDescendantsInstances = exclude
+	for _ = 1, 14 do
+		local a = rng:NextNumber(0, math.pi * 2)
+		local r = rng:NextNumber(minRadius, maxRadius)
+		local x = center.X + math.cos(a) * r
+		local z = center.Z + math.sin(a) * r
+		local hit = Workspace:Raycast(Vector3.new(x, center.Y + 180, z), Vector3.new(0, -600, 0), rayParams)
+		if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+			return hit.Position + Vector3.new(0, 2.6, 0)
+		end
+	end
+	return nil
+end
+
+-- Lucky Egg Call (Robux): `count` very lucky eggs appear around the player - only they can see and
+-- take them - and vanish after `lifetime` seconds. luckRange = { min, max }. Returns how many appeared.
+function EggService.SpawnBonusEggs(player: Player, count: number, luckRange: { number }?, lifetime: number?): number
+	local st = states[player]
+	if not st then
+		return 0
+	end
+	local positions = playerPositions(player)
+	local center = positions[1]
+	if not center then
+		return 0
+	end
+	local epic = WildEggConfig.ById.Epic
+	local range = luckRange or { 25, 100 }
+	local spawned = 0
+	local stay = lifetime or 300
+	for _ = 1, count do
+		local pos = findSpotNear(center, 22, 70)
+		if pos then
+			st.Serial += 1
+			local egg = {
+				Key = "b" .. st.Serial,
+				Type = epic.Eggs[rng:NextInteger(1, #epic.Eggs)],
+				Position = pos,
+				Area = "Lucky Call",
+				Luck = rng:NextInteger(math.floor(range[1]), math.floor(range[2])),
+				Bonus = true,
+			}
+			st.Active[egg.Key] = egg
+			Net.signal(player, "EggAdded", serialize(egg))
+			spawned += 1
+			local key = egg.Key
+			task.delay(stay, function()
+				if states[player] == st and st.Active[key] then
+					st.Active[key] = nil
+					Net.signal(player, "EggRemoved", { Key = key })
+				end
+			end)
+		end
+	end
+	return spawned
+end
+
 -- ============================================================== handlers
 local function handlePickup(player: Player, p)
 	if not Net.check.str(p.Key, 16) then
@@ -432,7 +519,7 @@ local function handlePickup(player: Player, p)
 	if model then
 		slack = (model:GetAttribute("BodyRadius") or 0) * 0.5
 	end
-	local reach = GameConfig.Interaction.EggPickupServerRange * (1 + TreeConfig.bonus(data, "EggMagnet"))
+	local reach = EggReach.range(data, GameConfig.Interaction.EggPickupServerRange)
 	if nearestDistance(player, egg.Position) > reach + slack then
 		return false, "TOO_FAR"
 	end
@@ -523,8 +610,10 @@ local function handlePlace(player: Player, p)
 	local hatchTime = def.HatchTime
 	local tree = Services.TreeService
 	if tree and tree.Bonus then
-		hatchTime = math.max(3, math.floor(hatchTime * (1 - tree.Bonus(player, "HatchSpeed")) + 0.5))
+		hatchTime = hatchTime * (1 - tree.Bonus(player, "HatchSpeed"))
 	end
+	-- Fast Hatch potion: the nest works faster while it runs
+	hatchTime = math.max(3, math.floor(hatchTime * EggReach.hatchFactor(data, now()) + 0.5))
 	Data.Set(player, { "Incubator", "Slots", tostring(slot) }, { Type = egg.Type, Start = t, Ready = t + hatchTime, Id = egg.Id, Luck = egg.Luck or 1 })
 	-- the hand is empty now; while nest spots remain, the next egg of the bag is taken
 	-- in hand so several eggs can be placed one after another

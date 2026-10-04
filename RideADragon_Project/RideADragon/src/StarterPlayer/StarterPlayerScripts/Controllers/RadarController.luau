@@ -51,11 +51,12 @@ end
 -- What powers the radar right now: boost timer, pass, or the Forge upgrade's range.
 local function powerText(data, now: number, range: number): string
 	local left = EggReach.radarSeconds(data, now)
+	local phone = Responsive.Device == "Phone" -- the chip is narrow there: shorter words
 	if left == math.huge then
-		return "EGG HUNTER"
+		return phone and "HUNTER" or "EGG HUNTER"
 	elseif left > 0 then
 		left = math.floor(left)
-		return string.format("EGG RADAR  %d:%02d", left // 60, left % 60)
+		return string.format("%s  %d:%02d", phone and "RADAR" or "EGG RADAR", left // 60, left % 60)
 	end
 	return range >= 100000 and "RADAR  WHOLE MAP" or string.format("RADAR  %d studs", range)
 end
@@ -71,10 +72,16 @@ local function layout()
 	local margin = math.floor(short * (phone and 0.03 or 0.022) + 0.5)
 	local top = R.TopInset + math.floor(short * 0.012)
 	local levelH = short * (phone and 0.095 or 0.058)
+	local levelW = short * (phone and 0.36 or 0.235)
 	chip.AnchorPoint = Vector2.new(0, 0)
-	chip.Position = UDim2.new(0, margin, 0, top + math.floor(levelH + short * 0.012))
+	if phone and R.Portrait then
+		-- portrait phone: right of the level badge (below it the cash pill and its pills take the width)
+		chip.Position = UDim2.new(0, margin + math.floor(levelW) + math.floor(short * 0.015), 0, top)
+	else
+		chip.Position = UDim2.new(0, margin, 0, top + math.floor(levelH + short * 0.012))
+	end
 	chip.SizeConstraint = R.Portrait and Enum.SizeConstraint.RelativeXX or Enum.SizeConstraint.RelativeYY
-	chip.Size = phone and UDim2.fromScale(0.36, 0.085) or UDim2.fromScale(0.235, 0.064)
+	chip.Size = phone and UDim2.fromScale(0.36, 0.1) or UDim2.fromScale(0.235, 0.064)
 end
 
 local function buildChip()
@@ -129,7 +136,7 @@ local function buildChip()
 		Role = "Micro",
 		Font = Theme.Fonts.Micro,
 		Scaled = true,
-		MinTextSize = 8,
+		MinTextSize = 9,
 		Color = Theme.Hud.TextMuted,
 		Position = UDim2.fromScale(0, 0.58),
 		Size = UDim2.fromScale(1, 0.38),
@@ -248,7 +255,7 @@ local function update()
 			markers[key] = nil
 		end
 	end
-	parts.Info.Text = preview and "EGG RADAR  12:34" or powerText(data, now, range)
+	parts.Info.Text = preview and (Responsive.Device == "Phone" and "RADAR  12:34" or "EGG RADAR  12:34") or powerText(data, now, range)
 	if bestEgg and from then
 		parts.Best.Text = string.format("x%d  %s", bestEgg.Luck or 1, distText(bestD))
 		parts.Best.TextColor3 = EggConfig.luckColor(bestEgg.Luck or 1)

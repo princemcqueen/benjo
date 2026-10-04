@@ -283,6 +283,24 @@ builders.Radar = function(root, col, acc)
 	circle(root, 0.32, 0.66, 0.12, acc)
 end
 
+builders.Magnet = function(root, col, acc)
+	rect(root, 0.28, 0.58, 0.2, 0.5, col, 0.12)
+	rect(root, 0.72, 0.58, 0.2, 0.5, col, 0.12)
+	rect(root, 0.5, 0.2, 0.46, 0.2, col, 0.25)
+	rect(root, 0.3, 0.27, 0.2, 0.2, col, 0.1, 40)
+	rect(root, 0.7, 0.27, 0.2, 0.2, col, 0.1, -40)
+	rect(root, 0.28, 0.86, 0.2, 0.17, acc, 0.1)
+	rect(root, 0.72, 0.86, 0.2, 0.17, acc, 0.1)
+end
+
+builders.Clock = function(root, col, acc, ink)
+	circle(root, 0.5, 0.5, 0.9, col)
+	circle(root, 0.5, 0.5, 0.72, ink)
+	rect(root, 0.5, 0.35, 0.07, 0.3, acc, 0.5)
+	rect(root, 0.62, 0.5, 0.24, 0.07, acc, 0.5)
+	circle(root, 0.5, 0.5, 0.12, acc)
+end
+
 builders.Clover = function(root, col, acc)
 	-- four heart-ish leaves (two circles each) around a center
 	local leaves = { { 0.5, 0.25, 0 }, { 0.75, 0.5, 90 }, { 0.5, 0.75, 180 }, { 0.25, 0.5, 270 } }

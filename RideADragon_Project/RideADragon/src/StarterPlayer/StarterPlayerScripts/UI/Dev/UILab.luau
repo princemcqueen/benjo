@@ -38,7 +38,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -69,6 +69,14 @@ function UILab.reset()
 	if hud and hud._labRiding then
 		hud._labRiding = false
 		hud:SetRiding(false)
+	end
+	if hud and hud._labBoosts then
+		hud._labBoosts = false
+		hud:PreviewBoosts(false)
+	end
+	local radar = registry.RadarController
+	if radar and radar.preview then
+		radar.preview(false)
 	end
 	if hud and hud._labArena then
 		hud._labArena = false
@@ -132,6 +140,24 @@ function UILab.show(screen: string)
 	elseif screen == "RaceTop" or screen == "RaceArena" then
 		ui.Open("Race", { Tab = screen == "RaceTop" and "Monthly" or "Arena" })
 		return "Race"
+	elseif screen == "Radar" then
+		-- the egg radar chip (arrow to the best egg) with sample text
+		local radar = registry.RadarController
+		if radar then
+			radar.preview(true)
+		end
+		return nil
+	elseif screen == "Boosts" then
+		-- every boost pill of the cash row at once (the longest texts)
+		local hud = registry.Hud
+		if hud then
+			hud._labBoosts = true
+			hud:PreviewBoosts(true)
+		end
+		return nil
+	elseif screen == "EggHunter" then
+		ui.Open("Shop", { Focus = "EggHunter" })
+		return "Shop"
 	elseif screen == "ArenaTouch" then
 		-- the duel buttons of the touch cluster (STRIKE / BLAST replace the bond buttons) + the arena panel
 		local hud = registry.Hud

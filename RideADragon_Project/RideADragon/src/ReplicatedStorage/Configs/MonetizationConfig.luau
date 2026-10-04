@@ -8,6 +8,14 @@
 
 	GamePasses: bought once, owned forever.
 	Products:   consumables (potions, cash packs), bought any number of times.
+
+	Egg hunting items (the "Hunt" section of the shop):
+	  Egg Radar     boost   every egg of yours is marked on screen, through walls
+	  Egg Magnet    boost   +100% egg pickup range
+	  Fast Hatch    boost   eggs you put in the nest hatch twice as fast
+	  Lucky Egg Call        3 very lucky eggs appear around you for a few minutes
+	  Mythic Bundle         3 Celestial Eggs with x50 luck go straight into the bag
+	  Egg Hunter    pass    permanent radar, +50% pickup range, +3 egg bag slots
 ]]
 
 local MonetizationConfig = {}
@@ -67,6 +75,23 @@ MonetizationConfig.GamePasses = {
 	},
 }
 
+MonetizationConfig.GamePasses.EggHunter = {
+	Id = 0,
+	Price = 1299,
+	Name = "Egg Hunter",
+	Description = "Find more eggs, faster: a permanent radar, a wider pickup range and a bigger bag.",
+	Icon = "Radar",
+	Kind = "Tool", -- no dragon: shown with an egg instead of a dragon
+	Radar = true, -- the egg radar is always on
+	Magnet = 0.5, -- +50% egg pickup range
+	Slots = 3, -- +3 egg bag slots
+	Egg = "CelestialEgg", -- the egg shown on the card
+	Accent = Color3.fromRGB(255, 140, 60),
+	UnlockText = "EGG HUNTER unlocked! Permanent egg radar, wider pickup range and +3 bag slots.",
+	Perks = { "Egg radar on forever", "+50% egg pickup range", "+3 egg bag slots", "Stacks with potions" },
+	Order = 4,
+}
+
 -- Featured passes in shop order.
 function MonetizationConfig.passOrder(): { string }
 	local list = {}
@@ -100,6 +125,17 @@ function MonetizationConfig.passLuck(data): number
 		end
 	end
 	return m
+end
+
+-- Extra egg bag slots from owned passes.
+function MonetizationConfig.passSlots(data): number
+	local n = 0
+	for id, pass in MonetizationConfig.GamePasses do
+		if pass.Slots and MonetizationConfig.ownsPass(data, id) then
+			n += pass.Slots
+		end
+	end
+	return n
 end
 
 MonetizationConfig.Products = {
@@ -208,7 +244,93 @@ MonetizationConfig.Products = {
 		Minimum = 250000,
 		Color = Color3.fromRGB(255, 120, 40),
 	},
+
+	-- egg hunting
+	EggRadar = {
+		Id = 0,
+		Price = 49,
+		Name = "Egg Radar",
+		Description = "Marks every egg on the map, even through walls, for 30 minutes.",
+		Icon = "Radar",
+		Kind = "Boost",
+		Boost = "Radar",
+		Seconds = 30 * 60,
+		Color = Color3.fromRGB(255, 140, 60),
+	},
+	EggMagnet = {
+		Id = 0,
+		Price = 39,
+		Name = "Egg Magnet",
+		Description = "Pick eggs up from twice as far away for 15 minutes.",
+		Icon = "Magnet",
+		Kind = "Boost",
+		Boost = "Magnet",
+		Seconds = 15 * 60,
+		Color = Color3.fromRGB(255, 90, 120),
+	},
+	HatchBoost = {
+		Id = 0,
+		Price = 59,
+		Name = "Fast Hatch",
+		Description = "Eggs you put in your nest hatch twice as fast for 30 minutes.",
+		Icon = "Clock",
+		Kind = "Boost",
+		Boost = "Hatch",
+		Seconds = 30 * 60,
+		Color = Color3.fromRGB(255, 205, 60),
+	},
+	LuckyEggCall = {
+		Id = 0,
+		Price = 99,
+		Name = "Lucky Egg Call",
+		Description = "3 rare eggs with x25 to x100 luck appear around you for 5 minutes.",
+		Icon = "Sparkle",
+		Kind = "LuckyEggs",
+		Count = 3,
+		Luck = { 25, 100 },
+		Lifetime = 5 * 60,
+		Color = Color3.fromRGB(190, 120, 255),
+	},
+	MythicBundle = {
+		Id = 0,
+		Price = 249,
+		Name = "Mythic Bundle",
+		Description = "3 Celestial Eggs with x50 luck, straight into your egg bag.",
+		Icon = "Gift",
+		Kind = "Eggs",
+		Egg = "CelestialEgg",
+		Count = 3,
+		Luck = 50,
+		Color = Color3.fromRGB(255, 80, 160),
+	},
 }
+
+-- Shop sections (ROBUX tab): products list their Section, ProductOrder their order.
+MonetizationConfig.Sections = {
+	{ Id = "Potions", Title = "POTIONS" },
+	{ Id = "Hunt", Title = "EGG HUNTING" },
+	{ Id = "Packs", Title = "CASH & SPINS" },
+}
+local SECTION_OF = {
+	LuckPotion = "Potions",
+	SuperLuckPotion = "Potions",
+	CashPotion = "Potions",
+	LevelPotion = "Potions",
+	MutationPotion = "Potions",
+	EggRadar = "Hunt",
+	EggMagnet = "Hunt",
+	HatchBoost = "Hunt",
+	LuckyEggCall = "Hunt",
+	MythicBundle = "Hunt",
+	SpinPack = "Packs",
+	SpinPackBig = "Packs",
+	CashPackSmall = "Packs",
+	CashPackMedium = "Packs",
+	CashPackLarge = "Packs",
+}
+for id, product in MonetizationConfig.Products do
+	product.Section = SECTION_OF[id] or "Packs"
+end
 
 -- Shop order (ROBUX tab)
 MonetizationConfig.ProductOrder = {
@@ -217,6 +339,11 @@ MonetizationConfig.ProductOrder = {
 	"CashPotion",
 	"LevelPotion",
 	"MutationPotion",
+	"EggRadar",
+	"EggMagnet",
+	"HatchBoost",
+	"LuckyEggCall",
+	"MythicBundle",
 	"SpinPack",
 	"SpinPackBig",
 	"CashPackSmall",
@@ -224,11 +351,26 @@ MonetizationConfig.ProductOrder = {
 	"CashPackLarge",
 }
 
+-- Product ids of one section, in shop order.
+function MonetizationConfig.sectionProducts(sectionId: string): { string }
+	local list = {}
+	for _, id in MonetizationConfig.ProductOrder do
+		if MonetizationConfig.Products[id].Section == sectionId then
+			table.insert(list, id)
+		end
+	end
+	return list
+end
+
 -- Boosts (timed): luck multipliers stack by multiplying.
 MonetizationConfig.Boosts = {
 	Luck = { Name = "x2 LUCK", Luck = 2, Color = Color3.fromRGB(110, 208, 104), Icon = "Clover" },
 	SuperLuck = { Name = "x3 LUCK", Luck = 3, Color = Color3.fromRGB(64, 236, 214), Icon = "Star" },
 	Cash = { Name = "x2 CASH", Cash = 2, Color = Color3.fromRGB(255, 196, 48), Icon = "Coin" },
+	-- egg hunting: Radar = radar on, Magnet = extra pickup range (+100%), HatchFactor = incubation time factor
+	Radar = { Name = "EGG RADAR", Radar = true, Color = Color3.fromRGB(255, 140, 60), Icon = "Radar" },
+	Magnet = { Name = "EGG MAGNET", Magnet = 1.0, Color = Color3.fromRGB(255, 90, 120), Icon = "Magnet" },
+	Hatch = { Name = "FAST HATCH", HatchFactor = 0.5, Color = Color3.fromRGB(255, 205, 60), Icon = "Clock" },
 }
 
 function MonetizationConfig.find(itemId: string)

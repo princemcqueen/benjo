@@ -1,4 +1,4 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 5)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 6)
 ======================================================
 
 CONTENTS
@@ -32,9 +32,11 @@ ROBUX ITEMS (before publishing)
   Create the game pass / developer products on create.roblox.com with the same
   prices and paste their IDs into
   ReplicatedStorage > Configs > MonetizationConfig (field Id):
-    Game passes: Owner Dragon 3000, PRINCE 8999, N2RC1S 8999, LEGENDARY M0NICA DRAGON 11999
+    Game passes: Owner Dragon 3000, PRINCE 8999, N2RC1S 8999, LEGENDARY M0NICA DRAGON 11999,
+                 EGG HUNTER 1299
     Products: Luck Potion 49, Super Luck Potion 149, Cash Potion 49, Level Potion 39,
-              Mutation Potion 99, 5 Spins 49, 25 Spins 199, Cash packs 25 / 99 / 249
+              Mutation Potion 99, 5 Spins 49, 25 Spins 199, Cash packs 25 / 99 / 249,
+              Egg Radar 49, Egg Magnet 39, Fast Hatch 59, Lucky Egg Call 99, Mythic Bundle 249
 
 SOUNDS
   Every sound is a key in ReplicatedStorage > Configs > AudioConfig; an empty Id is skipped
@@ -78,6 +80,23 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     arena, on foot, or while racing. A TRAINING DUMMY in the middle takes hits, shows damage
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
+
+EGG HUNTING (new in TEST 6)  -  Shop > ROBUX tab: sections POTIONS / EGG HUNTING / CASH & SPINS
+  - EGG RADAR (49 R$, 30 min): every egg on the map gets a marker you can see through walls and a
+    chip under the level badge points an arrow at the best egg (luck + distance). Without the
+    potion the same radar comes from the Forge upgrade (250 / 600 / 1200 studs / whole map).
+  - EGG MAGNET (39 R$, 15 min): eggs are picked up from twice as far away. Adds up with the Great
+    Tree "Egg Magnet" branch and the Egg Hunter pass.
+  - FAST HATCH (59 R$, 30 min): eggs you put in the nest take half the time.
+  - LUCKY EGG CALL (99 R$): 3 eggs with x25 - x100 luck appear around you (only you see them)
+    for 5 minutes.
+  - MYTHIC BUNDLE (249 R$): 3 Celestial Eggs with x50 luck straight into the bag (even when the
+    bag is full: paid eggs are never lost).
+  - EGG HUNTER pass (1,299 R$, permanent, no dragon): radar always on, +50% pickup range, +3 egg
+    bag slots. Shown in the shop with an egg instead of a dragon.
+  - HUD: a pill under the cash shows the running perks (MAGNET / FAST HATCH / HUNTER + timer);
+    phones get a compact text and the row shrinks a little when many pills are lit.
+  - Studio: Robux items with Id = 0 are free test purchases.
 
 DONE IN THIS SNAPSHOT (TEST 5 additions first)
   - LEGENDARY M0NICA DRAGON (game pass 11,999 R$): +50T income, x20 luck.
@@ -134,8 +153,7 @@ DONE IN THIS SNAPSHOT (TEST 5 additions first)
   - Passive income, offline earnings, inventory, perches, nest, spawn at own plot
 
 NOT FINISHED YET (planned next, in this order)
-  - Robux egg-hunting items (Egg Radar, Egg Magnet, Lucky Egg Call, Hatch Boost, bundles) and
-    new eggs / dragons (work in progress, kept in a git stash)
+  - New eggs / dragons and the zones they live in
   - Bigger map with Frostpeak / Ember Caldera / Skyreach regions (their eggs currently
     spawn at the valley's landmark spots: plateau, cave, ruins, pillar, island)
   - Hidden eggs / treasure, weather and events, Golden Dragon, adventure + boss, collection

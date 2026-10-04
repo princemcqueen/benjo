@@ -17,7 +17,7 @@ local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 
 local EggController = {}
 
@@ -222,8 +222,8 @@ end
 local function step(dt: number)
 	clock += dt
 	local positions, slack = myPositions()
-	-- Great Tree "Egg Magnet" widens the pickup range
-	local range = GameConfig.Interaction.EggPickupRange * (1 + TreeConfig.bonus(registry.DataController.all(), "EggMagnet")) + slack
+	-- Great Tree "Egg Magnet", the Egg Magnet potion and the Egg Hunter pass widen the pickup range
+	local range = EggReach.range(registry.DataController.all(), GameConfig.Interaction.EggPickupRange, Workspace:GetServerTimeNow()) + slack
 	for _, e in eggs do
 		local model = e.Model
 		if model and model.Parent then
