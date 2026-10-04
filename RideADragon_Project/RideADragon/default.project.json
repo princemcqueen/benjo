@@ -1,0 +1,153 @@
+{
+	"name": "RideADragon",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"$className": "ReplicatedStorage",
+			"Shared": {
+				"$path": "src/ReplicatedStorage/Shared"
+			},
+			"Configs": {
+				"$path": "src/ReplicatedStorage/Configs"
+			},
+			"Remotes": {
+				"$className": "Folder",
+				"Request": {
+					"$className": "RemoteFunction"
+				},
+				"DataSync": {
+					"$className": "RemoteEvent"
+				},
+				"Notify": {
+					"$className": "RemoteEvent"
+				},
+				"Signal": {
+					"$className": "RemoteEvent"
+				},
+				"ClientEvent": {
+					"$className": "RemoteEvent"
+				}
+			}
+		},
+		"ReplicatedFirst": {
+			"$className": "ReplicatedFirst",
+			"$path": "src/ReplicatedFirst"
+		},
+		"ServerScriptService": {
+			"$className": "ServerScriptService",
+			"$path": "src/ServerScriptService"
+		},
+		"StarterPlayer": {
+			"$className": "StarterPlayer",
+			"$properties": {
+				"EnableMouseLockOption": {
+					"Bool": false
+				},
+				"CameraMaxZoomDistance": {
+					"Float32": 70
+				},
+				"CameraMinZoomDistance": {
+					"Float32": 6
+				},
+				"CharacterWalkSpeed": {
+					"Float32": 20
+				}
+			},
+			"StarterPlayerScripts": {
+				"$className": "StarterPlayerScripts",
+				"$path": "src/StarterPlayer/StarterPlayerScripts"
+			}
+		},
+		"Workspace": {
+			"$className": "Workspace",
+			"$properties": {
+				"StreamingEnabled": {
+					"Bool": true
+				},
+				"StreamingMinRadius": {
+					"Int32": 640
+				},
+				"StreamingTargetRadius": {
+					"Int32": 2600
+				},
+				"StreamOutBehavior": {
+					"Enum": 1
+				},
+				"Gravity": {
+					"Float32": 196.2
+				}
+			},
+			"Terrain": {
+				"$className": "Terrain",
+				"$properties": {
+					"Decoration": {
+						"Bool": true
+					},
+					"WaterWaveSize": {
+						"Float32": 0.12
+					},
+					"WaterWaveSpeed": {
+						"Float32": 9
+					},
+					"WaterReflectance": {
+						"Float32": 0.6
+					},
+					"WaterTransparency": {
+						"Float32": 0.72
+					},
+					"GrassLength": {
+						"Float32": 0.35
+					}
+				}
+			}
+		},
+		"Lighting": {
+			"$className": "Lighting",
+			"$properties": {
+				"Technology": {
+					"Enum": 4
+				},
+				"GlobalShadows": {
+					"Bool": true
+				},
+				"Brightness": {
+					"Float32": 2.4
+				},
+				"ClockTime": {
+					"Float32": 14.6
+				},
+				"GeographicLatitude": {
+					"Float32": 32
+				},
+				"EnvironmentDiffuseScale": {
+					"Float32": 0.55
+				},
+				"EnvironmentSpecularScale": {
+					"Float32": 0.8
+				}
+			}
+		},
+		"SoundService": {
+			"$className": "SoundService"
+		},
+		"StarterGui": {
+			"$className": "StarterGui",
+			"$properties": {
+				"ResetPlayerGuiOnSpawn": {
+					"Bool": false
+				}
+			}
+		},
+		"Players": {
+			"$className": "Players",
+			"$properties": {
+				"CharacterAutoLoads": {
+					"Bool": false
+				},
+				"RespawnTime": {
+					"Float32": 3
+				}
+			}
+		}
+	}
+}
