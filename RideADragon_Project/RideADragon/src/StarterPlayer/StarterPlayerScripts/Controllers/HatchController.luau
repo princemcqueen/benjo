@@ -35,6 +35,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local PromptGate = require(Shared:WaitForChild("Util"):WaitForChild("PromptGate"))
 local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("DragonVisual"))
 local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
 local Species = require(Shared:WaitForChild("Dragons"):WaitForChild("Species"))
@@ -717,7 +718,10 @@ local function play(slot: number, result)
 	local conn = nil
 	local fov0 = camera.FieldOfView
 	local showCompanion = hideCompanion()
+	-- the "E / F" bubbles of the world must not hang over the show
+	PromptGate.set("Hatch", true)
 	local function cleanup()
+		PromptGate.set("Hatch", false)
 		if conn then
 			conn:Disconnect()
 			conn = nil
@@ -1093,6 +1097,7 @@ function HatchController.hatch(slot: number)
 	end)
 	if not ok then
 		warn("[Hatch] " .. tostring(err))
+		PromptGate.set("Hatch", false)
 		if active then
 			pcall(active.Cleanup)
 			active = nil

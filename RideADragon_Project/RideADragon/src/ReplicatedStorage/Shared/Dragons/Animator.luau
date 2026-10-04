@@ -6,6 +6,8 @@
 	  Rest (lying down awake - sanctuary perches)
 	One-shot actions (with fade in/out envelopes):
 	  Jump, Takeoff, Landing, Roar, Eat, IdleVariant
+	  Life on the ground: Yawn, Stretch (play bow), TailSwish, Sniff, Shake, Twirl, Bow, Howl
+	  Joy: Cheer (a happy hop on the ground), Loop (a somersault in the air)
 	  Dragon Bond: Dash, FireBreath (held until Stop), Flourish (Sky Dance)
 	Additive layers:
 	  wing banking, breathing, head look, spring-driven tail/neck motion.
@@ -47,6 +49,17 @@ local ONESHOTS = {
 	-- Hold: the clip sustains at that time until Stop() (or MaxHold seconds)
 	FireBreath = { Duration = 4.6, FadeIn = 0.18, FadeOut = 0.35, Hold = 0.45, MaxHold = 3.9 },
 	Flourish = { Duration = 1.8, FadeIn = 0.12, FadeOut = 0.3 },
+	-- everyday behaviour (perches, companions) and reactions
+	Yawn = { Duration = 2.8, FadeIn = 0.35, FadeOut = 0.5 },
+	Stretch = { Duration = 3.0, FadeIn = 0.4, FadeOut = 0.5 },
+	TailSwish = { Duration = 2.2, FadeIn = 0.3, FadeOut = 0.4 },
+	Sniff = { Duration = 2.6, FadeIn = 0.35, FadeOut = 0.45 },
+	Shake = { Duration = 1.5, FadeIn = 0.1, FadeOut = 0.3 },
+	Twirl = { Duration = 1.8, FadeIn = 0.1, FadeOut = 0.3 },
+	Bow = { Duration = 2.2, FadeIn = 0.3, FadeOut = 0.45 },
+	Howl = { Duration = 3.2, FadeIn = 0.35, FadeOut = 0.5 },
+	Cheer = { Duration = 1.5, FadeIn = 0.08, FadeOut = 0.3 },
+	Loop = { Duration = 2.0, FadeIn = 0.12, FadeOut = 0.35 },
 }
 Animator.OneShots = ONESHOTS
 
@@ -837,7 +850,7 @@ Shots.Flourish = function(self, acc, w, t)
 	local air = mode == "Fly" or mode == "Air" or mode == "Takeoff"
 	local s = self.Scale
 	if air then
-		local roll = TAU * smooth(0.08, 1.35, t)
+		local roll = (TAU * smooth(0.08, 1.35, t)) % TAU
 		local arch = sin(clamp(t / 1.6, 0, 1) * math.pi)
 		add(acc, "Body", w, 0.1 * arch, 0, roll)
 		neck(self, acc, w, 0.35 * arch)
@@ -890,6 +903,164 @@ Shots.IdleVariant = function(self, acc, w, t)
 	local stretch = clamp((t - 0.6) / 0.5, 0, 1) * clamp((2.0 - t) / 0.5, 0, 1)
 	wingsFolded(self, acc, w * (1 - stretch * 0.8))
 	wingsSpread(self, acc, w * stretch * 0.8, 0.7, 0.5, 0.25, 0.2)
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Everyday behaviour. Full turns are written modulo 2*pi so the envelope fading the clip out
+-- never spins the body backwards.
+
+-- Yawn: the head rears back, the jaw opens wide and trembles, the wings lift a little.
+Shots.Yawn = function(self, acc, w, t)
+	local up = smooth(0, 0.7, t) * (1 - smooth(2.0, 2.7, t))
+	local open = smooth(0.5, 1.0, t) * (1 - smooth(1.9, 2.4, t))
+	local shiver = open * sin(t * 26) * 0.015
+	add(acc, "Chest", w, 0.12 * up, 0, 0, 0, 0.1 * self.Scale * up, 0)
+	neck(self, acc, w, 0.5 * up, shiver * 3)
+	add(acc, "Head", w, 0.45 * up + shiver, 0, 0)
+	add(acc, "Jaw", w, 0.75 * open, 0, 0)
+	local lift = smooth(0.4, 1.1, t) * (1 - smooth(1.9, 2.5, t))
+	wingsFolded(self, acc, w * (1 - lift * 0.55))
+	wingsSpread(self, acc, w * lift * 0.55, 0.4, 0.25, 0.3, 0.3)
+end
+
+-- Stretch: the "play bow" - chest down, rear up, tail high and wagging, wings opening wide.
+Shots.Stretch = function(self, acc, w, t)
+	local s = self.Scale
+	local bow = smooth(0, 0.65, t) * (1 - smooth(2.0, 2.8, t))
+	local open = smooth(0.6, 1.1, t) * (1 - smooth(1.9, 2.5, t))
+	add(acc, "Body", w, -0.3 * bow, 0, 0, 0, -0.4 * s * bow, 0)
+	add(acc, "Chest", w, -0.12 * bow, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, 0.7 * bow, 0, 0)
+		sym(acc, "Arm%2", w, -0.5 * bow, 0, 0)
+		sym(acc, "Hand%", w, 0.25 * bow, 0, 0)
+	end
+	if self.HasBack then
+		sym(acc, "Leg%1", w, -0.28 * bow, 0, 0)
+		sym(acc, "Leg%2", w, 0.2 * bow, 0, 0)
+	end
+	neck(self, acc, w, 0.6 * bow)
+	add(acc, "Head", w, 0.05 * bow, 0, 0)
+	add(acc, "Jaw", w, 0.22 * open, 0, 0)
+	tail(self, acc, w, -0.6 * bow, 0, 0.1 * bow, t * 5)
+	wingsFolded(self, acc, w * (1 - open))
+	wingsSpread(self, acc, w * open, 0.5 + sin(t * 5) * 0.12, 0.35, 0.05, 0.05)
+end
+
+-- TailSwish: a happy wag - the tail sweeps from side to side, the head follows it a little.
+Shots.TailSwish = function(self, acc, w, t)
+	local a = smooth(0, 0.35, t) * (1 - smooth(1.7, 2.2, t))
+	local ph = t * 1.7
+	local sw = sin(ph * TAU)
+	tail(self, acc, w, -0.15 * a, 0, 0.14 * a, ph)
+	add(acc, "Body", w, 0, -sw * 0.05 * a, 0)
+	add(acc, "Chest", w, 0, sw * 0.04 * a, 0)
+	neck(self, acc, w, 0.05 * a, -sw * 0.12 * a)
+	add(acc, "Head", w, 0.06 * a, sw * 0.12 * a, 0)
+	wingsFolded(self, acc, w)
+end
+
+-- Sniff: the head drops to the ground, sniffing in short pulls, nose sweeping left and right.
+Shots.Sniff = function(self, acc, w, t)
+	local s = self.Scale
+	local down = smooth(0, 0.55, t) * (1 - smooth(2.0, 2.5, t))
+	local pull = down * max(0, sin(t * 10))
+	add(acc, "Body", w, -0.1 * down, 0, 0, 0, -0.18 * s * down, 0)
+	neck(self, acc, w, -0.95 * down - pull * 0.05, sin(t * 2.6) * 0.4 * down)
+	add(acc, "Head", w, -0.3 * down - pull * 0.08, 0, 0)
+	add(acc, "Jaw", w, pull * 0.1, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, 0.18 * down, 0, 0)
+	end
+	tail(self, acc, w, 0.1, 0, 0.08 * down, t * 2.5)
+	wingsFolded(self, acc, w)
+end
+
+-- Shake: a quick shiver from nose to tail, like a dog coming out of the lake.
+Shots.Shake = function(self, acc, w, t)
+	local a = smooth(0, 0.15, t) * (1 - smooth(1.1, 1.5, t))
+	local f = sin(t * 40)
+	add(acc, "Body", w, 0, f * 0.07 * a, f * 0.04 * a)
+	add(acc, "Chest", w, 0, -f * 0.1 * a, 0)
+	neck(self, acc, w, 0, f * 0.14 * a)
+	add(acc, "Head", w, 0.05 * a, f * 0.16 * a, 0)
+	tail(self, acc, w, 0, 0, 0.2 * a, t * 6)
+	local flutter = a * 0.8
+	wingsFolded(self, acc, w * (1 - flutter))
+	wingsSpread(self, acc, w * flutter, f * 0.35, f * 0.3, 0.45, 0.4)
+end
+
+-- Twirl: one graceful turn on the spot, the tail swinging out behind it.
+Shots.Twirl = function(self, acc, w, t)
+	local spin = (TAU * smooth(0.12, 1.5, t)) % TAU
+	local k = sin(clamp(t / 1.6, 0, 1) * math.pi)
+	add(acc, "Body", w, 0, spin, 0, 0, 0.1 * self.Scale * k, 0)
+	add(acc, "Head", w, 0.1 * k, 0, 0)
+	tail(self, acc, w, -0.1 * k, 0, 0.1 * k, t * 3)
+	wingsFolded(self, acc, w * (1 - k * 0.5))
+	wingsSpread(self, acc, w * k * 0.5, 0.45, 0.3, 0.15, 0.1)
+end
+
+-- Bow: a greeting - the forelegs bend, the head dips, a moment's pause, then up again.
+Shots.Bow = function(self, acc, w, t)
+	local s = self.Scale
+	local dip = smooth(0, 0.55, t) * (1 - smooth(1.5, 2.1, t))
+	add(acc, "Body", w, -0.1 * dip, 0, 0, 0, -0.55 * s * dip, 0)
+	neck(self, acc, w, -0.55 * dip)
+	add(acc, "Head", w, -0.15 * dip, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, 0.45 * dip, 0, 0)
+		sym(acc, "Arm%2", w, -0.95 * dip, 0, 0)
+		sym(acc, "Hand%", w, 0.5 * dip, 0, 0)
+	end
+	tail(self, acc, w, -0.25 * dip, 0, 0.05 * dip, t * 2)
+	wingsFolded(self, acc, w)
+end
+
+-- Howl: the head thrown back at the sky for a long call, wings half open and trembling.
+Shots.Howl = function(self, acc, w, t)
+	local s = self.Scale
+	local up = smooth(0, 0.7, t) * (1 - smooth(2.5, 3.1, t))
+	local call = smooth(0.6, 0.9, t) * (1 - smooth(2.4, 2.8, t))
+	local shake = call * sin(t * 34) * 0.02
+	add(acc, "Chest", w, 0.25 * up, 0, 0, 0, 0.16 * s * up, 0)
+	neck(self, acc, w, 0.8 * up, shake * 3)
+	add(acc, "Head", w, 0.5 * up + shake, 0, 0)
+	add(acc, "Jaw", w, 0.5 * call, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, -0.1 * up, 0, 0)
+	end
+	local open = smooth(0.2, 0.9, t) * (1 - smooth(2.4, 3.0, t))
+	wingsFolded(self, acc, w * (1 - open * 0.7))
+	wingsSpread(self, acc, w * open * 0.7, 0.55 + shake * 6, 0.4, 0.15, 0.1)
+	tail(self, acc, w, -0.12 * up, 0, 0.03 * call, t * 3)
+end
+
+-- Cheer: a happy hop - crouch, spring up with the wings beating, mouth open, tail high.
+Shots.Cheer = function(self, acc, w, t)
+	local s = self.Scale
+	local crouch = smooth(0, 0.16, t) * (1 - smooth(0.16, 0.3, t))
+	local air = sin(clamp((t - 0.18) / 0.8, 0, 1) * math.pi)
+	add(acc, "Body", w, -0.08 * crouch + 0.2 * air, 0, 0, 0, -0.6 * s * crouch + 1.0 * s * air, 0)
+	tuckLegs(self, acc, w, 0.55 * air)
+	neck(self, acc, w, 0.35 * air)
+	add(acc, "Head", w, 0.35 * air, 0, 0)
+	add(acc, "Jaw", w, 0.45 * air, 0, 0)
+	local open = smooth(0.12, 0.35, t) * (1 - smooth(1.1, 1.4, t))
+	wingsSpread(self, acc, w * open, beat(t * 1.8) * 0.9, beat(t * 1.8 - 0.1) * 0.9, 0.1, 0.1)
+	wingsFolded(self, acc, w * (1 - open))
+	tail(self, acc, w, -0.3 * air, 0, 0.14 * air, t * 4)
+end
+
+-- Loop: a somersault in the air (nose up, over the top), legs tucked, wings swept back.
+Shots.Loop = function(self, acc, w, t)
+	local turn = (TAU * smooth(0.15, 1.65, t)) % TAU
+	local k = sin(clamp((t - 0.1) / 1.7, 0, 1) * math.pi)
+	add(acc, "Body", w, turn, 0, 0)
+	neck(self, acc, w, -0.3 * k)
+	tuckLegs(self, acc, w, 0.8 * k)
+	wingsSpread(self, acc, w, 0.1, 0.1, 0.55 * k, 0.4 * k)
+	tail(self, acc, w, 0.2 * k, 0, 0.04, t * 5)
 end
 
 -- ============================================================== update

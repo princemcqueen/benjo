@@ -94,6 +94,7 @@ local lighting = game:GetService("Lighting")
 out.grade = lighting:FindFirstChild("HatchGrade") ~= nil
 out.focus = lighting:FindFirstChild("HatchFocus") ~= nil
 out.camType = tostring(cam.CameraType)
+out.prompts = game:GetService("ProximityPromptService").Enabled
 shared.R = out
 '''
 
@@ -182,6 +183,9 @@ shared.R = { x = cf.Position.X, y = cf.Position.Y, z = cf.Position.Z }''')
     check(len(roar) > 5, f"the roar lasts a moment ({len(roar) * 0.1:.1f}s)")
     check(any(s["fov"] < 66 for s in roar), "camera punches in during the roar")
     check(not any(s["hud"] for s in samples if s["phase"] in ("Charge", "Walk", "Roar")), "HUD is hidden during the show")
+    check(not any(s["prompts"] for s in samples if s["phase"]), "world prompts (E / F bubbles) are hidden during the whole show")
+    # riding on/off while the show runs must not bring the bubbles back
+    cli(sim, player, '''LP:SetAttribute("Riding", true) task.wait(0.2) LP:SetAttribute("Riding", false) task.wait(0.2) shared.R = {}''')
 
     sim.run_for(1.6, 1 / 30)
     s = sample(sim, player)
@@ -194,6 +198,7 @@ shared.R = { x = cf.Position.X, y = cf.Position.Y, z = cf.Position.Z }''')
     s = sample(sim, player)
     check(s["phase"] == "" and s["stage"] is False, "stage is removed afterwards")
     check(s["hud"] is True, "HUD is back")
+    check(s["prompts"] is True, "world prompts are back after the show")
     check(s["grade"] is False and s["focus"] is False, "cinematic grading is removed")
     check(s["card"] is False, "card is gone")
     check(abs(s["fov"] - 70) < 1, f"field of view restored ({s['fov']:.0f})")
@@ -223,6 +228,7 @@ shared.R = { dragons = n, slot = d.Incubator.Slots["1"] == nil, hatched = d.Stat
     sim.run_for(2.0, 1 / 30)
     s = sample(sim, player)
     check(s["phase"] == "" and s["hud"] is True and s["grade"] is False, "clean exit after skipping")
+    check(s["prompts"] is True, "world prompts are back after skipping")
 
     # ------------------------------------------------------------ rare result: longer charge, more cracks
     put_ready_egg(sim, "RainbowEgg", "E_t3", 5000)

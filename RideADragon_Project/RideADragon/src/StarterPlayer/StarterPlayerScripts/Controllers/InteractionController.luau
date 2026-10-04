@@ -7,6 +7,8 @@
 
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PromptGate = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Util"):WaitForChild("PromptGate"))
 
 local InteractionController = {}
 
@@ -44,10 +46,9 @@ end
 
 function InteractionController.Start()
 	ProximityPromptService.PromptTriggered:Connect(onTriggered)
-	-- hide world prompts while riding a dragon
+	-- hide world prompts while riding a dragon (PromptGate: other reasons, like the hatch show, stay in force)
 	local function update()
-		local riding = LocalPlayer:GetAttribute("Riding") == true
-		ProximityPromptService.Enabled = not riding
+		PromptGate.set("Riding", LocalPlayer:GetAttribute("Riding") == true)
 	end
 	LocalPlayer:GetAttributeChangedSignal("Riding"):Connect(update)
 	update()

@@ -142,6 +142,7 @@ shared.R = {}
     sim.run_for(1, 1 / 30)
     other = [i for i in ids if i != best["equipped"]][0]
     r = req(sim, player, "Dragon", "Release", f'{{ Id = "{other}" }}')
+    sim.run_for(0.6, 1 / 30)  # the client's data copy catches up
     s = cli(sim, player, STATE)
     check(r["ok"] and s["placed"] == 0 and s["free"] == 1, "a resting dragon can be released")
     r = req(sim, player, "Dragon", "Release", f'{{ Id = "{best["equipped"]}" }}')

@@ -141,6 +141,8 @@ return DragonStats
 	  Rest (lying down awake - sanctuary perches)
 	One-shot actions (with fade in/out envelopes):
 	  Jump, Takeoff, Landing, Roar, Eat, IdleVariant
+	  Life on the ground: Yawn, Stretch (play bow), TailSwish, Sniff, Shake, Twirl, Bow, Howl
+	  Joy: Cheer (a happy hop on the ground), Loop (a somersault in the air)
 	  Dragon Bond: Dash, FireBreath (held until Stop), Flourish (Sky Dance)
 	Additive layers:
 	  wing banking, breathing, head look, spring-driven tail/neck motion.
@@ -182,6 +184,17 @@ local ONESHOTS = {
 	-- Hold: the clip sustains at that time until Stop() (or MaxHold seconds)
 	FireBreath = { Duration = 4.6, FadeIn = 0.18, FadeOut = 0.35, Hold = 0.45, MaxHold = 3.9 },
 	Flourish = { Duration = 1.8, FadeIn = 0.12, FadeOut = 0.3 },
+	-- everyday behaviour (perches, companions) and reactions
+	Yawn = { Duration = 2.8, FadeIn = 0.35, FadeOut = 0.5 },
+	Stretch = { Duration = 3.0, FadeIn = 0.4, FadeOut = 0.5 },
+	TailSwish = { Duration = 2.2, FadeIn = 0.3, FadeOut = 0.4 },
+	Sniff = { Duration = 2.6, FadeIn = 0.35, FadeOut = 0.45 },
+	Shake = { Duration = 1.5, FadeIn = 0.1, FadeOut = 0.3 },
+	Twirl = { Duration = 1.8, FadeIn = 0.1, FadeOut = 0.3 },
+	Bow = { Duration = 2.2, FadeIn = 0.3, FadeOut = 0.45 },
+	Howl = { Duration = 3.2, FadeIn = 0.35, FadeOut = 0.5 },
+	Cheer = { Duration = 1.5, FadeIn = 0.08, FadeOut = 0.3 },
+	Loop = { Duration = 2.0, FadeIn = 0.12, FadeOut = 0.35 },
 }
 Animator.OneShots = ONESHOTS
 
@@ -972,7 +985,7 @@ Shots.Flourish = function(self, acc, w, t)
 	local air = mode == "Fly" or mode == "Air" or mode == "Takeoff"
 	local s = self.Scale
 	if air then
-		local roll = TAU * smooth(0.08, 1.35, t)
+		local roll = (TAU * smooth(0.08, 1.35, t)) % TAU
 		local arch = sin(clamp(t / 1.6, 0, 1) * math.pi)
 		add(acc, "Body", w, 0.1 * arch, 0, roll)
 		neck(self, acc, w, 0.35 * arch)
@@ -1025,6 +1038,164 @@ Shots.IdleVariant = function(self, acc, w, t)
 	local stretch = clamp((t - 0.6) / 0.5, 0, 1) * clamp((2.0 - t) / 0.5, 0, 1)
 	wingsFolded(self, acc, w * (1 - stretch * 0.8))
 	wingsSpread(self, acc, w * stretch * 0.8, 0.7, 0.5, 0.25, 0.2)
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Everyday behaviour. Full turns are written modulo 2*pi so the envelope fading the clip out
+-- never spins the body backwards.
+
+-- Yawn: the head rears back, the jaw opens wide and trembles, the wings lift a little.
+Shots.Yawn = function(self, acc, w, t)
+	local up = smooth(0, 0.7, t) * (1 - smooth(2.0, 2.7, t))
+	local open = smooth(0.5, 1.0, t) * (1 - smooth(1.9, 2.4, t))
+	local shiver = open * sin(t * 26) * 0.015
+	add(acc, "Chest", w, 0.12 * up, 0, 0, 0, 0.1 * self.Scale * up, 0)
+	neck(self, acc, w, 0.5 * up, shiver * 3)
+	add(acc, "Head", w, 0.45 * up + shiver, 0, 0)
+	add(acc, "Jaw", w, 0.75 * open, 0, 0)
+	local lift = smooth(0.4, 1.1, t) * (1 - smooth(1.9, 2.5, t))
+	wingsFolded(self, acc, w * (1 - lift * 0.55))
+	wingsSpread(self, acc, w * lift * 0.55, 0.4, 0.25, 0.3, 0.3)
+end
+
+-- Stretch: the "play bow" - chest down, rear up, tail high and wagging, wings opening wide.
+Shots.Stretch = function(self, acc, w, t)
+	local s = self.Scale
+	local bow = smooth(0, 0.65, t) * (1 - smooth(2.0, 2.8, t))
+	local open = smooth(0.6, 1.1, t) * (1 - smooth(1.9, 2.5, t))
+	add(acc, "Body", w, -0.3 * bow, 0, 0, 0, -0.4 * s * bow, 0)
+	add(acc, "Chest", w, -0.12 * bow, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, 0.7 * bow, 0, 0)
+		sym(acc, "Arm%2", w, -0.5 * bow, 0, 0)
+		sym(acc, "Hand%", w, 0.25 * bow, 0, 0)
+	end
+	if self.HasBack then
+		sym(acc, "Leg%1", w, -0.28 * bow, 0, 0)
+		sym(acc, "Leg%2", w, 0.2 * bow, 0, 0)
+	end
+	neck(self, acc, w, 0.6 * bow)
+	add(acc, "Head", w, 0.05 * bow, 0, 0)
+	add(acc, "Jaw", w, 0.22 * open, 0, 0)
+	tail(self, acc, w, -0.6 * bow, 0, 0.1 * bow, t * 5)
+	wingsFolded(self, acc, w * (1 - open))
+	wingsSpread(self, acc, w * open, 0.5 + sin(t * 5) * 0.12, 0.35, 0.05, 0.05)
+end
+
+-- TailSwish: a happy wag - the tail sweeps from side to side, the head follows it a little.
+Shots.TailSwish = function(self, acc, w, t)
+	local a = smooth(0, 0.35, t) * (1 - smooth(1.7, 2.2, t))
+	local ph = t * 1.7
+	local sw = sin(ph * TAU)
+	tail(self, acc, w, -0.15 * a, 0, 0.14 * a, ph)
+	add(acc, "Body", w, 0, -sw * 0.05 * a, 0)
+	add(acc, "Chest", w, 0, sw * 0.04 * a, 0)
+	neck(self, acc, w, 0.05 * a, -sw * 0.12 * a)
+	add(acc, "Head", w, 0.06 * a, sw * 0.12 * a, 0)
+	wingsFolded(self, acc, w)
+end
+
+-- Sniff: the head drops to the ground, sniffing in short pulls, nose sweeping left and right.
+Shots.Sniff = function(self, acc, w, t)
+	local s = self.Scale
+	local down = smooth(0, 0.55, t) * (1 - smooth(2.0, 2.5, t))
+	local pull = down * max(0, sin(t * 10))
+	add(acc, "Body", w, -0.1 * down, 0, 0, 0, -0.18 * s * down, 0)
+	neck(self, acc, w, -0.95 * down - pull * 0.05, sin(t * 2.6) * 0.4 * down)
+	add(acc, "Head", w, -0.3 * down - pull * 0.08, 0, 0)
+	add(acc, "Jaw", w, pull * 0.1, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, 0.18 * down, 0, 0)
+	end
+	tail(self, acc, w, 0.1, 0, 0.08 * down, t * 2.5)
+	wingsFolded(self, acc, w)
+end
+
+-- Shake: a quick shiver from nose to tail, like a dog coming out of the lake.
+Shots.Shake = function(self, acc, w, t)
+	local a = smooth(0, 0.15, t) * (1 - smooth(1.1, 1.5, t))
+	local f = sin(t * 40)
+	add(acc, "Body", w, 0, f * 0.07 * a, f * 0.04 * a)
+	add(acc, "Chest", w, 0, -f * 0.1 * a, 0)
+	neck(self, acc, w, 0, f * 0.14 * a)
+	add(acc, "Head", w, 0.05 * a, f * 0.16 * a, 0)
+	tail(self, acc, w, 0, 0, 0.2 * a, t * 6)
+	local flutter = a * 0.8
+	wingsFolded(self, acc, w * (1 - flutter))
+	wingsSpread(self, acc, w * flutter, f * 0.35, f * 0.3, 0.45, 0.4)
+end
+
+-- Twirl: one graceful turn on the spot, the tail swinging out behind it.
+Shots.Twirl = function(self, acc, w, t)
+	local spin = (TAU * smooth(0.12, 1.5, t)) % TAU
+	local k = sin(clamp(t / 1.6, 0, 1) * math.pi)
+	add(acc, "Body", w, 0, spin, 0, 0, 0.1 * self.Scale * k, 0)
+	add(acc, "Head", w, 0.1 * k, 0, 0)
+	tail(self, acc, w, -0.1 * k, 0, 0.1 * k, t * 3)
+	wingsFolded(self, acc, w * (1 - k * 0.5))
+	wingsSpread(self, acc, w * k * 0.5, 0.45, 0.3, 0.15, 0.1)
+end
+
+-- Bow: a greeting - the forelegs bend, the head dips, a moment's pause, then up again.
+Shots.Bow = function(self, acc, w, t)
+	local s = self.Scale
+	local dip = smooth(0, 0.55, t) * (1 - smooth(1.5, 2.1, t))
+	add(acc, "Body", w, -0.1 * dip, 0, 0, 0, -0.55 * s * dip, 0)
+	neck(self, acc, w, -0.55 * dip)
+	add(acc, "Head", w, -0.15 * dip, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, 0.45 * dip, 0, 0)
+		sym(acc, "Arm%2", w, -0.95 * dip, 0, 0)
+		sym(acc, "Hand%", w, 0.5 * dip, 0, 0)
+	end
+	tail(self, acc, w, -0.25 * dip, 0, 0.05 * dip, t * 2)
+	wingsFolded(self, acc, w)
+end
+
+-- Howl: the head thrown back at the sky for a long call, wings half open and trembling.
+Shots.Howl = function(self, acc, w, t)
+	local s = self.Scale
+	local up = smooth(0, 0.7, t) * (1 - smooth(2.5, 3.1, t))
+	local call = smooth(0.6, 0.9, t) * (1 - smooth(2.4, 2.8, t))
+	local shake = call * sin(t * 34) * 0.02
+	add(acc, "Chest", w, 0.25 * up, 0, 0, 0, 0.16 * s * up, 0)
+	neck(self, acc, w, 0.8 * up, shake * 3)
+	add(acc, "Head", w, 0.5 * up + shake, 0, 0)
+	add(acc, "Jaw", w, 0.5 * call, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, -0.1 * up, 0, 0)
+	end
+	local open = smooth(0.2, 0.9, t) * (1 - smooth(2.4, 3.0, t))
+	wingsFolded(self, acc, w * (1 - open * 0.7))
+	wingsSpread(self, acc, w * open * 0.7, 0.55 + shake * 6, 0.4, 0.15, 0.1)
+	tail(self, acc, w, -0.12 * up, 0, 0.03 * call, t * 3)
+end
+
+-- Cheer: a happy hop - crouch, spring up with the wings beating, mouth open, tail high.
+Shots.Cheer = function(self, acc, w, t)
+	local s = self.Scale
+	local crouch = smooth(0, 0.16, t) * (1 - smooth(0.16, 0.3, t))
+	local air = sin(clamp((t - 0.18) / 0.8, 0, 1) * math.pi)
+	add(acc, "Body", w, -0.08 * crouch + 0.2 * air, 0, 0, 0, -0.6 * s * crouch + 1.0 * s * air, 0)
+	tuckLegs(self, acc, w, 0.55 * air)
+	neck(self, acc, w, 0.35 * air)
+	add(acc, "Head", w, 0.35 * air, 0, 0)
+	add(acc, "Jaw", w, 0.45 * air, 0, 0)
+	local open = smooth(0.12, 0.35, t) * (1 - smooth(1.1, 1.4, t))
+	wingsSpread(self, acc, w * open, beat(t * 1.8) * 0.9, beat(t * 1.8 - 0.1) * 0.9, 0.1, 0.1)
+	wingsFolded(self, acc, w * (1 - open))
+	tail(self, acc, w, -0.3 * air, 0, 0.14 * air, t * 4)
+end
+
+-- Loop: a somersault in the air (nose up, over the top), legs tucked, wings swept back.
+Shots.Loop = function(self, acc, w, t)
+	local turn = (TAU * smooth(0.15, 1.65, t)) % TAU
+	local k = sin(clamp((t - 0.1) / 1.7, 0, 1) * math.pi)
+	add(acc, "Body", w, turn, 0, 0)
+	neck(self, acc, w, -0.3 * k)
+	tuckLegs(self, acc, w, 0.8 * k)
+	wingsSpread(self, acc, w, 0.1, 0.1, 0.55 * k, 0.4 * k)
+	tail(self, acc, w, 0.2 * k, 0, 0.04, t * 5)
 end
 
 -- ============================================================== update
@@ -6451,6 +6622,42 @@ return MathUtil
 				</Item>
 				<Item class="ModuleScript" referent="RBX000024">
 					<Properties>
+						<string name="Name">PromptGate</string>
+						<ProtectedString name="Source"><![CDATA[--[[
+	PromptGate
+	World prompts (ProximityPrompt: the "E / F" bubbles) are switched off while something else
+	owns the screen: riding a dragon, the hatch cinematic... Several reasons can be active at
+	once; the prompts come back only when the last one is released.
+
+	  PromptGate.set(reason, on)   on = true hides the prompts for that reason, false releases it
+	  PromptGate.hidden()          true while any reason is active
+]]
+
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local PromptGate = {}
+
+local reasons: { [string]: boolean } = {}
+
+local function apply()
+	ProximityPromptService.Enabled = next(reasons) == nil
+end
+
+function PromptGate.set(reason: string, on: boolean)
+	reasons[reason] = on or nil
+	apply()
+end
+
+function PromptGate.hidden(): boolean
+	return next(reasons) ~= nil
+end
+
+return PromptGate
+]]></ProtectedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX000025">
+					<Properties>
 						<string name="Name">Signal</string>
 						<ProtectedString name="Source"><![CDATA[--[[
 	Signal
@@ -6534,7 +6741,7 @@ return Signal
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000025">
+				<Item class="ModuleScript" referent="RBX000026">
 					<Properties>
 						<string name="Name">Spring</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6587,7 +6794,7 @@ return Spring
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000026">
+				<Item class="ModuleScript" referent="RBX000027">
 					<Properties>
 						<string name="Name">TableUtil</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6678,7 +6885,7 @@ return TableUtil
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000027">
+				<Item class="ModuleScript" referent="RBX000028">
 					<Properties>
 						<string name="Name">Trove</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6743,7 +6950,7 @@ return Trove
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000028">
+				<Item class="ModuleScript" referent="RBX000029">
 					<Properties>
 						<string name="Name">WeightedRandom</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -6781,11 +6988,11 @@ return WeightedRandom
 				</Item>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000029">
+		<Item class="Folder" referent="RBX000030">
 			<Properties>
 				<string name="Name">Configs</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000030">
+			<Item class="ModuleScript" referent="RBX000031">
 				<Properties>
 					<string name="Name">AudioConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6852,7 +7059,7 @@ return table.freeze(AudioConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000031">
+			<Item class="ModuleScript" referent="RBX000032">
 				<Properties>
 					<string name="Name">BondConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -6949,7 +7156,7 @@ return table.freeze(BondConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000032">
+			<Item class="ModuleScript" referent="RBX000033">
 				<Properties>
 					<string name="Name">DragonConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -7440,7 +7647,7 @@ return table.freeze(DragonConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000033">
+			<Item class="ModuleScript" referent="RBX000034">
 				<Properties>
 					<string name="Name">EconomyConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -7588,7 +7795,7 @@ return table.freeze(EconomyConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000034">
+			<Item class="ModuleScript" referent="RBX000035">
 				<Properties>
 					<string name="Name">EggConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8036,7 +8243,7 @@ return table.freeze(EggConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000035">
+			<Item class="ModuleScript" referent="RBX000036">
 				<Properties>
 					<string name="Name">GameConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8169,7 +8376,7 @@ return table.freeze(GameConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000036">
+			<Item class="ModuleScript" referent="RBX000037">
 				<Properties>
 					<string name="Name">HatchConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8215,7 +8422,7 @@ return table.freeze(HatchConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000037">
+			<Item class="ModuleScript" referent="RBX000038">
 				<Properties>
 					<string name="Name">LeaderboardConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8293,7 +8500,7 @@ return table.freeze(LeaderboardConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000038">
+			<Item class="ModuleScript" referent="RBX000039">
 				<Properties>
 					<string name="Name">MonetizationConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8570,7 +8777,7 @@ return MonetizationConfig
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000039">
+			<Item class="ModuleScript" referent="RBX000040">
 				<Properties>
 					<string name="Name">MutationConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8676,7 +8883,7 @@ return table.freeze(MutationConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000040">
+			<Item class="ModuleScript" referent="RBX000041">
 				<Properties>
 					<string name="Name">QuestConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8718,7 +8925,7 @@ return table.freeze(QuestConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000041">
+			<Item class="ModuleScript" referent="RBX000042">
 				<Properties>
 					<string name="Name">RegionConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8821,7 +9028,7 @@ return table.freeze(RegionConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000042">
+			<Item class="ModuleScript" referent="RBX000043">
 				<Properties>
 					<string name="Name">SpinConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -8901,7 +9108,7 @@ return table.freeze(SpinConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000043">
+			<Item class="ModuleScript" referent="RBX000044">
 				<Properties>
 					<string name="Name">TreeConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9108,7 +9315,7 @@ return table.freeze(TreeConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000044">
+			<Item class="ModuleScript" referent="RBX000045">
 				<Properties>
 					<string name="Name">WildEggConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9167,7 +9374,7 @@ return table.freeze(WildEggConfig)
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000045">
+			<Item class="ModuleScript" referent="RBX000046">
 				<Properties>
 					<string name="Name">WorldConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -9349,42 +9556,42 @@ return WorldConfig
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000046">
+		<Item class="Folder" referent="RBX000047">
 			<Properties>
 				<string name="Name">Remotes</string>
 			</Properties>
-			<Item class="RemoteFunction" referent="RBX000047">
+			<Item class="RemoteFunction" referent="RBX000048">
 				<Properties>
 					<string name="Name">Request</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000048">
+			<Item class="RemoteEvent" referent="RBX000049">
 				<Properties>
 					<string name="Name">DataSync</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000049">
+			<Item class="RemoteEvent" referent="RBX000050">
 				<Properties>
 					<string name="Name">Notify</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000050">
+			<Item class="RemoteEvent" referent="RBX000051">
 				<Properties>
 					<string name="Name">Signal</string>
 				</Properties>
 			</Item>
-			<Item class="RemoteEvent" referent="RBX000051">
+			<Item class="RemoteEvent" referent="RBX000052">
 				<Properties>
 					<string name="Name">ClientEvent</string>
 				</Properties>
 			</Item>
 		</Item>
 	</Item>
-	<Item class="ReplicatedFirst" referent="RBX000052">
+	<Item class="ReplicatedFirst" referent="RBX000053">
 		<Properties>
 			<string name="Name">ReplicatedFirst</string>
 		</Properties>
-		<Item class="LocalScript" referent="RBX000053">
+		<Item class="LocalScript" referent="RBX000054">
 			<Properties>
 				<string name="Name">LoadingScreen</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -9567,11 +9774,11 @@ gui:Destroy()
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="ServerScriptService" referent="RBX000054">
+	<Item class="ServerScriptService" referent="RBX000055">
 		<Properties>
 			<string name="Name">ServerScriptService</string>
 		</Properties>
-		<Item class="Script" referent="RBX000055">
+		<Item class="Script" referent="RBX000056">
 			<Properties>
 				<string name="Name">Main</string>
 				<ProtectedString name="Source"><![CDATA[--[[
@@ -9698,11 +9905,11 @@ ReplicatedStorage:SetAttribute("ServerReady", true)
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-		<Item class="Folder" referent="RBX000056">
+		<Item class="Folder" referent="RBX000057">
 			<Properties>
 				<string name="Name">Services</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000057">
+			<Item class="ModuleScript" referent="RBX000058">
 				<Properties>
 					<string name="Name">BondService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10051,7 +10258,7 @@ return BondService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000058">
+			<Item class="ModuleScript" referent="RBX000059">
 				<Properties>
 					<string name="Name">BoostService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10184,7 +10391,7 @@ return BoostService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000059">
+			<Item class="ModuleScript" referent="RBX000060">
 				<Properties>
 					<string name="Name">DevService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10335,7 +10542,7 @@ return DevService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000060">
+			<Item class="ModuleScript" referent="RBX000061">
 				<Properties>
 					<string name="Name">DragonAssetService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -10435,7 +10642,7 @@ return DragonAssetService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000061">
+			<Item class="ModuleScript" referent="RBX000062">
 				<Properties>
 					<string name="Name">DragonService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11153,7 +11360,7 @@ return DragonService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000062">
+			<Item class="ModuleScript" referent="RBX000063">
 				<Properties>
 					<string name="Name">EconomyService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -11325,7 +11532,7 @@ return EconomyService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000063">
+			<Item class="ModuleScript" referent="RBX000064">
 				<Properties>
 					<string name="Name">EggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12067,7 +12274,7 @@ return EggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000064">
+			<Item class="ModuleScript" referent="RBX000065">
 				<Properties>
 					<string name="Name">LeaderboardService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12548,7 +12755,7 @@ return LeaderboardService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000065">
+			<Item class="ModuleScript" referent="RBX000066">
 				<Properties>
 					<string name="Name">LeaderstatsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12638,7 +12845,7 @@ return LeaderstatsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000066">
+			<Item class="ModuleScript" referent="RBX000067">
 				<Properties>
 					<string name="Name">LevelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -12830,7 +13037,7 @@ return LevelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000067">
+			<Item class="ModuleScript" referent="RBX000068">
 				<Properties>
 					<string name="Name">MonetizationService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13081,7 +13288,7 @@ return MonetizationService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000068">
+			<Item class="ModuleScript" referent="RBX000069">
 				<Properties>
 					<string name="Name">MountService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13688,7 +13895,7 @@ return MountService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000069">
+			<Item class="ModuleScript" referent="RBX000070">
 				<Properties>
 					<string name="Name">PhysicsGroups</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13774,7 +13981,7 @@ return PhysicsGroups
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000070">
+			<Item class="ModuleScript" referent="RBX000071">
 				<Properties>
 					<string name="Name">PlayerDataService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14237,7 +14444,7 @@ return PlayerDataService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000071">
+			<Item class="ModuleScript" referent="RBX000072">
 				<Properties>
 					<string name="Name">SanctuaryService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14499,7 +14706,7 @@ return SanctuaryService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000072">
+			<Item class="ModuleScript" referent="RBX000073">
 				<Properties>
 					<string name="Name">SettingsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14557,7 +14764,7 @@ return SettingsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000073">
+			<Item class="ModuleScript" referent="RBX000074">
 				<Properties>
 					<string name="Name">ShopService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14611,7 +14818,7 @@ return ShopService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000074">
+			<Item class="ModuleScript" referent="RBX000075">
 				<Properties>
 					<string name="Name">SpinService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -14910,7 +15117,7 @@ return SpinService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000075">
+			<Item class="ModuleScript" referent="RBX000076">
 				<Properties>
 					<string name="Name">TravelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15025,7 +15232,7 @@ return TravelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000076">
+			<Item class="ModuleScript" referent="RBX000077">
 				<Properties>
 					<string name="Name">TreeService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15147,7 +15354,7 @@ return TreeService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000077">
+			<Item class="ModuleScript" referent="RBX000078">
 				<Properties>
 					<string name="Name">WildEggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15385,7 +15592,7 @@ return WildEggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000078">
+			<Item class="ModuleScript" referent="RBX000079">
 				<Properties>
 					<string name="Name">WorldService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15542,11 +15749,11 @@ return WorldService
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000079">
+		<Item class="Folder" referent="RBX000080">
 			<Properties>
 				<string name="Name">World</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000080">
+			<Item class="ModuleScript" referent="RBX000081">
 				<Properties>
 					<string name="Name">GreatTree</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15747,7 +15954,7 @@ return GreatTree
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000081">
+			<Item class="ModuleScript" referent="RBX000082">
 				<Properties>
 					<string name="Name">Haven</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -15913,7 +16120,7 @@ return Haven
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000082">
+			<Item class="ModuleScript" referent="RBX000083">
 				<Properties>
 					<string name="Name">HavenLayout</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/layout.py - do not edit by hand.
@@ -20299,7 +20506,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000083">
+			<Item class="ModuleScript" referent="RBX000084">
 				<Properties>
 					<string name="Name">HavenTerrainData</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/terrain_data.py - do not edit by hand.
@@ -20350,7 +20557,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000084">
+			<Item class="ModuleScript" referent="RBX000085">
 				<Properties>
 					<string name="Name">Kit</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20696,7 +20903,7 @@ return Kit
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000085">
+			<Item class="ModuleScript" referent="RBX000086">
 				<Properties>
 					<string name="Name">Landmarks</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21058,7 +21265,7 @@ return Landmarks
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000086">
+			<Item class="ModuleScript" referent="RBX000087">
 				<Properties>
 					<string name="Name">Props</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21254,13 +21461,13 @@ return Props
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000087">
+			<Item class="ModuleScript" referent="RBX000088">
 				<Properties>
 					<string name="Name">Sanctuaries</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	Sanctuaries - the 8 personal dragon sanctuaries (plots) around the hub.
 	Each plot: stone-walled terrace, gate arch with the owner's banner and
-	sign, central nest (eggs), eight dragon perches, income shrine, lanterns.
+	sign, central LEGO nest (eggs), eight LEGO dragon perches, income shrine, lanterns.
 
 	Logic-bearing pieces are tagged with attributes so services can find them:
 	  plot model attributes: PlotId, OwnerUserId (0 = free)
@@ -21377,23 +21584,84 @@ local function nameGui(part: BasePart, plotId: number)
 	return gui
 end
 
+-- ============================================================== LEGO look
+-- Chunky toy bricks with studs (Kit.roundBrick / box); owner-coloured parts are named
+-- "PerchTint" (perches) and "BannerCloth" (flags) and recoloured by setOwner / setPerchGem.
+local LEGO = {
+	DarkGrey = Color3.fromRGB(99, 95, 98),
+	Grey = Color3.fromRGB(163, 162, 165),
+	White = Color3.fromRGB(242, 243, 242),
+	Tan = Color3.fromRGB(215, 197, 153),
+	Straw = Color3.fromRGB(226, 198, 120),
+	Brown = Color3.fromRGB(124, 80, 46),
+	Orange = Color3.fromRGB(190, 110, 48),
+	Yellow = Color3.fromRGB(245, 205, 47),
+}
+local TINT_FREE = Color3.fromRGB(104, 124, 168) -- plot colour while nobody owns the plot
+local NO_COLLIDE = { CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false }
+
+local function wrapAngle(a: number): number
+	return (a + math.pi) % (math.pi * 2) - math.pi
+end
+
+-- Nest: stepped round bricks, a woven basket wall of radial bricks (two layers, a gap at the
+-- front so you can walk in), four lantern pillars with owner-coloured pennants, straw bedding.
+-- Egg slots sit on a ring of radius 4.6 around the centre (SanctuaryController.slotCFrame).
 local function nest(b, at: Vector3)
-	-- stone dais + woven twig ring + soft bedding
-	b:cyl(1.6, 22, at + V(0, 0.8, 0), C.StoneDark, M.Slate)
-	b:cyl(0.6, 23, at + V(0, 1.7, 0), C.Stone, M.Cobblestone)
-	local n = 22
-	for i = 0, n - 1 do
-		local a = i / n * math.pi * 2
-		local r = 8.2
-		local p = at + V(math.cos(a) * r, 3.0, math.sin(a) * r)
-		local seg = b:box(V(1.6, 1.4, 3.0), CF(p) * ANG(0, -a, 0) * ANG(math.rad(10 * ((i % 2) * 2 - 1)), 0, 0),
-			(i % 3 == 0) and C.TimberLight or C.Timber, M.Wood)
-		seg.Name = "Twig"
-		local p2 = at + V(math.cos(a + 0.14) * (r - 1.2), 2.4, math.sin(a + 0.14) * (r - 1.2))
-		b:box(V(1.2, 1.0, 2.6), CF(p2) * ANG(0, -a - 0.14, 0), C.TimberLight, M.Wood)
+	b:roundBrick(1.5, 27.4, at + V(0, 0.75, 0), LEGO.DarkGrey, { Studs = "None" })
+	b:roundBrick(0.5, 25.8, at + V(0, 1.75, 0), LEGO.Grey, { Studs = "None" })
+	local pillarAngles = { math.pi / 4, 3 * math.pi / 4, 5 * math.pi / 4, 7 * math.pi / 4 }
+	-- studs around the edge of the walking tier (not where a pillar stands)
+	local studs = 20
+	for i = 0, studs - 1 do
+		local a = (i + 0.5) / studs * math.pi * 2
+		local nearPillar = false
+		for _, pa in pillarAngles do
+			if math.abs(wrapAngle(a - pa)) < 0.2 then
+				nearPillar = true
+			end
+		end
+		if not nearPillar then
+			b:cyl(0.5, 2.0, at + V(math.cos(a) * 11.9, 2.25, math.sin(a) * 11.9), LEGO.White, M.SmoothPlastic, NO_COLLIDE)
+		end
 	end
-	local bed = b:cyl(0.8, 15, at + V(0, 2.2, 0), Color3.fromRGB(176, 150, 104), M.Fabric)
+	-- basket wall: radial bricks laid like a wall (second layer shifted by half a brick)
+	local colors = { LEGO.Brown, LEGO.Orange, LEGO.Tan }
+	local n = 26
+	local front = -math.pi / 2 -- local -Z faces the gate
+	for layer = 1, 2 do
+		for i = 0, n - 1 do
+			local a = (i + (layer == 2 and 0.5 or 0)) / n * math.pi * 2
+			if math.abs(wrapAngle(a - front)) > 0.32 then
+				local y = 2.0 + 0.75 + (layer - 1) * 1.5
+				local p = at + V(math.cos(a) * 9.4, y, math.sin(a) * 9.4)
+				local color = colors[(i + layer) % 3 + 1]
+				local brick = b:box(V(2.2, 1.5, 3.1), CF(p) * ANG(0, -a, 0), color, M.SmoothPlastic)
+				brick.Name = "NestBrick"
+				if layer == 2 then
+					b:cyl(0.5, 1.5, CF(p + V(0, 1.0, 0)) * ANG(0, -a, 0), color, M.SmoothPlastic, NO_COLLIDE)
+				end
+			end
+		end
+	end
+	-- lantern pillars with pennants
+	for _, a in pillarAngles do
+		local base = at + V(math.cos(a) * 11.3, 2.0, math.sin(a) * 11.3)
+		b:roundBrick(1.2, 3.6, base + V(0, 0.6, 0), LEGO.DarkGrey, { Studs = "None" })
+		b:roundBrick(1.8, 3.1, base + V(0, 2.1, 0), LEGO.Grey, { Studs = "None" })
+		b:roundBrick(1.2, 3.6, base + V(0, 3.6, 0), LEGO.DarkGrey, { Studs = "Top" })
+		local lamp = b:box(V(1.8, 1.8, 1.8), base + V(0, 5.5, 0), LEGO.Yellow, M.Neon, { CastShadow = false, Transparency = 0.15 })
+		lamp.Name = "NestLantern"
+		b:box(V(2.2, 0.4, 2.2), base + V(0, 6.55, 0), LEGO.DarkGrey, M.SmoothPlastic)
+		b:cyl(4.4, 0.3, base + V(0, 8.5, 0), LEGO.White, M.SmoothPlastic)
+		local tangent = V(-math.sin(a), 0, math.cos(a))
+		local flag = b:box(V(0.25, 1.5, 2.6), CF(base + V(0, 9.9, 0) + tangent * 1.4) * ANG(0, -a, 0), TINT_FREE, M.Fabric)
+		flag.Name = "BannerCloth"
+	end
+	-- straw bedding (the part the eggs rest on) with a lighter heart
+	local bed = b:cyl(0.8, 15, at + V(0, 2.2, 0), LEGO.Straw, M.Fabric)
 	bed.Name = "Nest"
+	b:cyl(0.12, 9.6, at + V(0, 2.64, 0), LEGO.Tan, M.Fabric, NO_COLLIDE)
 	return bed
 end
 
@@ -21402,36 +21670,66 @@ end
 local GEM_LIT = Color3.fromRGB(120, 210, 255)
 local GEM_DARK = Color3.fromRGB(70, 74, 86)
 
--- cf: plot-local perch frame at the standing surface (-Z faces the nest).
+-- Perch: two round bricks, an owner-coloured ring with white studs, a straw bed and a
+-- crystal tower on the rim. cf: plot-local perch frame at the standing surface (-Z faces the nest).
 local function perch(b, cf: CFrame, i: number)
 	local at = Vector3.new(cf.Position.X, 0, cf.Position.Z)
 	local surface = cf.Position.Y
-	b:cyl(surface - 0.6, 13.5, at + V(0, (surface - 0.6) / 2, 0), C.StoneDark, M.Slate)
-	b:cyl(0.6, 12.4, at + V(0, surface - 0.3, 0), C.Stone, M.Cobblestone)
-	-- soft bedding ring the dragon rests on
-	b:cyl(0.22, 9.6, at + V(0, surface + 0.02, 0), Color3.fromRGB(146, 122, 82), M.Fabric, { CanCollide = false })
-	local top = b:box(V(10, 0.4, 10), CF(at + V(0, surface - 0.2, 0)) * cf.Rotation, C.StoneWarm, M.Limestone,
+	b:roundBrick(surface - 0.8, 14.2, at + V(0, (surface - 0.8) / 2, 0), LEGO.DarkGrey, { Studs = "None" })
+	local ring = b:roundBrick(0.8, 12.8, at + V(0, surface - 0.4, 0), LEGO.Grey, { Studs = "None" })
+	ring.Name = "PerchTint"
+	ring:SetAttribute("Slot", i)
+	for k = 0, 9 do
+		local a = (k + 0.5) / 10 * math.pi * 2
+		b:cyl(0.5, 1.5, at + V(math.cos(a) * 5.6, surface + 0.25, math.sin(a) * 5.6), LEGO.White, M.SmoothPlastic, NO_COLLIDE)
+	end
+	-- straw bed the dragon rests on, with a lighter heart
+	b:cyl(0.22, 9.6, at + V(0, surface + 0.02, 0), LEGO.Straw, M.Fabric, { CanCollide = false })
+	b:cyl(0.1, 6.0, at + V(0, surface + 0.14, 0), LEGO.Tan, M.Fabric, NO_COLLIDE)
+	local top = b:box(V(10, 0.4, 10), CF(at + V(0, surface - 0.2, 0)) * cf.Rotation, Color3.fromRGB(150, 138, 118), M.Limestone,
 		{ Transparency = 1, CanCollide = false, CanQuery = false })
 	top.Name = "Perch" .. i
 	top:SetAttribute("Slot", i)
-	-- rune crystal on the outer rim (beside the tail, never under it)
+	-- a white tile on the front rim (the side that faces the nest)
+	local look = cf.LookVector
+	b:box(V(2.6, 0.25, 1.5), CF(at + look * 5.5 + V(0, surface + 0.1, 0)) * cf.Rotation, LEGO.White, M.SmoothPlastic, NO_COLLIDE)
+	-- crystal tower on the outer rim (beside the tail, never under it)
 	local out = -cf.LookVector
 	local right = cf.RightVector
 	local rim = at + (out * 0.55 + right * 0.83).Unit * 6.0
-	b:box(V(1.7, 0.9, 1.7), CF(rim + V(0, surface + 0.35, 0)) * cf.Rotation, C.StoneDark, M.Slate)
-	local gem = b:box(V(0.9, 2.4, 0.9), CF(rim + V(0, surface + 1.9, 0)) * cf.Rotation * ANG(0, 0.6, 0.18),
+	b:brick(V(2.0, 0.9, 2.0), CF(rim + V(0, surface + 0.45, 0)) * cf.Rotation, LEGO.DarkGrey, { NoStuds = true })
+	local cap = b:brick(V(1.6, 0.7, 1.6), CF(rim + V(0, surface + 1.3, 0)) * cf.Rotation, LEGO.Grey, { NoStuds = true })
+	cap.Name = "PerchTint"
+	cap:SetAttribute("Slot", i)
+	local gem = b:box(V(0.9, 2.4, 0.9), CF(rim + V(0, surface + 2.85, 0)) * cf.Rotation * ANG(0, 0.6, 0.18),
 		GEM_DARK, M.Glass, { CastShadow = false, Transparency = 0.15 })
 	gem.Name = "PerchGem" .. i
 	gem:SetAttribute("Slot", i)
+	gem:SetAttribute("Lit", false)
 end
 
--- Lights or dims a perch crystal (unlocked / locked).
+-- Perch colour: unlocked perches wear the owner's plot colour, locked ones stay stone grey.
+local function applyTint(model: Model, slot: number)
+	local gem = model:FindFirstChild("PerchGem" .. slot, true)
+	local lit = gem ~= nil and gem:GetAttribute("Lit") == true
+	local tint = model:GetAttribute("TintColor")
+	local color = lit and (typeof(tint) == "Color3" and tint or TINT_FREE) or LEGO.Grey
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d.Name == "PerchTint" and d:GetAttribute("Slot") == slot then
+			d.Color = color
+		end
+	end
+end
+
+-- Lights or dims a perch crystal (unlocked / locked) and colours its brick ring.
 function Sanctuaries.setPerchGem(model: Model, i: number, lit: boolean)
 	local gem = model:FindFirstChild("PerchGem" .. i, true)
 	if gem and gem:IsA("BasePart") then
 		gem.Color = lit and GEM_LIT or GEM_DARK
 		gem.Material = lit and M.Neon or M.Glass
 		gem.Transparency = lit and 0.1 or 0.15
+		gem:SetAttribute("Lit", lit)
+		applyTint(model, i)
 	end
 end
 
@@ -21541,13 +21839,17 @@ function Sanctuaries.setOwner(model: Model, ownerName: string?, color: Color3?)
 			d.Color = color or C.BannerBlue
 		end
 	end
+	model:SetAttribute("TintColor", color)
+	for i = 1, WorldConfig.Sanctuary.PerchCount do
+		applyTint(model, i)
+	end
 end
 
 return Sanctuaries
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000088">
+			<Item class="ModuleScript" referent="RBX000089">
 				<Properties>
 					<string name="Name">TerrainWriter</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21961,7 +22263,7 @@ return TerrainWriter
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000089">
+			<Item class="ModuleScript" referent="RBX000090">
 				<Properties>
 					<string name="Name">Village</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -22375,7 +22677,7 @@ return Village
 			</Item>
 		</Item>
 	</Item>
-	<Item class="StarterPlayer" referent="RBX000090">
+	<Item class="StarterPlayer" referent="RBX000091">
 		<Properties>
 			<string name="Name">StarterPlayer</string>
 			<bool name="EnableMouseLockOption">false</bool>
@@ -22383,15 +22685,15 @@ return Village
 			<float name="CameraMinZoomDistance">6.0</float>
 			<float name="CharacterWalkSpeed">20.0</float>
 		</Properties>
-		<Item class="StarterPlayerScripts" referent="RBX000091">
+		<Item class="StarterPlayerScripts" referent="RBX000092">
 			<Properties>
 				<string name="Name">StarterPlayerScripts</string>
 			</Properties>
-			<Item class="Folder" referent="RBX000092">
+			<Item class="Folder" referent="RBX000093">
 				<Properties>
 					<string name="Name">Controllers</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000093">
+				<Item class="ModuleScript" referent="RBX000094">
 					<Properties>
 						<string name="Name">AnimationController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -22842,7 +23144,7 @@ return AnimationController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000094">
+				<Item class="ModuleScript" referent="RBX000095">
 					<Properties>
 						<string name="Name">AnnounceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23104,7 +23406,7 @@ return AnnounceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000095">
+				<Item class="ModuleScript" referent="RBX000096">
 					<Properties>
 						<string name="Name">AudioController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23277,7 +23579,7 @@ return AudioController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000096">
+				<Item class="ModuleScript" referent="RBX000097">
 					<Properties>
 						<string name="Name">BondController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23595,7 +23897,7 @@ return BondController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000097">
+				<Item class="ModuleScript" referent="RBX000098">
 					<Properties>
 						<string name="Name">CameraController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23958,7 +24260,7 @@ return CameraController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000098">
+				<Item class="ModuleScript" referent="RBX000099">
 					<Properties>
 						<string name="Name">DataController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -24089,7 +24391,7 @@ return DataController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000099">
+				<Item class="ModuleScript" referent="RBX000100">
 					<Properties>
 						<string name="Name">DragonController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -24685,7 +24987,7 @@ return DragonController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000100">
+				<Item class="ModuleScript" referent="RBX000101">
 					<Properties>
 						<string name="Name">EggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -24996,7 +25298,7 @@ return EggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000101">
+				<Item class="ModuleScript" referent="RBX000102">
 					<Properties>
 						<string name="Name">GraphicsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -25133,7 +25435,7 @@ return GraphicsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000102">
+				<Item class="ModuleScript" referent="RBX000103">
 					<Properties>
 						<string name="Name">HatchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -25173,6 +25475,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local PromptGate = require(Shared:WaitForChild("Util"):WaitForChild("PromptGate"))
 local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("DragonVisual"))
 local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
 local Species = require(Shared:WaitForChild("Dragons"):WaitForChild("Species"))
@@ -25855,7 +26158,10 @@ local function play(slot: number, result)
 	local conn = nil
 	local fov0 = camera.FieldOfView
 	local showCompanion = hideCompanion()
+	-- the "E / F" bubbles of the world must not hang over the show
+	PromptGate.set("Hatch", true)
 	local function cleanup()
+		PromptGate.set("Hatch", false)
 		if conn then
 			conn:Disconnect()
 			conn = nil
@@ -26231,6 +26537,7 @@ function HatchController.hatch(slot: number)
 	end)
 	if not ok then
 		warn("[Hatch] " .. tostring(err))
+		PromptGate.set("Hatch", false)
 		if active then
 			pcall(active.Cleanup)
 			active = nil
@@ -26274,7 +26581,7 @@ return HatchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000103">
+				<Item class="ModuleScript" referent="RBX000104">
 					<Properties>
 						<string name="Name">HeldEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26671,7 +26978,7 @@ return HeldEggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000104">
+				<Item class="ModuleScript" referent="RBX000105">
 					<Properties>
 						<string name="Name">InputController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26894,7 +27201,7 @@ return InputController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000105">
+				<Item class="ModuleScript" referent="RBX000106">
 					<Properties>
 						<string name="Name">InteractionController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -26906,6 +27213,8 @@ return InputController
 
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PromptGate = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Util"):WaitForChild("PromptGate"))
 
 local InteractionController = {}
 
@@ -26943,10 +27252,9 @@ end
 
 function InteractionController.Start()
 	ProximityPromptService.PromptTriggered:Connect(onTriggered)
-	-- hide world prompts while riding a dragon
+	-- hide world prompts while riding a dragon (PromptGate: other reasons, like the hatch show, stay in force)
 	local function update()
-		local riding = LocalPlayer:GetAttribute("Riding") == true
-		ProximityPromptService.Enabled = not riding
+		PromptGate.set("Riding", LocalPlayer:GetAttribute("Riding") == true)
 	end
 	LocalPlayer:GetAttributeChangedSignal("Riding"):Connect(update)
 	update()
@@ -26956,7 +27264,7 @@ return InteractionController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000106">
+				<Item class="ModuleScript" referent="RBX000107">
 					<Properties>
 						<string name="Name">PerchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27420,7 +27728,7 @@ return PerchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000107">
+				<Item class="ModuleScript" referent="RBX000108">
 					<Properties>
 						<string name="Name">RadarController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27726,7 +28034,7 @@ return RadarController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000108">
+				<Item class="ModuleScript" referent="RBX000109">
 					<Properties>
 						<string name="Name">SanctuaryController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28235,7 +28543,7 @@ return SanctuaryController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000109">
+				<Item class="ModuleScript" referent="RBX000110">
 					<Properties>
 						<string name="Name">SettingsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28323,7 +28631,7 @@ return SettingsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000110">
+				<Item class="ModuleScript" referent="RBX000111">
 					<Properties>
 						<string name="Name">SpinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28751,7 +29059,7 @@ return SpinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000111">
+				<Item class="ModuleScript" referent="RBX000112">
 					<Properties>
 						<string name="Name">TitleController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28938,7 +29246,7 @@ return TitleController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000112">
+				<Item class="ModuleScript" referent="RBX000113">
 					<Properties>
 						<string name="Name">TreeController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29078,7 +29386,7 @@ return TreeController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000113">
+				<Item class="ModuleScript" referent="RBX000114">
 					<Properties>
 						<string name="Name">UIController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29496,7 +29804,7 @@ return UIController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000114">
+				<Item class="ModuleScript" referent="RBX000115">
 					<Properties>
 						<string name="Name">WildEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29994,7 +30302,7 @@ return WildEggController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000115">
+			<Item class="ModuleScript" referent="RBX000116">
 				<Properties>
 					<string name="Name">Diagnostics</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -30251,7 +30559,7 @@ return Diagnostics
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="LocalScript" referent="RBX000116">
+			<Item class="LocalScript" referent="RBX000117">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -30380,16 +30688,16 @@ end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000117">
+			<Item class="Folder" referent="RBX000118">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000118">
+				<Item class="Folder" referent="RBX000119">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000119">
+				<Item class="ModuleScript" referent="RBX000120">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30469,11 +30777,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000120">
+				<Item class="Folder" referent="RBX000121">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000121">
+					<Item class="ModuleScript" referent="RBX000122">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -30640,7 +30948,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000122">
+					<Item class="ModuleScript" referent="RBX000123">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -30989,7 +31297,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000123">
+				<Item class="ModuleScript" referent="RBX000124">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31055,11 +31363,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000124">
+				<Item class="Folder" referent="RBX000125">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000125">
+					<Item class="ModuleScript" referent="RBX000126">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -32219,7 +32527,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000126">
+					<Item class="ModuleScript" referent="RBX000127">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -32558,7 +32866,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000127">
+				<Item class="ModuleScript" referent="RBX000128">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32956,7 +33264,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000128">
+				<Item class="ModuleScript" referent="RBX000129">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34290,11 +34598,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000129">
+				<Item class="Folder" referent="RBX000130">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000130">
+					<Item class="ModuleScript" referent="RBX000131">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -34511,7 +34819,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000131">
+					<Item class="ModuleScript" referent="RBX000132">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -34717,7 +35025,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000132">
+					<Item class="ModuleScript" referent="RBX000133">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -34806,7 +35114,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000133">
+				<Item class="ModuleScript" referent="RBX000134">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35064,7 +35372,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000134">
+				<Item class="ModuleScript" referent="RBX000135">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35194,7 +35502,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000135">
+				<Item class="ModuleScript" referent="RBX000136">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35370,11 +35678,11 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000136">
+				<Item class="Folder" referent="RBX000137">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000137">
+					<Item class="ModuleScript" referent="RBX000138">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -35666,7 +35974,7 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000138">
+					<Item class="ModuleScript" referent="RBX000139">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -36996,7 +37304,7 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000139">
+					<Item class="ModuleScript" referent="RBX000140">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37212,7 +37520,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000140">
+					<Item class="ModuleScript" referent="RBX000141">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37663,7 +37971,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000141">
+					<Item class="ModuleScript" referent="RBX000142">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -37995,7 +38303,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000142">
+					<Item class="ModuleScript" referent="RBX000143">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -38164,7 +38472,7 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000143">
+					<Item class="ModuleScript" referent="RBX000144">
 						<Properties>
 							<string name="Name">TreeWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -38709,7 +39017,7 @@ return TreeWindow
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000144">
+	<Item class="Workspace" referent="RBX000145">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -38718,7 +39026,7 @@ return TreeWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000145">
+		<Item class="Terrain" referent="RBX000146">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -38730,7 +39038,7 @@ return TreeWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000146">
+	<Item class="Lighting" referent="RBX000147">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -38742,18 +39050,18 @@ return TreeWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000147">
+	<Item class="SoundService" referent="RBX000148">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000148">
+	<Item class="StarterGui" referent="RBX000149">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000149">
+	<Item class="Players" referent="RBX000150">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>
