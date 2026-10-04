@@ -247,9 +247,18 @@ end
 
 -- ============================================================== mount / dismount
 local function mount(player: Player)
+	-- nobody out (every dragon rests on a perch): the strongest one comes down and is ridden
+	local data = Data.Get(player)
+	if data and data.EquippedDragon == "" then
+		local uid = DragonService.EquipBest(player)
+		local record = uid and data.Dragons[uid]
+		if record then
+			Net.notify(player, "info", record.Name .. " came down from its perch.")
+		end
+	end
 	local comp = companions[player] or spawnFor(player)
 	if not comp then
-		return false, "NO_DRAGON", "Equip a dragon first."
+		return false, "NO_DRAGON", "No dragon is out. Open your dragons and press RIDE on one - it comes down from its perch."
 	end
 	if comp.Riding then
 		return true

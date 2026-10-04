@@ -249,6 +249,12 @@ D.PrinceDragon = species("Royal", "PRINCE", 2.5, pal(B.White, C(32, 58, 140), B.
 	{ Wings = { Glow = true, Span = 21 }, Head = { Horns = "Crown", HornLength = 1.6 }, Tail = { Tip = "Plume" },
 		Features = { "Crown", "Halo", "Mane", "Aura" }, Brick = { Shine = 0.14 } })
 
+-- LEGENDARY M0NICA: hot pink and gold, crown + halo, a mane of gold, stars and a blazing aura
+D.M0nicaDragon = species("Royal", "M0NICA", 2.7, pal(C(236, 56, 160), C(92, 18, 84), B.Gold, C(255, 214, 84), C(255, 244, 200), C(255, 110, 215), C(90, 240, 255),
+	{ Glow = C(255, 90, 210), Saddle = C(70, 12, 96), Crystal = C(120, 255, 240), Mane = C(255, 214, 84), HornTip = C(255, 214, 84) }),
+	{ Wings = { Glow = true, Span = 22 }, Head = { Horns = "Long", HornLength = 2.3 }, Tail = { Tip = "Plume" },
+		Features = { "Crown", "Halo", "Mane", "Stars", "Aura" }, Brick = { Shine = 0.17 } })
+
 function Species.get(id: string)
 	return Species.Defs[id] or Species.Defs.GreenDrake
 end

@@ -106,6 +106,46 @@ shared.R = {}
     rec = d.get("Dragon") or {}
     check(r["ok"] and (rec.get("Odds") or 0) >= 1, "hatched dragon carries its odds (1 in %s)" % rec.get("Odds"))
     sim.run_for(2, 1 / 30)
+
+    # ---------------------------------------------------------------- LEGENDARY M0NICA (11999 R$, 50T base, x20 luck)
+    mon0 = srv(sim, 'shared.R = { luck = BS.LuckMultiplier(p) }')
+    r = req(sim, p1, "Shop", "TestBuy", '{ Item = "MonicaDragon" }')
+    sim.run_for(0.5, 1 / 30)
+    mon = srv(sim, '''
+local rec
+for _, r in d.Dragons do if r.SpeciesId == "M0nicaDragon" then rec = r end end
+local MC = require(game:GetService("ReplicatedStorage").Configs.MonetizationConfig)
+shared.R = { has = rec ~= nil, mutation = rec and rec.Mutation or "", income = rec and rec.IncomePerSecond or 0, rarity = rec and rec.Rarity or "",
+	luck = BS.LuckMultiplier(p), attr = p:GetAttribute("Luck"), owns = MC.ownsPass(d, "MonicaDragon"), price = MC.GamePasses.MonicaDragon.Price,
+	name = rec and rec.Name or "" }
+''')
+    print("monica", r, mon0, mon)
+    check(r["ok"], "test purchase of LEGENDARY M0NICA succeeds")
+    check(mon["has"] and mon["owns"] and mon["price"] == 11999, "M0NICA dragon granted, pass owned, price 11999 R$")
+    check(mon["mutation"] == "Omni", "M0NICA comes with every mutation (Omni)")
+    check(mon["income"] == 50e12 * 25, f"M0NICA income: 50T base x25 Omni = $1.25Qa/s ({mon['income']:.3g})")
+    check(abs(mon["luck"] / mon0["luck"] - 20) < 1e-9 and mon["attr"] == mon["luck"], f"permanent x20 luck stacks on top ({mon0['luck']} -> {mon['luck']})")
+    ui = run_client_lua(sim, p1, '''
+local uic = require(game:GetService("Players").LocalPlayer.PlayerScripts.Controllers.UIController)
+uic.Close()
+task.wait(0.4)
+uic.Open("Shop")
+task.wait(0.6)
+local pg = game:GetService("Players").LocalPlayer.PlayerGui
+local card = pg:FindFirstChild("MonicaDragon", true)
+local texts = {}
+if card then
+	for _, d in card:GetDescendants() do
+		if d:IsA("TextLabel") and d.Text ~= "" then table.insert(texts, d.Text) end
+	end
+end
+shared.R = { found = card ~= nil, texts = table.concat(texts, " | ") }
+''')
+    cardinfo = lua_table_to_py(ui.get("R"))
+    print("card", cardinfo)
+    check(cardinfo["found"] and "LEGENDARY M0NICA DRAGON" in cardinfo["texts"].upper(), "shop card is titled LEGENDARY M0NICA DRAGON")
+    check("11,999" in cardinfo["texts"] or "OWNED" in cardinfo["texts"], "shop card shows the price (R$ 11,999) / OWNED")
+    check("X20 LUCK" in cardinfo["texts"].upper(), "card advertises x20 LUCK")
     run_client_lua(sim, p1, '''
 local uic = require(game:GetService("Players").LocalPlayer.PlayerScripts.Controllers.UIController)
 uic.Close()

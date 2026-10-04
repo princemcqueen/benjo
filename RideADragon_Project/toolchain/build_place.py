@@ -233,8 +233,17 @@ def load_into_sim(sim, tree):
 
 
 if __name__ == "__main__":
-    proj = sys.argv[1]
-    out = sys.argv[2]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    proj = args[0]
+    out = args[1]
+    if "--skip-realcheck" not in sys.argv:
+        # gate: the real Luau compiler must accept every script (the Python interpreter is more lenient)
+        import luau_realcheck
+        ok, report = luau_realcheck.check(os.path.join(os.path.dirname(os.path.abspath(proj)), "src"))
+        print(report.splitlines()[-1] if report else "")
+        if ok is False:
+            print(report)
+            sys.exit("BUILD ABORTED: Roblox would reject these scripts (real Luau compiler)")
     name, tree = load_project(proj)
     write_rbxlx(tree, out)
     print(f"wrote {out}")

@@ -1025,11 +1025,13 @@ function Hud:RefreshEquipped()
 		self.DragonName.TextColor3 = H.Text
 		self.RideButton:SetEnabled(true)
 	else
-		self.DragonName.Text = "No dragon equipped"
+		-- every dragon rests on a perch: RIDE brings the strongest one down
+		local owned = next(data.Dragons or {}) ~= nil
+		self.DragonName.Text = owned and "No dragon out" or "No dragon equipped"
 		self.DragonName.TextColor3 = H.TextMuted
 		self.DragonLevel.Text = "-"
 		self.DragonSpeed.Text = "0"
-		self.RideButton:SetEnabled(false)
+		self.RideButton:SetEnabled(owned)
 	end
 end
 

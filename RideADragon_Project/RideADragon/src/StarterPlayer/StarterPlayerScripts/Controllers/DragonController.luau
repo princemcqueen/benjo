@@ -497,8 +497,12 @@ function DragonController.toggleRide()
 		return
 	end
 	if not equippedRecord() then
-		registry.UIController.Notify("info", "Equip a dragon in your collection first.")
-		return
+		-- nobody out: with dragons resting on perches the server brings the strongest one down
+		local data = registry.DataController.all()
+		if not data or next(data.Dragons or {}) == nil then
+			registry.UIController.Notify("info", "You have no dragon yet - hatch an egg first.")
+			return
+		end
 	end
 	busy = true
 	task.spawn(function()

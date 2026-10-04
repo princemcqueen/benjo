@@ -235,7 +235,7 @@ shared.Q = { frost = a, legendary = b, top = w.List[1] }
     print("autoplace:", r.get("data"), st["Slots"])
     check(r["ok"] and len(st["Slots"]) == 3 and st["Equipped"] not in st["Slots"].values(), "auto place fills free perches, never the equipped dragon")
 
-    # keep one free: a tiny collection cannot place its last free dragon
+    # the last free dragon can rest on a perch too (nobody out -> nothing equipped, RIDE takes one back)
     r = srv(sim, '''
 local keep = d.EquippedDragon
 for uid, rec in table.clone(d.Dragons) do
@@ -248,7 +248,9 @@ shared.R = { free = n, keep = keep }
     print("free dragons:", r)
     rr = req(sim, player, "BuyPerch")
     rr = req(sim, player, "Place", f'{{ Id = "{r["keep"]}" }}')
-    check(not rr["ok"] and rr["err"] in ("KEEP_ONE",), f"last free dragon stays out ({rr['err']})")
+    st = state(sim)
+    check(rr["ok"] and st["Equipped"] == "" and r["keep"] in st["Slots"].values(),
+          f"the last free dragon can be placed too (equipped now '{st['Equipped']}')")
 
     # ---------------------------------------------------------------- ride from the window
     res = run_client_lua(sim, player, '''
@@ -275,7 +277,7 @@ shared.RIDE = { riding = game:GetService("Players").LocalPlayer:GetAttribute("Ri
     joint = comp3.find_child("Root").find_child("RiderJoint") if comp3 and comp3.find_child("Root") else None
     check(r["ok"] and riding and joint is not None, "equip while riding swaps the dragon and keeps the rider seated")
     r = req(sim, player, "Release", f'{{ Id = "{other}" }}')
-    check(not r["ok"] and r["err"] in ("RIDING", "LAST_DRAGON", "KEEP_ONE"), f"cannot release the ridden dragon ({r['err']})")
+    check(not r["ok"] and r["err"] in ("RIDING", "LAST_DRAGON"), f"cannot release the ridden dragon ({r['err']})")
 
     # ---------------------------------------------------------------- render the plot (perch dragons)
     try:

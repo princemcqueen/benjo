@@ -5299,6 +5299,12 @@ D.PrinceDragon = species("Royal", "PRINCE", 2.5, pal(B.White, C(32, 58, 140), B.
 	{ Wings = { Glow = true, Span = 21 }, Head = { Horns = "Crown", HornLength = 1.6 }, Tail = { Tip = "Plume" },
 		Features = { "Crown", "Halo", "Mane", "Aura" }, Brick = { Shine = 0.14 } })
 
+-- LEGENDARY M0NICA: hot pink and gold, crown + halo, a mane of gold, stars and a blazing aura
+D.M0nicaDragon = species("Royal", "M0NICA", 2.7, pal(C(236, 56, 160), C(92, 18, 84), B.Gold, C(255, 214, 84), C(255, 244, 200), C(255, 110, 215), C(90, 240, 255),
+	{ Glow = C(255, 90, 210), Saddle = C(70, 12, 96), Crystal = C(120, 255, 240), Mane = C(255, 214, 84), HornTip = C(255, 214, 84) }),
+	{ Wings = { Glow = true, Span = 22 }, Head = { Horns = "Long", HornLength = 2.3 }, Tail = { Tip = "Plume" },
+		Features = { "Crown", "Halo", "Mane", "Stars", "Aura" }, Brick = { Shine = 0.17 } })
+
 function Species.get(id: string)
 	return Species.Defs[id] or Species.Defs.GreenDrake
 end
@@ -7395,6 +7401,20 @@ DragonConfig.Species = {
 		Order = 33,
 		Exclusive = true,
 	},
+	-- Robux exclusive (11999 R$): the strongest dragon of all - 50T base income, x20 luck.
+	M0nicaDragon = {
+		Name = "M0NICA",
+		Rarity = "Exclusive",
+		Description = "The legendary M0NICA. Fifty trillion coins a second and luck that bends the odds.",
+		Speed = 450000000000,
+		FlightSpeed = 600000000000,
+		Income = 50000000000000,
+		Scale = 2.7,
+		Handling = { Turn = 1.35, Accel = 1.8, Agility = 1.4 },
+		FeedCost = 500000000000000,
+		Order = 34,
+		Exclusive = true,
+	},
 }
 
 DragonConfig.StarterSpecies = "GreenDrake"
@@ -8291,6 +8311,20 @@ return table.freeze(LeaderboardConfig)
 local MonetizationConfig = {}
 
 MonetizationConfig.GamePasses = {
+	MonicaDragon = {
+		Id = 0,
+		Price = 11999,
+		Name = "LEGENDARY M0NICA",
+		Description = "The strongest dragon of all: 50T per second, every mutation at once and x20 LUCK forever.",
+		Icon = "Sparkle",
+		Grants = "M0nicaDragon",
+		Mutation = "Omni",
+		Luck = 20,
+		Badges = { "LEGENDARY" },
+		Perks = { "x20 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$50T per second (x25 Omni = $1.25Qa/s)", "Legendary crown, halo, stars and a blazing aura" },
+		Featured = true,
+		Order = 0,
+	},
 	OwnerDragon = {
 		Id = 0,
 		Price = 3000,
@@ -8312,7 +8346,7 @@ MonetizationConfig.GamePasses = {
 		Grants = "PrinceDragon",
 		Mutation = "Omni",
 		Luck = 3,
-		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second on a perch", "Royal halo, crown and golden aura" },
+		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second (x25 Omni = $250T/s)", "Royal halo, crown and golden aura" },
 		Featured = true,
 		Order = 1,
 	},
@@ -8325,7 +8359,7 @@ MonetizationConfig.GamePasses = {
 		Grants = "N2RC1SDragon",
 		Mutation = "Omni",
 		Luck = 3,
-		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second on a perch", "Crystal crown, stars and neon aura" },
+		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second (x25 Omni = $250T/s)", "Crystal crown, stars and neon aura" },
 		Featured = true,
 		Order = 2,
 	},
@@ -10497,17 +10531,6 @@ function DragonService.Count(player: Player): number
 	return n
 end
 
--- Dragons that are not resting on a perch (can be ridden).
-local function freeCount(data): number
-	local n = 0
-	for _, rec in data.Dragons do
-		if rec.PlacedNestId == "" then
-			n += 1
-		end
-	end
-	return n
-end
-
 function DragonService.Capacity(player: Player): number
 	local data = Data.Get(player)
 	local level = data and data.Upgrades.DragonStorage or 0
@@ -10611,8 +10634,8 @@ local function grantStarter(player: Player, data)
 end
 
 -- Makes sure the equipped dragon still exists and is free; otherwise equips
--- the best free dragon so players are never stranded. Returns true when the
--- equipped dragon changed.
+-- the best free dragon (none when every dragon rests on a perch). Returns true
+-- when the equipped dragon changed.
 local function validateEquipped(player: Player, data): boolean
 	local before = data.EquippedDragon
 	local uid = before
@@ -10684,6 +10707,35 @@ local function placeOn(player: Player, data, uid: string, slot: number): (boolea
 	return true, nil, nil, { Slot = slot, Swapped = swapped }
 end
 
+-- Nobody is out (every dragon rests on a perch): brings the strongest one down and equips it.
+-- Returns the equipped uid (nil when there is no dragon at all).
+function DragonService.EquipBest(player: Player): string?
+	local data = Data.Get(player)
+	if not data then
+		return nil
+	end
+	local current = data.EquippedDragon
+	if current ~= "" and data.Dragons[current] then
+		return current
+	end
+	local best, bestScore = nil, -math.huge
+	for uid, rec in data.Dragons do
+		local s = DragonStats.score(rec)
+		if s > bestScore then
+			best, bestScore = uid, s
+		end
+	end
+	if not best then
+		return nil
+	end
+	if data.Dragons[best].PlacedNestId ~= "" then
+		clearPlaced(player, best)
+		DragonService.PlacedChanged:Fire(player)
+	end
+	DragonService.Equip(player, best)
+	return best
+end
+
 -- ============================================================== net handlers
 local function handleEquip(player: Player, p)
 	if not Net.check.str(p.Id, 40) then
@@ -10730,9 +10782,6 @@ local function handleRelease(player: Player, p)
 	end
 	if DragonService.Count(player) <= 1 then
 		return false, "LAST_DRAGON", "You can't release your only dragon."
-	end
-	if record.PlacedNestId == "" and freeCount(data) <= 1 then
-		return false, "KEEP_ONE", "Keep at least one dragon out of the sanctuary to ride."
 	end
 	if ridingThis(player, p.Id) then
 		return false, "RIDING", "Dismount before releasing the dragon you are riding."
@@ -10956,11 +11005,8 @@ local function handlePlace(player: Player, p)
 			return false, "PERCHES_FULL", "All your perches are taken. Unlock more in your sanctuary."
 		end
 	end
-	-- the dragon leaving the free pool must not strand the player
-	local occupant = data.Nests.Slots[tostring(slot)]
-	if record.PlacedNestId == "" and not occupant and freeCount(data) <= 1 then
-		return false, "KEEP_ONE", "Keep at least one dragon out of the sanctuary to ride."
-	end
+	-- every dragon may rest on a perch, the last free one too: with nobody out, RIDE / EQUIP on a
+	-- resting dragon (Inventory) takes it back first
 	local ok, err, msg, result = placeOn(player, data, p.Id, slot)
 	if not ok then
 		return false, err, msg
@@ -10984,8 +11030,7 @@ local function handleTakeBack(player: Player, p)
 	return true
 end
 
--- Fills every free perch with the best free dragons (never the equipped one,
--- always leaving one dragon to ride).
+-- Fills every free perch with the best free dragons (never the equipped one).
 local function handleAutoPlace(player: Player)
 	local data = Data.Get(player)
 	if not data then
@@ -11010,7 +11055,7 @@ local function handleAutoPlace(player: Player)
 	local placed = 0
 	for _, rec in candidates do
 		local slot = freePerch(data)
-		if not slot or freeCount(data) <= 1 then
+		if not slot then
 			break
 		end
 		setPlaced(player, rec.UniqueId, tostring(slot))
@@ -13288,9 +13333,18 @@ end
 
 -- ============================================================== mount / dismount
 local function mount(player: Player)
+	-- nobody out (every dragon rests on a perch): the strongest one comes down and is ridden
+	local data = Data.Get(player)
+	if data and data.EquippedDragon == "" then
+		local uid = DragonService.EquipBest(player)
+		local record = uid and data.Dragons[uid]
+		if record then
+			Net.notify(player, "info", record.Name .. " came down from its perch.")
+		end
+	end
 	local comp = companions[player] or spawnFor(player)
 	if not comp then
-		return false, "NO_DRAGON", "Equip a dragon first."
+		return false, "NO_DRAGON", "No dragon is out. Open your dragons and press RIDE on one - it comes down from its perch."
 	end
 	if comp.Riding then
 		return true
@@ -24537,8 +24591,12 @@ function DragonController.toggleRide()
 		return
 	end
 	if not equippedRecord() then
-		registry.UIController.Notify("info", "Equip a dragon in your collection first.")
-		return
+		-- nobody out: with dragons resting on perches the server brings the strongest one down
+		local data = registry.DataController.all()
+		if not data or next(data.Dragons or {}) == nil then
+			registry.UIController.Notify("info", "You have no dragon yet - hatch an egg first.")
+			return
+		end
 	end
 	busy = true
 	task.spawn(function()
@@ -32031,11 +32089,13 @@ function Hud:RefreshEquipped()
 		self.DragonName.TextColor3 = H.Text
 		self.RideButton:SetEnabled(true)
 	else
-		self.DragonName.Text = "No dragon equipped"
+		-- every dragon rests on a perch: RIDE brings the strongest one down
+		local owned = next(data.Dragons or {}) ~= nil
+		self.DragonName.Text = owned and "No dragon out" or "No dragon equipped"
 		self.DragonName.TextColor3 = H.TextMuted
 		self.DragonLevel.Text = "-"
 		self.DragonSpeed.Text = "0"
-		self.RideButton:SetEnabled(false)
+		self.RideButton:SetEnabled(owned)
 	end
 end
 
@@ -37383,10 +37443,15 @@ function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: numbe
 	local info = Kit.frame({ Name = "Info", Position = UDim2.fromScale(0.43, 0.06), Size = UDim2.fromScale(0.55, 0.88), Parent = card })
 	local tags = Kit.frame({ Name = "Tags", Size = UDim2.fromScale(1, 0.12), Parent = info })
 	Kit.list(tags, "H", 6, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = 1, Parent = tags })
-	Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = 2, Parent = tags })
+	local nextBadge = 1
+	for _, text in pass.Badges or {} do
+		Kit.badge({ Text = text, Color = Color3.fromRGB(255, 190, 40), LayoutOrder = nextBadge, Parent = tags })
+		nextBadge += 1
+	end
+	Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = nextBadge, Parent = tags })
+	Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
 	if pass.Mutation == "Omni" then
-		Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = 3, Parent = tags })
+		Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = nextBadge + 2, Parent = tags })
 	end
 	local title = Kit.text({ Name = "Title", Text = string.upper(pass.Name) .. (pass.Grants == "OwnerDragon" and "" or " DRAGON"), Role = "Display", Scaled = true, Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.2), Parent = info })
 	Create("UIGradient", { Rotation = 90, Color = top and ColorSequence.new(Color3.fromRGB(255, 245, 190), Color3.fromRGB(255, 180, 40)) or ColorSequence.new(rarity.Glow, rarity.Color), Parent = title })

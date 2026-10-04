@@ -226,10 +226,15 @@ function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: numbe
 	local info = Kit.frame({ Name = "Info", Position = UDim2.fromScale(0.43, 0.06), Size = UDim2.fromScale(0.55, 0.88), Parent = card })
 	local tags = Kit.frame({ Name = "Tags", Size = UDim2.fromScale(1, 0.12), Parent = info })
 	Kit.list(tags, "H", 6, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = 1, Parent = tags })
-	Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = 2, Parent = tags })
+	local nextBadge = 1
+	for _, text in pass.Badges or {} do
+		Kit.badge({ Text = text, Color = Color3.fromRGB(255, 190, 40), LayoutOrder = nextBadge, Parent = tags })
+		nextBadge += 1
+	end
+	Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = nextBadge, Parent = tags })
+	Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
 	if pass.Mutation == "Omni" then
-		Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = 3, Parent = tags })
+		Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = nextBadge + 2, Parent = tags })
 	end
 	local title = Kit.text({ Name = "Title", Text = string.upper(pass.Name) .. (pass.Grants == "OwnerDragon" and "" or " DRAGON"), Role = "Display", Scaled = true, Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.2), Parent = info })
 	Create("UIGradient", { Rotation = 90, Color = top and ColorSequence.new(Color3.fromRGB(255, 245, 190), Color3.fromRGB(255, 180, 40)) or ColorSequence.new(rarity.Glow, rarity.Color), Parent = title })

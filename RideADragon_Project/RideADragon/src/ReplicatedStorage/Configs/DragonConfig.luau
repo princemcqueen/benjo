@@ -447,6 +447,20 @@ DragonConfig.Species = {
 		Order = 33,
 		Exclusive = true,
 	},
+	-- Robux exclusive (11999 R$): the strongest dragon of all - 50T base income, x20 luck.
+	M0nicaDragon = {
+		Name = "M0NICA",
+		Rarity = "Exclusive",
+		Description = "The legendary M0NICA. Fifty trillion coins a second and luck that bends the odds.",
+		Speed = 450000000000,
+		FlightSpeed = 600000000000,
+		Income = 50000000000000,
+		Scale = 2.7,
+		Handling = { Turn = 1.35, Accel = 1.8, Agility = 1.4 },
+		FeedCost = 500000000000000,
+		Order = 34,
+		Exclusive = true,
+	},
 }
 
 DragonConfig.StarterSpecies = "GreenDrake"

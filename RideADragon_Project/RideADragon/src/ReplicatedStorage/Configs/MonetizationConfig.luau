@@ -13,6 +13,20 @@
 local MonetizationConfig = {}
 
 MonetizationConfig.GamePasses = {
+	MonicaDragon = {
+		Id = 0,
+		Price = 11999,
+		Name = "LEGENDARY M0NICA",
+		Description = "The strongest dragon of all: 50T per second, every mutation at once and x20 LUCK forever.",
+		Icon = "Sparkle",
+		Grants = "M0nicaDragon",
+		Mutation = "Omni",
+		Luck = 20,
+		Badges = { "LEGENDARY" },
+		Perks = { "x20 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$50T per second (x25 Omni = $1.25Qa/s)", "Legendary crown, halo, stars and a blazing aura" },
+		Featured = true,
+		Order = 0,
+	},
 	OwnerDragon = {
 		Id = 0,
 		Price = 3000,
@@ -34,7 +48,7 @@ MonetizationConfig.GamePasses = {
 		Grants = "PrinceDragon",
 		Mutation = "Omni",
 		Luck = 3,
-		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second on a perch", "Royal halo, crown and golden aura" },
+		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second (x25 Omni = $250T/s)", "Royal halo, crown and golden aura" },
 		Featured = true,
 		Order = 1,
 	},
@@ -47,7 +61,7 @@ MonetizationConfig.GamePasses = {
 		Grants = "N2RC1SDragon",
 		Mutation = "Omni",
 		Luck = 3,
-		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second on a perch", "Crystal crown, stars and neon aura" },
+		Perks = { "x3 LUCK on every roll, forever", "ALL MUTATIONS at once (Omni x25)", "$10T per second (x25 Omni = $250T/s)", "Crystal crown, stars and neon aura" },
 		Featured = true,
 		Order = 2,
 	},

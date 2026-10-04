@@ -91,17 +91,6 @@ function DragonService.Count(player: Player): number
 	return n
 end
 
--- Dragons that are not resting on a perch (can be ridden).
-local function freeCount(data): number
-	local n = 0
-	for _, rec in data.Dragons do
-		if rec.PlacedNestId == "" then
-			n += 1
-		end
-	end
-	return n
-end
-
 function DragonService.Capacity(player: Player): number
 	local data = Data.Get(player)
 	local level = data and data.Upgrades.DragonStorage or 0
@@ -205,8 +194,8 @@ local function grantStarter(player: Player, data)
 end
 
 -- Makes sure the equipped dragon still exists and is free; otherwise equips
--- the best free dragon so players are never stranded. Returns true when the
--- equipped dragon changed.
+-- the best free dragon (none when every dragon rests on a perch). Returns true
+-- when the equipped dragon changed.
 local function validateEquipped(player: Player, data): boolean
 	local before = data.EquippedDragon
 	local uid = before
@@ -278,6 +267,35 @@ local function placeOn(player: Player, data, uid: string, slot: number): (boolea
 	return true, nil, nil, { Slot = slot, Swapped = swapped }
 end
 
+-- Nobody is out (every dragon rests on a perch): brings the strongest one down and equips it.
+-- Returns the equipped uid (nil when there is no dragon at all).
+function DragonService.EquipBest(player: Player): string?
+	local data = Data.Get(player)
+	if not data then
+		return nil
+	end
+	local current = data.EquippedDragon
+	if current ~= "" and data.Dragons[current] then
+		return current
+	end
+	local best, bestScore = nil, -math.huge
+	for uid, rec in data.Dragons do
+		local s = DragonStats.score(rec)
+		if s > bestScore then
+			best, bestScore = uid, s
+		end
+	end
+	if not best then
+		return nil
+	end
+	if data.Dragons[best].PlacedNestId ~= "" then
+		clearPlaced(player, best)
+		DragonService.PlacedChanged:Fire(player)
+	end
+	DragonService.Equip(player, best)
+	return best
+end
+
 -- ============================================================== net handlers
 local function handleEquip(player: Player, p)
 	if not Net.check.str(p.Id, 40) then
@@ -324,9 +342,6 @@ local function handleRelease(player: Player, p)
 	end
 	if DragonService.Count(player) <= 1 then
 		return false, "LAST_DRAGON", "You can't release your only dragon."
-	end
-	if record.PlacedNestId == "" and freeCount(data) <= 1 then
-		return false, "KEEP_ONE", "Keep at least one dragon out of the sanctuary to ride."
 	end
 	if ridingThis(player, p.Id) then
 		return false, "RIDING", "Dismount before releasing the dragon you are riding."
@@ -550,11 +565,8 @@ local function handlePlace(player: Player, p)
 			return false, "PERCHES_FULL", "All your perches are taken. Unlock more in your sanctuary."
 		end
 	end
-	-- the dragon leaving the free pool must not strand the player
-	local occupant = data.Nests.Slots[tostring(slot)]
-	if record.PlacedNestId == "" and not occupant and freeCount(data) <= 1 then
-		return false, "KEEP_ONE", "Keep at least one dragon out of the sanctuary to ride."
-	end
+	-- every dragon may rest on a perch, the last free one too: with nobody out, RIDE / EQUIP on a
+	-- resting dragon (Inventory) takes it back first
 	local ok, err, msg, result = placeOn(player, data, p.Id, slot)
 	if not ok then
 		return false, err, msg
@@ -578,8 +590,7 @@ local function handleTakeBack(player: Player, p)
 	return true
 end
 
--- Fills every free perch with the best free dragons (never the equipped one,
--- always leaving one dragon to ride).
+-- Fills every free perch with the best free dragons (never the equipped one).
 local function handleAutoPlace(player: Player)
 	local data = Data.Get(player)
 	if not data then
@@ -604,7 +615,7 @@ local function handleAutoPlace(player: Player)
 	local placed = 0
 	for _, rec in candidates do
 		local slot = freePerch(data)
-		if not slot or freeCount(data) <= 1 then
+		if not slot then
 			break
 		end
 		setPlaced(player, rec.UniqueId, tostring(slot))
