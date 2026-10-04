@@ -38,7 +38,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "DuelMenu", "DuelEnd", "DuelHall", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -102,6 +102,10 @@ function UILab.reset()
 	if combat and combat.clear then
 		combat.clear()
 	end
+	local duel = registry.DuelController
+	if duel and duel.clear then
+		duel.clear()
+	end
 end
 
 function UILab.show(screen: string)
@@ -140,6 +144,16 @@ function UILab.show(screen: string)
 	elseif screen == "RaceTop" or screen == "RaceArena" then
 		ui.Open("Race", { Tab = screen == "RaceTop" and "Monthly" or "Arena" })
 		return "Race"
+	elseif screen == "DuelMenu" or screen == "DuelEnd" then
+		-- the Pokemon-style duel HUD (plates, text box, move menu / end card) with sample fighters, no stage
+		local duel = registry.DuelController
+		if duel and duel.preview then
+			duel.preview(screen == "DuelEnd" and "End" or "Menu")
+		end
+		return nil
+	elseif screen == "DuelHall" then
+		ui.Open("Duel", {})
+		return "Duel"
 	elseif screen == "Radar" then
 		-- the egg radar chip (arrow to the best egg) with sample text
 		local radar = registry.RadarController

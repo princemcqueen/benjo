@@ -403,4 +403,48 @@ function Village.elder(parent: Instance, origin: CFrame, station)
 	return b.Model, sign
 end
 
+-- ============================================================== battle hall (Duels)
+-- A little arena ring with banners, two pedestals (a dragon on each side, like the duel scene),
+-- a trainer and a sign: Window "Duel" (trainers and challenges).
+function Village.duel(parent: Instance, origin: CFrame, station)
+	local b = Kit.new(parent, origin, "BattleHall")
+	local red, blue = Color3.fromRGB(214, 70, 60), Color3.fromRGB(70, 120, 214)
+	-- the ring
+	b:cyl(1.4, 26, V(0, 0.7, 0), C.StoneDark, M.Slate)
+	b:cyl(0.5, 22, V(0, 1.55, 0), C.StoneWarm, M.Cobblestone)
+	b:cyl(0.2, 8, V(0, 1.85, 0), C.Gold, M.Metal)
+	for i = 1, 16 do
+		local a = i / 16 * math.pi * 2
+		b:box(V(2.2, 1.0, 0.6), CF(math.cos(a) * 12.2, 1.6, math.sin(a) * 12.2) * ANG(0, -a + math.pi / 2, 0), i % 2 == 0 and red or blue, M.SmoothPlastic)
+	end
+	-- two pedestals facing each other
+	b:cyl(1.6, 7, V(-6, 2.6, 2), C.Stone, M.Slate)
+	b:cyl(1.6, 7, V(6, 2.6, -2), C.Stone, M.Slate)
+	b:cyl(0.4, 6, V(-6, 3.6, 2), red, M.SmoothPlastic)
+	b:cyl(0.4, 6, V(6, 3.6, -2), blue, M.SmoothPlastic)
+	-- banners
+	for _, side in { -1, 1 } do
+		local color = side < 0 and red or blue
+		b:box(V(0.6, 14, 0.6), V(side * 15, 7, -3), C.Timber, M.Wood)
+		b:box(V(0.5, 7, 3.2), V(side * 15, 9.5, -3), color, M.Fabric)
+		b:wedge(V(0.5, 1.6, 3.2), CF(side * 15, 5.2, -3) * ANG(0, 0, math.pi), color, M.Fabric)
+		local l = b:ball(1.6, V(side * 15, 14.4, -3), Color3.fromRGB(255, 220, 120), M.Neon, { CastShadow = false })
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(255, 220, 140)
+		light.Range = 14
+		light.Parent = l
+	end
+	-- the trainer (a simple figure at the rim)
+	local npc = b:sub("Trainer")
+	npc:box(V(2.4, 4.2, 1.6), V(11, 3.9, -8), Color3.fromRGB(150, 50, 44), M.Fabric)
+	npc:box(V(2.6, 1.0, 1.8), V(11, 2.4, -8), Color3.fromRGB(120, 40, 36), M.Fabric)
+	npc:ball(1.8, V(11, 6.9, -8), Color3.fromRGB(226, 186, 150), M.SmoothPlastic)
+	npc:box(V(2.2, 0.5, 2.2), V(11, 7.9, -8), Color3.fromRGB(50, 50, 60), M.Fabric)
+	local sign = signBoard(b, CF(0, 14.5, -14), 12, 2.2, station and station.Name or "Battle Hall")
+	if station then
+		stationPrompt(b, b:box(V(8, 4, 4), V(0, 4, -3), C.Planks, M.WoodPlanks, { Transparency = 1, CanCollide = false }), station, "Duel")
+	end
+	return b.Model, sign
+end
+
 return Village

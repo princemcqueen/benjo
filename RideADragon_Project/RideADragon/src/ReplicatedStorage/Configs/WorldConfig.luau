@@ -38,6 +38,7 @@ WorldConfig.Stations = {
 	Forge = { Name = "Dragonsmith Forge", Position = Vector3.new(-104, 30, -66), Window = "Shop", Tab = "Upgrades", Prompt = "Upgrades", Radius = 22 },
 	Library = { Name = "Hall of Dragons", Position = Vector3.new(-122, 30, 32), Window = "Index", Prompt = "Dragon Index", Radius = 22 },
 	Quests = { Name = "Elder Rowan", Position = Vector3.new(116, 30, -28), Window = "Quests", Prompt = "Quests", Radius = 20 },
+	Duel = { Name = "Battle Hall", Position = Vector3.new(-48, 30, -82), Window = "Duel", Prompt = "Battle", Radius = 20 },
 }
 for _, s in WorldConfig.Stations do
 	s.Facing = yawToward(s.Position, WorldConfig.Hub.Center)

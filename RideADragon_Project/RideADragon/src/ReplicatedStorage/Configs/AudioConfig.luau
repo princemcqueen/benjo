@@ -58,6 +58,7 @@ AudioConfig.Sounds = {
 	Blast = { Id = "", Group = "SFX", Volume = 0.9, RollOffMax = 260 }, -- "fireball cast"
 	Hit = { Id = "", Group = "SFX", Volume = 0.8, RollOffMax = 200 }, -- "punch impact"
 	Knockout = { Id = "", Group = "UI", Volume = 0.9 }, -- "knockout sting"
+	DuelStart = { Id = "", Group = "UI", Volume = 0.8 }, -- "battle start sting"
 
 	-- Economy & UI
 	Collect = { Id = "", Group = "SFX", Volume = 0.7 }, -- "coins collect"

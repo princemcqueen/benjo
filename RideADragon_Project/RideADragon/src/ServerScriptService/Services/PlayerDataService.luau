@@ -83,6 +83,8 @@ local TEMPLATE = {
 		ArenaKills = 0,
 		ArenaDeaths = 0,
 		Coins = 0,
+		DuelsWon = 0,
+		DuelsLost = 0,
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},

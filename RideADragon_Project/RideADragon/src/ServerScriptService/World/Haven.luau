@@ -65,6 +65,15 @@ function Haven.build(ctx)
 			end
 		end
 	end
+	-- the Battle Hall (duels): not part of the generated layout
+	local duelStation = WorldConfig.Stations.Duel
+	if duelStation then
+		local at = duelStation.Position
+		local cf = CF(at.X, ground(at.X, at.Z), at.Z) * ANG(0, duelStation.Facing, 0)
+		local model = Village.duel(hub, cf, duelStation)
+		model:SetAttribute("Station", "Duel")
+		stations.Duel = model
+	end
 	-- the Great Tree (skill tree station) north-east of the statue
 	local treePos, treeYaw = GreatTree.position(ground)
 	stations.Tree = GreatTree.build(hub, treePos, treeYaw)

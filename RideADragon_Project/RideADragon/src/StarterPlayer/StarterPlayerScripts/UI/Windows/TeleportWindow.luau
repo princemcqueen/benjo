@@ -29,6 +29,7 @@ TeleportWindow.Places = {
 	{ Id = "RaceIsland", Title = "RACE ISLAND", Sub = "Sky races, duels, monthly prize", Icon = "Trophy", Color = Color3.fromRGB(255, 80, 70) },
 	{ Id = "Shop", Title = "DRAGON MARKET", Sub = "Potions, boosts and eggs", Icon = "Bag", Color = Color3.fromRGB(77, 163, 255) },
 	{ Id = "Forge", Title = "DRAGONSMITH FORGE", Sub = "Upgrades", Icon = "Flame", Color = Color3.fromRGB(255, 140, 60) },
+	{ Id = "Duel", Title = "BATTLE HALL", Sub = "Turn-based dragon duels", Icon = "Sword", Color = Color3.fromRGB(255, 110, 90) },
 	{ Id = "Quests", Title = "ELDER ROWAN", Sub = "Quests and rewards", Icon = "Scroll", Color = Color3.fromRGB(205, 164, 222) },
 	{ Id = "Library", Title = "HALL OF DRAGONS", Sub = "Dragon Index", Icon = "Book", Color = Color3.fromRGB(64, 236, 214) },
 }

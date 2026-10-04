@@ -1,4 +1,4 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 8)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 9)
 ======================================================
 
 CONTENTS
@@ -41,7 +41,7 @@ ROBUX ITEMS (before publishing)
 SOUNDS
   Every sound is a key in ReplicatedStorage > Configs > AudioConfig; an empty Id is skipped
   silently. New keys in this snapshot: EggPlace, RaceCount, RaceGo, RaceGate, RaceBoost,
-  RaceFinish, Strike, Blast, Hit, Knockout (paste Creator Store ids to give them a sound).
+  RaceFinish, Strike, Blast, Hit, Knockout, DuelStart (paste Creator Store ids to give them a sound).
 
 RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly north-east)
   A floating LEGO island with a plaza, start grid, a sky circuit, a duel arena, a podium and
@@ -80,6 +80,35 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     arena, on foot, or while racing. A TRAINING DUMMY in the middle takes hits, shows damage
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
+
+BATTLE HALL: POKEMON-STYLE DUELS (new in TEST 9)  -  Teleport menu > BATTLE HALL (or the hall in the village)
+  A turn-based duel in a fixed scene, like the old Pokemon games: your dragon in front on the left,
+  the opponent's behind on the right, a name / hit point plate for each, a text box and a menu of
+  four moves. The scene is built far above the world (nobody else sees it, nothing of the map is in
+  the way); HUD and walking are held until the duel is over and come back on their own.
+  - OPPONENTS: 4 NPC TRAINERS in the Battle window (Rookie Ren, Ranger Kai, Captain Vale, Champion
+    Ashka). Their dragon's level follows YOUR equipped dragon (-2 / 0 / +3 / +6 levels), so a duel is
+    never hopeless and never trivial. Or CHALLENGE ANOTHER PLAYER of the server (PLAYERS tab): they
+    get an ACCEPT / DECLINE panel, the answer starts the duel on both screens (30 s to answer).
+  - YOUR FIGHTER is the dragon you have EQUIPPED (change it in DRAGONS). Hit points and damage come
+    from its level and rarity (the same formulas as the arena, hit points scaled down so a duel
+    lasts about 5-7 turns).
+  - MOVES (click or keys 1-4): STRIKE (reliable, free), FIRE (the strong breath, 8 uses, can miss),
+    GUARD (goes first and halves the damage of the turn, 6 uses, fails if used twice in a row),
+    SPECIAL (a mutated dragon: <MUTATION> BURST, the strongest hit, 3 uses; a normal dragon: ROAR,
+    +30% damage for 3 turns, 4 uses). The faster dragon moves first (the one that flies faster).
+    Every hit is rolled by the SERVER (accuracy, 8% critical, +-10% variance); the scene only plays it.
+  - ELEMENTS: every species has an element (FIRE, WATER, NATURE, EARTH, STORM, ICE, DARK, LIGHT).
+    Fire > Nature / Ice, Water > Fire / Earth, Nature > Water / Earth, Earth > Fire / Storm,
+    Storm > Water / Ice, Ice > Nature / Earth, Dark and Light are neutral to each other.
+    "It's super effective!" is x1.5, "It's not very effective..." x0.67.
+  - REWARDS: a trainer pays cash from YOUR income (2-30 minutes of it, with a minimum) + XP, the first
+    win of each trainer every 3 minutes (a rematch right away pays 25%). A player duel pays the winner
+    like a trainer of the loser's level, the loser gets a little XP; a duel that ends in 2 turns or
+    by a forfeit pays nothing (no win trading), the same two players within 10 minutes pay 25%.
+    FORFEIT button any time (the other side wins). Leaving the game forfeits too.
+    Counted: Stats DuelsWon / DuelsLost. Numbers: ReplicatedStorage > Configs > DuelConfig.
+    Server: DuelService (Net domain "Duel"). Client scene: DuelController, window: DuelWindow.
 
 DAILY REWARD + DRAGON INDEX (new in TEST 8)  -  the DAILY and INDEX buttons of the HUD work now
   - DAILY (button on the right, key J): a 7-day calendar. One reward per UTC day; claiming on
