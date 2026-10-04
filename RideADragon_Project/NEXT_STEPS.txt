@@ -1,0 +1,56 @@
+RIDE A DRAGON - what is left after TEST 12  (hand-over notes for the next session)
+====================================================================================
+
+HOW WE WORK (the owner writes Bosnian; answer in Bosnian, code and comments in English)
+  - After every feature: lint + tests, build the place, send it.
+      cd RideADragon_Project
+      python3 toolchain/luau_lint.py RideADragon/src
+      python3 toolchain/tests/<name>_test.py                       (simulation tests, 1-8 minutes each)
+      python3 toolchain/ui_qa.py Screen1,Screen2 phone_landscape,phone_portrait,tablet,1920x1080,1280x720
+      python3 toolchain/build_place.py RideADragon/default.project.json RideADragon_Dev.rbxlx
+    (the build also runs the real Luau compiler over every script)
+  - Deliver RideADragon_Dev.rbxlx + a zip of the project (without toolchain/out and __pycache__).
+  - Never use the owner's Roblox Studio until they write "mozes u Studio".
+  - Commit messages end with the Co-Authored-By / Claude-Session trailers; keep tracked __pycache__
+    files out of commits (git checkout -- toolchain/__pycache__ before committing).
+  - The owner sends the finished Robux pass / product ids themselves: do NOT touch MonetizationConfig.
+    (Cash Potion still has Id 0 - the developer product is missing.)
+
+DONE IN TEST 10: four sky islands + random eggs on land and islands, the owner's statue on the plaza.
+DONE IN TEST 11: QUESTS (service, window, badge, starter goals), the statue's preset outfit.
+DONE IN TEST 12: EGG GUARDIANS (every world egg lies in a nest guarded by a dragon you must beat in a duel; stronger
+  egg = stronger guardian; see README 'EGG GUARDIANS'), riders no longer hear running steps while flying.
+  Balance knobs: EggConfig.Guardians (Pools, Soften, LevelPerPower, LevelBase, XPBase). Idea for later: guardian
+  drops, a guardian boss for the Golden / Rainbow eggs, sound of the guardian waking up (key Roar).
+
+THE OWNER'S WISHES THAT ARE NOT DONE YET (in this order)
+  0. SOUNDS: the running sound while flying is FIXED (the default Roblox character sounds are muted on
+     mounted characters - AudioController.Start; dragon footsteps only after 0.35 s on the ground).
+     STILL OPEN: the dragon sounds are silent because AudioConfig WingFlap / Roar / Eat / Strike / Hit... have
+     empty ids: the owner pastes Creator Store ids (no audio can be made offline); the hooks are in
+     AnimationController.OnFlap / OnFootstep, DragonController (Roar key F), EggController (guardian wakes up)
+     and AudioController.play3D.
+  1. NEW EGG TYPES (EggConfig.Eggs + region weights + egg look + Index / shop text); more islands / maps.
+  2. IMPROVE THE MAP: more landmarks / hidden egg spots / ambient life (birds, butterflies), weather and
+     events (roadmap "Series B": Frostpeak, Ember Caldera, Skyreach, treasure, Golden Dragon, cinematic
+     discoveries, RegionService). World code: ServerScriptService/World (Haven, Landmarks, Props, Village).
+  3. BETTER ANIMATIONS: dragon idle variety (look around, tail sway, blink, yawn), secondary motion,
+     take-off and landing, wing beat sync, hatch emerge. Code: ReplicatedStorage/Shared/Dragons/Animator.luau,
+     tests: toolchain/tests/anim_test.py, mesh_pose.py, toolchain/pose_sheet.py (renders poses).
+  4. A guided TUTORIAL with an objective line in the HUD (the starter goals of the Quests window are the first step;
+     QuestConfig.Tutorial has the old waypoint steps). 
+  5. Series C: abilities, World Boss, titles, streaks (see the task list in the old notes).
+
+ECONOMY NOTES (TEST 9)
+  - Regular dragons use the new ladder in DragonConfig (see its header); the four Robux exclusives keep
+    their old trillions on purpose - ask the owner whether they should come down too.
+  - Selling: DragonStats.sellValue = 300 s of base income x mutation (level never counts).
+  - If the numbers still feel wrong after a playtest: the knobs are DragonConfig.Species[*].Income,
+    EconomyConfig.FeedExponent / SellSeconds, TreeConfig prices (generate() ranges), EconomyConfig.Upgrades.
+
+KNOWN LIMITS
+  - Everything was tested in the offline simulator, not in real Roblox Studio. The simulator cannot render
+    ViewportFrame previews (dragon cards, Egg Hunter card, Index): check those in Studio.
+  - Audio ids in AudioConfig are empty (paste Creator Store ids to give the sounds).
+  - The monthly race prize ($50) is paid by the owner by hand (the game records the winner).
+  - wildegg_test can flake once in a while (random spawn area).

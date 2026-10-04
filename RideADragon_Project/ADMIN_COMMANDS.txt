@@ -1,0 +1,66 @@
+RIDE A DRAGON - ADMIN /GIVE SYSTEM
+==================================
+
+The system is already embedded in RideADragon_Dev.rbxlx.
+It is SERVER-SIDE and uses the existing game services/DataStore.
+A successful grant requests an immediate save.
+
+LIVE ADMIN ACCESS
+  ReplicatedStorage > Configs > AdminConfig
+
+  Current username allowed:
+    Bendzaminoo
+
+  For extra admins, add their numeric Roblox UserId to AdminUserIds.
+  In Studio, everyone is allowed so the commands are easy to test.
+
+COMMANDS
+  /give me Cash 10000
+  /give me Spins 25
+  /give PlayerName PrinceDragon
+  /give PlayerName PrinceDragon 2
+  /give PlayerName LuckPotion 5
+  /give PlayerName CelestialEgg 3
+  /give PlayerName EggHunter
+  /givehelp
+
+PLAYER TARGET
+  Use a full username, a unique username/display-name prefix, or "me".
+
+WHAT CAN BE GIVEN
+  - Cash / Spins
+  - Every dragon species in DragonConfig, including OwnerDragon, PrinceDragon,
+    N2RC1SDragon and M0nicaDragon
+  - Every egg in EggConfig
+  - Every Developer Product in MonetizationConfig.Products
+  - Permanent Game Pass perk flags in MonetizationConfig.GamePasses (e.g. EggHunter)
+
+POTIONS
+  Potions in this game are immediate timed boosts, not bag items.
+  Example: /give Player LuckPotion 5 applies five normal Luck Potions and therefore
+  extends the Luck timer by 5 x 15 minutes.
+
+SECURITY
+  - Permission is checked on the server.
+  - Grants use EconomyService, SpinService, DragonService, EggService and
+    MonetizationService directly.
+  - No client RemoteEvent can choose arbitrary amounts.
+  - Per-command limits are in AdminConfig.
+
+RANKS (added in TEST 9)
+-----------------------
+  /rank <player|me> <rank|none>     rank = vip, mod, admin, coowner, owner (or the numbers 1-5)
+  /ranks                            the ranks and who has one in this server
+  /rankhelp
+
+  Examples:
+    /rank Bob vip
+    /rank Bob co-owner
+    /rank me owner
+    /rank Bob none
+    /rank SomeUsername vip           (not in the server: they get it when they join)
+
+  Titles, epithets and colours: ReplicatedStorage > Configs > RankConfig.
+  Who may: the owner (AdminConfig / the experience creator / anybody inside Studio) can set any rank.
+  A CO-OWNER can hand out VIP, MOD and ADMIN to players below CO-OWNER and may also use /give.
+  A rank is a tag over the character and a coloured [TITLE] in chat; it is saved with the player.
