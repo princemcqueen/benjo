@@ -182,7 +182,8 @@ shared.R = { keys = table.concat(keys, ",") }'''
     new_keys = mid_keys - old_keys
     sim.run_for(6.0, 1 / 30)
     late_keys = set(filter(None, cli(sim, player, KEYS)["keys"].split(",")))
-    check(len(new_keys) == 2 and not (new_keys & late_keys), f"lucky eggs vanish after their time ({len(new_keys)} new, {len(new_keys & late_keys)} left)")
+    # (the companion may pick one of the two up in the first second: one is enough to see them vanish)
+    check(len(new_keys) >= 1 and not (new_keys & late_keys), f"lucky eggs vanish after their time ({len(new_keys)} new, {len(new_keys & late_keys)} left)")
 
     # ------------------------------------------------------------ Egg Magnet potion
     r = buy(sim, player, "EggMagnet")
@@ -332,7 +333,10 @@ shared.R = { radar = cards.EggRadar, magnet = cards.EggMagnet, hatch = cards.Hat
 	pass = pass and texts(pass) or "", hasPass = pass ~= nil, hasPreview = preview ~= nil }''')
     print("shop", ui)
     check(ui["hPotions"] == "POTIONS" and ui["hHunt"] == "EGG HUNTING" and ui["hPacks"] == "CASH & SPINS", f"section headers: {ui['hPotions']} / {ui['hHunt']} / {ui['hPacks']}")
-    for key, name, price in (("radar", "EGG RADAR", "49"), ("magnet", "EGG MAGNET", "39"), ("hatch", "FAST HATCH", "59"), ("lucky", "LUCKY EGG CALL", "99"), ("bundle", "MYTHIC BUNDLE", "249")):
+    # (the prices are the owner's: read them from MonetizationConfig instead of hard-coding them)
+    prices = srv(sim, 'shared.R = { radar = MC.Products.EggRadar.Price, magnet = MC.Products.EggMagnet.Price, hatch = MC.Products.HatchBoost.Price, lucky = MC.Products.LuckyEggCall.Price, bundle = MC.Products.MythicBundle.Price }')
+    for key, name in (("radar", "EGG RADAR"), ("magnet", "EGG MAGNET"), ("hatch", "FAST HATCH"), ("lucky", "LUCKY EGG CALL"), ("bundle", "MYTHIC BUNDLE")):
+        price = str(int(prices[key]))
         check(name in ui[key].upper() and price in ui[key], f"shop card {name}: R$ {price}")
     check(ui["potion"] != "" and ui["cash"] != "", "the old potion and cash cards are still in the shop")
     check(ui["hasPass"] and ui["hasPreview"], "the Egg Hunter pass has a card with an egg preview")
