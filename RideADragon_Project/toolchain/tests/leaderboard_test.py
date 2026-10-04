@@ -87,7 +87,9 @@ out.Pos = pos
 shared.R = out
 ''')
     print(r)
-    check(r["Boards"] == 4, "4 leaderboards built in the plaza")
+    # the plaza has 6 boards (earned, hatched, income, play time, strongest dragon, highest level dragon);
+    # the Race Island has 3 more (monthly race, fastest racers, arena warriors)
+    check(r["Boards"] == 9, "9 leaderboards built (6 in the plaza + 3 on the Race Island)")
     check(r["Earned"][0].startswith("Player2") and "$12M" in r["Earned"][0], "earned board ranks Player2 first ($12M)")
     check(r["Earned"][1].startswith("Player1"), "earned board ranks Player1 second")
     check(r["Hatched"][0].startswith("Player1") and r["Hatched"][0].endswith("40"), "hatched board ranks Player1 first (40)")
@@ -111,7 +113,7 @@ shared.L = { ok = true, inView = n, near = near, pos = tostring(hrp.Position) }
     L = lua_table_to_py(look.get("L"))
     print("travel", res, L)
     check(res["ok"], "Travel To Spawn succeeds")
-    check(L["inView"] >= 3 and L["near"] == 4, "arrival faces the leaderboards (in view: %s)" % L["inView"])
+    check(L["inView"] >= 4 and L["near"] == 6, "arrival faces the leaderboards (in view: %s of %s)" % (L["inView"], L["near"]))
 
     # teleport window
     sim.run_for(3.0, 1 / 30)
