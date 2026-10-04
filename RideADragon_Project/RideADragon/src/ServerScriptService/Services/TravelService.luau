@@ -6,7 +6,8 @@
 	moves, the rider stays seated); on foot, the companion is brought along.
 
 	Net (domain "Travel"): To { Place } -> { Place }
-	Places: Sanctuary, Spawn (leaderboards), SpinIsland, RaceIsland, Shop, Forge, Quests, Library
+	Places: Sanctuary, Spawn (leaderboards), SpinIsland, RaceIsland, the sky islands (WorldConfig.SkyIslands),
+	        Shop, Forge, Quests, Library
 ]]
 
 local Players = game:GetService("Players")
@@ -44,6 +45,10 @@ function TravelService.Destination(player: Player, place: string): CFrame?
 	if place == "RaceIsland" then
 		local at = RaceConfig.toWorld(RaceConfig.Arrival)
 		return CFrame.lookAt(at, at + Vector3.new(0, 0, -10))
+	end
+	local isle = WorldConfig.SkyIslandById[place]
+	if isle then
+		return WorldConfig.islandArrival(isle)
 	end
 	if place == "Spawn" then
 		local lb = Services.LeaderboardService

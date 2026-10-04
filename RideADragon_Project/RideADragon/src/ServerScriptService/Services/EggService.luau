@@ -51,7 +51,9 @@ EggService.Hatched = Signal.new() -- (player, record, eggType)
 
 local Data
 local Services
-local areas: { { Name: string, Position: Vector3, Region: string } } = {}
+local areas: { any } = {} -- { Name, Position, Region, Label?, Radius?, Island? }
+local extraAreas: { any } = {} -- areas added by other services (sky islands): they survive a reload
+local areasLoaded = false -- the fixed areas of the world are in (eggs are only spawned after that)
 local states: { [Player]: any } = {}
 local rng = Random.new()
 
@@ -75,6 +77,21 @@ local function loadAreas()
 			table.insert(areas, { Name = name, Position = p.Position, Region = region })
 		end
 	end
+	for _, a in extraAreas do
+		table.insert(areas, a)
+	end
+	areasLoaded = true
+end
+
+-- Eggs rest on the terrain (not in water) or on a part marked EggSurface (the plate of a sky island).
+local function eggGround(hit): boolean
+	if not hit or hit.Normal.Y <= 0.6 then
+		return false
+	end
+	if hit.Instance == Workspace.Terrain then
+		return hit.Material ~= Enum.Material.Water
+	end
+	return hit.Instance:GetAttribute("EggSurface") == true
 end
 
 local rayParams = RaycastParams.new()
@@ -103,7 +120,7 @@ local function findSpot(area): Vector3?
 		end
 	end
 	rayParams.FilterDescendantsInstances = exclude
-	local radius = area.Name == "Pillar" and 8 or EggConfig.Spawning.ScatterRadius
+	local radius = area.Radius or (area.Name == "Pillar" and 8 or EggConfig.Spawning.ScatterRadius)
 	for _ = 1, 8 do
 		local a = rng:NextNumber(0, math.pi * 2)
 		local r = math.sqrt(rng:NextNumber()) * radius
@@ -111,7 +128,7 @@ local function findSpot(area): Vector3?
 		local z = area.Position.Z + math.sin(a) * r
 		local origin = Vector3.new(x, area.Position.Y + 160, z)
 		local hit = Workspace:Raycast(origin, Vector3.new(0, -400, 0), rayParams)
-		if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+		if eggGround(hit) then
 			return hit.Position + Vector3.new(0, 2.6, 0)
 		end
 	end
@@ -124,6 +141,22 @@ end
 local function randomSpot(avoid: Vector3?): (Vector3?, any?)
 	if #areas == 0 then
 		return nil, nil
+	end
+	-- a share of the roaming eggs lands on a sky island (its own area: rare luck, its region's eggs)
+	local islands = {}
+	for _, a in areas do
+		if a.Island then
+			table.insert(islands, a)
+		end
+	end
+	if #islands > 0 and rng:NextNumber() < EggConfig.Spawning.IslandShare then
+		for _ = 1, 8 do
+			local isle = islands[rng:NextInteger(1, #islands)]
+			local spot = findSpot({ Name = isle.Name, Position = isle.Position, Radius = isle.Radius * EggConfig.Spawning.IslandInset / 0.78 })
+			if spot and (not avoid or (Vector2.new(spot.X, spot.Z) - Vector2.new(avoid.X, avoid.Z)).Magnitude >= 40) then
+				return spot, isle
+			end
+		end
 	end
 	local box = EggConfig.Spawning.WorldBox
 	local skip = {}
@@ -155,7 +188,7 @@ local function randomSpot(avoid: Vector3?): (Vector3?, any?)
 		local z = rng:NextNumber(box.MinZ, box.MaxZ)
 		if not avoid or (Vector2.new(x, z) - Vector2.new(avoid.X, avoid.Z)).Magnitude >= EggConfig.Spawning.RoamMinSeparation then
 			local hit = Workspace:Raycast(Vector3.new(x, 520, z), Vector3.new(0, -900, 0), rayParams)
-			if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+			if eggGround(hit) then
 				local nearest, best = nil, math.huge
 				for _, a in areas do
 					if not skip[a.Name] then
@@ -482,6 +515,15 @@ end
 
 function EggService.FindSpot(area): Vector3?
 	return findSpot(area)
+end
+
+-- Adds an egg area from another service (a sky island): { Name, Label?, Position, Region, Radius?, Island? }.
+-- Kept across a reload of the world areas, so the order of the services does not matter.
+function EggService.AddArea(area)
+	table.insert(extraAreas, area)
+	if areasLoaded then
+		table.insert(areas, area)
+	end
 end
 
 -- A completely random spot on the land + an area record for it (see randomSpot).
@@ -821,7 +863,7 @@ local function onLoaded(player: Player)
 	end
 	states[player] = { Active = {}, Serial = 0 }
 	task.spawn(function()
-		while #areas == 0 and player.Parent == Players do
+		while not areasLoaded and player.Parent == Players do
 			task.wait(0.5)
 		end
 		fillEggs(player)

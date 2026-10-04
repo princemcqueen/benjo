@@ -1,5 +1,12 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 9)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 10)
 ======================================================
+
+NEW IN TEST 10 (short)
+  - FOUR NEW SKY ISLANDS: Crystal Isle, Bloom Isle, Ember Isle, Frost Isle (see SKY ISLANDS below).
+  - EGGS EVERYWHERE: up to 24 eggs per player; half of them appear at random places of the whole land,
+    a third of those on the sky islands; wild eggs roam over land and islands too.
+  - THE STATUE IN THE MIDDLE OF THE PLAZA IS NOW THE OWNER (your avatar, "Bendzaminoo").
+  - Teleport menu: a card for every island.
 
 NEW IN TEST 9 (short)
   - ADMIN /give system (from your TEST8_ADMIN_GIVE zip) is in, with your MonetizationConfig untouched
@@ -94,6 +101,31 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     arena, on foot, or while racing. A TRAINING DUMMY in the middle takes hits, shows damage
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
+
+SKY ISLANDS + EGGS EVERYWHERE (new in TEST 10)  -  Teleport menu > CRYSTAL / BLOOM / EMBER / FROST ISLE
+  Four floating LEGO islands (WorldConfig.SkyIslands: position, size, theme, egg region). Fly there on a dragon
+  (they float at 290-430 studs, away from the race circuit) or use the Teleport menu (a landing pad):
+    CRYSTAL ISLE (-430, 330, 560)  glowing crystal spires, a shimmering pool        eggs of Skyreach
+    BLOOM ISLE   (380, 290, 330)   a giant flower, mushrooms, round trees           eggs of Dragon Haven
+    EMBER ISLE   (-780, 380, -330) a small volcano with lava flows, charred trees   eggs of Ember Caldera
+    FROST ISLE   (60, 430, -880)   ice spikes, snowy pines, a frozen pond, an igloo eggs of Frostpeak
+  Every island has a floating name sign (visible from far away) and glowing stalactites underneath. It is a
+  RARE egg area: the luck of an egg that grows there rolls twice and keeps the better one.
+  - EGGS: every player has up to 24 own eggs in the world (EggConfig.Spawning.MaxActive). Half of the new ones
+    appear at a completely random place of the whole land (not near the fixed areas), and a third of those on
+    a random sky island; the rest scatter (70 studs) round the named areas, which now include the 4 islands.
+    Wild (lucky) eggs always roam: anywhere on the land or on an island, never close to the previous one.
+    The knobs: EggConfig.Spawning (MaxActive, RoamingShare, IslandShare, ScatterRadius, WorldBox).
+  - Code: World/SkyIslands.luau (the builder), Services/IslandService (builds them, registers the egg areas),
+    EggService.AddArea / RandomSpot, TravelService (places = island ids), toolchain/tests/island_test.py.
+
+THE OWNER'S STATUE (new in TEST 10)
+  The statue in the middle of the plaza (on the fountain plinth) is now the owner instead of the stone dragon: built
+  from the real avatar of WorldConfig.PlazaStatue.Username ("Bendzaminoo"; or set UserId), 3.6 times the size of a
+  normal avatar, right fist raised, with a plaque on the plinth and a floating "OWNER - Dragon King" title in the
+  rank colours. If the avatar cannot be loaded (no web access, wrong name) a marble king with a crown stands
+  there instead. Change who it is or how big in ReplicatedStorage > Configs > WorldConfig > PlazaStatue.
+  Code: Services/StatueService.luau, toolchain/tests/statue_test.py.
 
 ADMIN COMMANDS + RANKS (new in TEST 9)  -  see ADMIN_COMMANDS.txt
   Who is the owner: ReplicatedStorage > Configs > AdminConfig (username "Bendzaminoo", extra user ids,

@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
+local WorldConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WorldConfig"))
 
 local UI = script.Parent.Parent
 local Theme = require(UI.Theme)
@@ -33,6 +34,10 @@ TeleportWindow.Places = {
 	{ Id = "Quests", Title = "ELDER ROWAN", Sub = "Quests and rewards", Icon = "Scroll", Color = Color3.fromRGB(205, 164, 222) },
 	{ Id = "Library", Title = "HALL OF DRAGONS", Sub = "Dragon Index", Icon = "Book", Color = Color3.fromRGB(64, 236, 214) },
 }
+-- the floating sky islands (WorldConfig.SkyIslands): rare eggs grow on them
+for _, isle in WorldConfig.SkyIslands do
+	table.insert(TeleportWindow.Places, { Id = isle.Id, Title = string.upper(isle.Name), Sub = isle.Sub, Icon = isle.Icon, Color = isle.Color })
+end
 
 function TeleportWindow.new(ui, registry)
 	local self = WindowBase.new({

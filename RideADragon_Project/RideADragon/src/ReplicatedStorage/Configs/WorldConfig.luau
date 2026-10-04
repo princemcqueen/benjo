@@ -173,4 +173,28 @@ WorldConfig.Bridges = {
 	{ Name = "East Bridge", Road = "East" },
 }
 
+-- Floating sky islands (World/SkyIslands builds them, IslandService registers their egg areas).
+-- Center = the middle of the top surface; Radius = the grass plate; Region = which eggs grow there
+-- (EggConfig.Regions); every island is a RARE egg area (luck rolls twice) and a Travel place (Id).
+-- They float well away from the race circuit (north-east) and the sky pillar (far west).
+WorldConfig.SkyIslands = {
+	{ Id = "CrystalIsle", Name = "Crystal Isle", Sub = "Glowing crystals and Skyreach eggs", Theme = "Crystal", Center = Vector3.new(-430, 330, 560), Radius = 64, Region = "Skyreach", Color = Color3.fromRGB(150, 225, 255), Icon = "Sparkle" },
+	{ Id = "BloomIsle", Name = "Bloom Isle", Sub = "Giant flowers and mushrooms", Theme = "Bloom", Center = Vector3.new(380, 290, 330), Radius = 60, Region = "Haven", Color = Color3.fromRGB(255, 160, 210), Icon = "Clover" },
+	{ Id = "EmberIsle", Name = "Ember Isle", Sub = "A small volcano and Ember eggs", Theme = "Ember", Center = Vector3.new(-780, 380, -330), Radius = 66, Region = "EmberCaldera", Color = Color3.fromRGB(255, 130, 60), Icon = "Flame" },
+	{ Id = "FrostIsle", Name = "Frost Isle", Sub = "Ice spikes and Frostpeak eggs", Theme = "Frost", Center = Vector3.new(60, 430, -880), Radius = 62, Region = "Frostpeak", Color = Color3.fromRGB(190, 235, 255), Icon = "Wind" },
+}
+-- The statue in the middle of the plaza is the owner (StatueService): built from this player's avatar,
+-- or a marble king when the avatar cannot be loaded. Scale = times the size of a normal avatar.
+WorldConfig.PlazaStatue = { Username = "Bendzaminoo", UserId = 0, Scale = 3.6 }
+
+WorldConfig.SkyIslandById = {}
+for _, isle in WorldConfig.SkyIslands do
+	WorldConfig.SkyIslandById[isle.Id] = isle
+end
+-- Where Travel puts you on an island (a landing pad), facing the middle.
+function WorldConfig.islandArrival(isle): CFrame
+	local at = isle.Center + Vector3.new(0, 3.4, isle.Radius * 0.55)
+	return CFrame.lookAt(at, isle.Center + Vector3.new(0, 3.4, 0))
+end
+
 return WorldConfig
