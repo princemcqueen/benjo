@@ -5719,14 +5719,20 @@ return Species
 					<string name="Name">EggReach</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	EggReach
-	How far an egg can be grabbed from, and whether the Egg Radar is on. The server (pickup
-	validation) and the client (when to ask) use the same numbers.
+	How far an egg can be grabbed from, whether the Egg Radar is on and how fast the nest
+	hatches. The server (pickup / incubation) and the client (when to ask, what to show) use
+	the same numbers.
 
-	Range bonus = Great Tree "Egg Magnet" branch
-	            + Egg Magnet boost (Robux product, timed)
-	            + Egg Hunter pass (permanent)
+	Pickup range bonus (fraction, 0.5 = +50%) =
+	      Great Tree "Egg Magnet" branch
+	    + every running boost with a Magnet value   (Egg Magnet potion)
+	    + every owned pass with a Magnet value      (Egg Hunter)
 	Egg Radar range (studs) = the Forge upgrade "Egg Radar" (250 / 600 / 1200 / whole map),
-	unlimited while the Egg Radar boost runs or with the Egg Hunter pass. 0 = no radar.
+	unlimited while a Radar boost runs or with a pass that has Radar = true.  0 = no radar.
+	Hatch factor = product of the HatchFactor of every running boost (Fast Hatch: 0.5).
+
+	Boosts live in data.Boosts[id] = expiry (os.time); `now` is os.time() on the server and
+	Workspace:GetServerTimeNow() on the client.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -5743,23 +5749,52 @@ local function boostLeft(data, boostId: string, now: number): number
 	return math.max(0, t - now)
 end
 
+-- Seconds left of the boost with the longest time among the ones that have `flag`.
+local function flagLeft(data, flag: string, now: number): number
+	local best = 0
+	for id, def in MonetizationConfig.Boosts do
+		if def[flag] then
+			best = math.max(best, boostLeft(data, id, now))
+		end
+	end
+	return best
+end
+
+local function passWith(data, flag: string): boolean
+	for id, pass in MonetizationConfig.GamePasses do
+		if pass[flag] and MonetizationConfig.ownsPass(data, id) then
+			return true
+		end
+	end
+	return false
+end
+
 -- Extra pickup range as a fraction (0.5 = +50%).
 function EggReach.bonus(data, now: number?): number
 	local t = now or os.time()
 	local b = TreeConfig.bonus(data, "EggMagnet")
-	if boostLeft(data, "Magnet", t) > 0 then
-		b += MonetizationConfig.Boosts.Magnet.Magnet
+	for id, def in MonetizationConfig.Boosts do
+		if def.Magnet and boostLeft(data, id, t) > 0 then
+			b += def.Magnet
+		end
 	end
-	if MonetizationConfig.ownsPass(data, "EggHunter") then
-		b += MonetizationConfig.GamePasses.EggHunter.Magnet
+	for id, pass in MonetizationConfig.GamePasses do
+		if pass.Magnet and MonetizationConfig.ownsPass(data, id) then
+			b += pass.Magnet
+		end
 	end
 	return b
+end
+
+-- Pickup range in studs for a base range.
+function EggReach.range(data, base: number, now: number?): number
+	return base * (1 + EggReach.bonus(data, now))
 end
 
 -- How far the radar sees (0 = off, math.huge = everything).
 function EggReach.radarRange(data, now: number?): number
 	local t = now or os.time()
-	if boostLeft(data, "Radar", t) > 0 or MonetizationConfig.ownsPass(data, "EggHunter") then
+	if flagLeft(data, "Radar", t) > 0 or passWith(data, "Radar") then
 		return math.huge
 	end
 	local level = data and data.Upgrades and tonumber(data.Upgrades.Radar) or 0
@@ -5770,12 +5805,24 @@ function EggReach.radarActive(data, now: number?): boolean
 	return EggReach.radarRange(data, now) > 0
 end
 
--- Seconds of the Egg Radar BOOST left (math.huge with the pass, 0 otherwise).
+-- Seconds of the Egg Radar BOOST left (math.huge with a radar pass, 0 otherwise).
 function EggReach.radarSeconds(data, now: number?): number
-	if MonetizationConfig.ownsPass(data, "EggHunter") then
+	if passWith(data, "Radar") then
 		return math.huge
 	end
-	return boostLeft(data, "Radar", now or os.time())
+	return flagLeft(data, "Radar", now or os.time())
+end
+
+-- Incubation time factor (1 = normal, 0.5 = twice as fast).
+function EggReach.hatchFactor(data, now: number?): number
+	local t = now or os.time()
+	local f = 1
+	for id, def in MonetizationConfig.Boosts do
+		if def.HatchFactor and boostLeft(data, id, t) > 0 then
+			f *= def.HatchFactor
+		end
+	end
+	return f
 end
 
 return EggReach
@@ -8864,6 +8911,14 @@ return table.freeze(LeaderboardConfig)
 
 	GamePasses: bought once, owned forever.
 	Products:   consumables (potions, cash packs), bought any number of times.
+
+	Egg hunting items (the "Hunt" section of the shop):
+	  Egg Radar     boost   every egg of yours is marked on screen, through walls
+	  Egg Magnet    boost   +100% egg pickup range
+	  Fast Hatch    boost   eggs you put in the nest hatch twice as fast
+	  Lucky Egg Call        3 very lucky eggs appear around you for a few minutes
+	  Mythic Bundle         3 Celestial Eggs with x50 luck go straight into the bag
+	  Egg Hunter    pass    permanent radar, +50% pickup range, +3 egg bag slots
 ]]
 
 local MonetizationConfig = {}
@@ -8923,6 +8978,23 @@ MonetizationConfig.GamePasses = {
 	},
 }
 
+MonetizationConfig.GamePasses.EggHunter = {
+	Id = 0,
+	Price = 1299,
+	Name = "Egg Hunter",
+	Description = "Find more eggs, faster: a permanent radar, a wider pickup range and a bigger bag.",
+	Icon = "Radar",
+	Kind = "Tool", -- no dragon: shown with an egg instead of a dragon
+	Radar = true, -- the egg radar is always on
+	Magnet = 0.5, -- +50% egg pickup range
+	Slots = 3, -- +3 egg bag slots
+	Egg = "CelestialEgg", -- the egg shown on the card
+	Accent = Color3.fromRGB(255, 140, 60),
+	UnlockText = "EGG HUNTER unlocked! Permanent egg radar, wider pickup range and +3 bag slots.",
+	Perks = { "Egg radar on forever", "+50% egg pickup range", "+3 egg bag slots", "Stacks with potions" },
+	Order = 4,
+}
+
 -- Featured passes in shop order.
 function MonetizationConfig.passOrder(): { string }
 	local list = {}
@@ -8956,6 +9028,17 @@ function MonetizationConfig.passLuck(data): number
 		end
 	end
 	return m
+end
+
+-- Extra egg bag slots from owned passes.
+function MonetizationConfig.passSlots(data): number
+	local n = 0
+	for id, pass in MonetizationConfig.GamePasses do
+		if pass.Slots and MonetizationConfig.ownsPass(data, id) then
+			n += pass.Slots
+		end
+	end
+	return n
 end
 
 MonetizationConfig.Products = {
@@ -9064,7 +9147,93 @@ MonetizationConfig.Products = {
 		Minimum = 250000,
 		Color = Color3.fromRGB(255, 120, 40),
 	},
+
+	-- egg hunting
+	EggRadar = {
+		Id = 0,
+		Price = 49,
+		Name = "Egg Radar",
+		Description = "Marks every egg on the map, even through walls, for 30 minutes.",
+		Icon = "Radar",
+		Kind = "Boost",
+		Boost = "Radar",
+		Seconds = 30 * 60,
+		Color = Color3.fromRGB(255, 140, 60),
+	},
+	EggMagnet = {
+		Id = 0,
+		Price = 39,
+		Name = "Egg Magnet",
+		Description = "Pick eggs up from twice as far away for 15 minutes.",
+		Icon = "Magnet",
+		Kind = "Boost",
+		Boost = "Magnet",
+		Seconds = 15 * 60,
+		Color = Color3.fromRGB(255, 90, 120),
+	},
+	HatchBoost = {
+		Id = 0,
+		Price = 59,
+		Name = "Fast Hatch",
+		Description = "Eggs you put in your nest hatch twice as fast for 30 minutes.",
+		Icon = "Clock",
+		Kind = "Boost",
+		Boost = "Hatch",
+		Seconds = 30 * 60,
+		Color = Color3.fromRGB(255, 205, 60),
+	},
+	LuckyEggCall = {
+		Id = 0,
+		Price = 99,
+		Name = "Lucky Egg Call",
+		Description = "3 rare eggs with x25 to x100 luck appear around you for 5 minutes.",
+		Icon = "Sparkle",
+		Kind = "LuckyEggs",
+		Count = 3,
+		Luck = { 25, 100 },
+		Lifetime = 5 * 60,
+		Color = Color3.fromRGB(190, 120, 255),
+	},
+	MythicBundle = {
+		Id = 0,
+		Price = 249,
+		Name = "Mythic Bundle",
+		Description = "3 Celestial Eggs with x50 luck, straight into your egg bag.",
+		Icon = "Gift",
+		Kind = "Eggs",
+		Egg = "CelestialEgg",
+		Count = 3,
+		Luck = 50,
+		Color = Color3.fromRGB(255, 80, 160),
+	},
 }
+
+-- Shop sections (ROBUX tab): products list their Section, ProductOrder their order.
+MonetizationConfig.Sections = {
+	{ Id = "Potions", Title = "POTIONS" },
+	{ Id = "Hunt", Title = "EGG HUNTING" },
+	{ Id = "Packs", Title = "CASH & SPINS" },
+}
+local SECTION_OF = {
+	LuckPotion = "Potions",
+	SuperLuckPotion = "Potions",
+	CashPotion = "Potions",
+	LevelPotion = "Potions",
+	MutationPotion = "Potions",
+	EggRadar = "Hunt",
+	EggMagnet = "Hunt",
+	HatchBoost = "Hunt",
+	LuckyEggCall = "Hunt",
+	MythicBundle = "Hunt",
+	SpinPack = "Packs",
+	SpinPackBig = "Packs",
+	CashPackSmall = "Packs",
+	CashPackMedium = "Packs",
+	CashPackLarge = "Packs",
+}
+for id, product in MonetizationConfig.Products do
+	product.Section = SECTION_OF[id] or "Packs"
+end
 
 -- Shop order (ROBUX tab)
 MonetizationConfig.ProductOrder = {
@@ -9073,6 +9242,11 @@ MonetizationConfig.ProductOrder = {
 	"CashPotion",
 	"LevelPotion",
 	"MutationPotion",
+	"EggRadar",
+	"EggMagnet",
+	"HatchBoost",
+	"LuckyEggCall",
+	"MythicBundle",
 	"SpinPack",
 	"SpinPackBig",
 	"CashPackSmall",
@@ -9080,11 +9254,26 @@ MonetizationConfig.ProductOrder = {
 	"CashPackLarge",
 }
 
+-- Product ids of one section, in shop order.
+function MonetizationConfig.sectionProducts(sectionId: string): { string }
+	local list = {}
+	for _, id in MonetizationConfig.ProductOrder do
+		if MonetizationConfig.Products[id].Section == sectionId then
+			table.insert(list, id)
+		end
+	end
+	return list
+end
+
 -- Boosts (timed): luck multipliers stack by multiplying.
 MonetizationConfig.Boosts = {
 	Luck = { Name = "x2 LUCK", Luck = 2, Color = Color3.fromRGB(110, 208, 104), Icon = "Clover" },
 	SuperLuck = { Name = "x3 LUCK", Luck = 3, Color = Color3.fromRGB(64, 236, 214), Icon = "Star" },
 	Cash = { Name = "x2 CASH", Cash = 2, Color = Color3.fromRGB(255, 196, 48), Icon = "Coin" },
+	-- egg hunting: Radar = radar on, Magnet = extra pickup range (+100%), HatchFactor = incubation time factor
+	Radar = { Name = "EGG RADAR", Radar = true, Color = Color3.fromRGB(255, 140, 60), Icon = "Radar" },
+	Magnet = { Name = "EGG MAGNET", Magnet = 1.0, Color = Color3.fromRGB(255, 90, 120), Icon = "Magnet" },
+	Hatch = { Name = "FAST HATCH", HatchFactor = 0.5, Color = Color3.fromRGB(255, 205, 60), Icon = "Clock" },
 }
 
 function MonetizationConfig.find(itemId: string)
@@ -9762,8 +9951,8 @@ return table.freeze(SpinConfig)
 	  BoostRegen     x(1+b) boost refill speed                    Locomotion (client stats)
 	  RunSpeed       x(1+b) ground run speed                      MountService / DragonController
 	  HatchSpeed     eggs incubate b faster                       EggService.Place
-	  EggBag         +b egg bag slots                             EggService (+ UI)
-	  EggMagnet      x(1+b) egg pickup range                      EggController / EggService
+	  EggBag         +b egg bag slots                             EggService (+ UI)  (Egg Hunter pass: +3 more)
+	  EggMagnet      x(1+b) egg pickup range                      EggReach.bonus (+ boost + pass)
 	  EggRespawn     new eggs appear b faster                     EggService
 	  BondGrowth     x(1+b) bond points                           BondService
 	  QuickFeathers  bond ability cooldowns -b                    BondService / BondController
@@ -9771,6 +9960,7 @@ return table.freeze(SpinConfig)
 ]]
 
 local EconomyConfig = require(script.Parent:WaitForChild("EconomyConfig"))
+local MonetizationConfig = require(script.Parent:WaitForChild("MonetizationConfig"))
 
 local TreeConfig = {}
 
@@ -9877,10 +10067,13 @@ function TreeConfig.bonus(data, id: string): number
 	return branch.Levels[math.min(lvl, #branch.Levels)].Bonus
 end
 
--- Egg bag capacity: Egg Storage upgrade + Deep Pockets (the one formula everybody uses).
+-- Egg bag capacity: Egg Storage upgrade + Deep Pockets + pass slots (Egg Hunter) - the one
+-- formula everybody uses.
 function TreeConfig.eggCapacity(data): number
 	local level = data and data.Upgrades and tonumber(data.Upgrades.EggStorage) or 0
-	return EconomyConfig.upgradeValue("EggStorage", level) + math.floor(TreeConfig.bonus(data, "EggBag") + 0.5)
+	return EconomyConfig.upgradeValue("EggStorage", level)
+		+ math.floor(TreeConfig.bonus(data, "EggBag") + 0.5)
+		+ MonetizationConfig.passSlots(data)
 end
 
 -- Seconds of the dragon's income refunded when it is released (Gentle Goodbye).
@@ -12800,6 +12993,9 @@ return EconomyService
 	  Hatch  { Slot }           -> { Dragon = record, New = bool, Egg = type }
 	  BuyIncubator { Slot }     -> { Unlocked }
 	Signals to the owner: "Eggs" { List }, "EggAdded" egg, "EggRemoved" { Key }
+
+	Robux items use EggService.GiveEgg(.., force) (the bag may overflow - paid eggs are never
+	lost) and EggService.SpawnBonusEggs (Lucky Egg Call: lucky eggs near the player for a while).
 ]]
 
 local Players = game:GetService("Players")
@@ -12817,6 +13013,8 @@ local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
 local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 local HatchConfig = require(Configs:WaitForChild("HatchConfig"))
+local WildEggConfig = require(Configs:WaitForChild("WildEggConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 
 local EggService = {}
 EggService.PickedUp = Signal.new() -- (player, eggType)
@@ -12934,10 +13132,13 @@ local function spawnOne(player: Player): boolean
 	return true
 end
 
+-- Eggs of the normal respawn cycle (bonus eggs from Robux items do not count).
 local function activeCount(st): number
 	local n = 0
-	for _ in st.Active do
-		n += 1
+	for _, e in st.Active do
+		if not e.Bonus then
+			n += 1
+		end
 	end
 	return n
 end
@@ -13150,8 +13351,9 @@ end
 -- ============================================================== giving eggs
 -- Puts a new egg in the player's bag (capacity checked) and - when the hand is free - in
 -- the hand. Used by pickups and by world events (Lucky Wild Eggs).
+-- `force` (paid items) lets the bag overflow instead of refusing.
 -- Returns ok, id | errorCode, inHand
-function EggService.GiveEgg(player: Player, eggType: string, luck: number?): (boolean, string, boolean?)
+function EggService.GiveEgg(player: Player, eggType: string, luck: number?, force: boolean?): (boolean, string, boolean?)
 	local data = Data.Get(player)
 	if not data then
 		return false, "NOT_LOADED"
@@ -13159,7 +13361,7 @@ function EggService.GiveEgg(player: Player, eggType: string, luck: number?): (bo
 	if not EggConfig.Eggs[eggType] then
 		return false, "BAD_EGG"
 	end
-	if #data.Eggs >= capacity(data) then
+	if #data.Eggs >= capacity(data) and not force then
 		return false, "EGG_STORAGE_FULL"
 	end
 	local id = Data.NextId(player, "EggSerial", "E")
@@ -13190,6 +13392,84 @@ function EggService.FindSpot(area): Vector3?
 	return findSpot(area)
 end
 
+-- Resting spot on the terrain around a point (for eggs that appear next to the player).
+local function findSpotNear(center: Vector3, minRadius: number, maxRadius: number): Vector3?
+	local exclude = {}
+	local world = Workspace:FindFirstChild("World")
+	for _, name in { "Nature", "EggSpots" } do
+		local folder = world and world:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, name in { "Dragons", "MyEggs", "HeldEggs" } do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, p in Players:GetPlayers() do
+		if p.Character then
+			table.insert(exclude, p.Character)
+		end
+	end
+	rayParams.FilterDescendantsInstances = exclude
+	for _ = 1, 14 do
+		local a = rng:NextNumber(0, math.pi * 2)
+		local r = rng:NextNumber(minRadius, maxRadius)
+		local x = center.X + math.cos(a) * r
+		local z = center.Z + math.sin(a) * r
+		local hit = Workspace:Raycast(Vector3.new(x, center.Y + 180, z), Vector3.new(0, -600, 0), rayParams)
+		if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+			return hit.Position + Vector3.new(0, 2.6, 0)
+		end
+	end
+	return nil
+end
+
+-- Lucky Egg Call (Robux): `count` very lucky eggs appear around the player - only they can see and
+-- take them - and vanish after `lifetime` seconds. luckRange = { min, max }. Returns how many appeared.
+function EggService.SpawnBonusEggs(player: Player, count: number, luckRange: { number }?, lifetime: number?): number
+	local st = states[player]
+	if not st then
+		return 0
+	end
+	local positions = playerPositions(player)
+	local center = positions[1]
+	if not center then
+		return 0
+	end
+	local epic = WildEggConfig.ById.Epic
+	local range = luckRange or { 25, 100 }
+	local spawned = 0
+	local stay = lifetime or 300
+	for _ = 1, count do
+		local pos = findSpotNear(center, 22, 70)
+		if pos then
+			st.Serial += 1
+			local egg = {
+				Key = "b" .. st.Serial,
+				Type = epic.Eggs[rng:NextInteger(1, #epic.Eggs)],
+				Position = pos,
+				Area = "Lucky Call",
+				Luck = rng:NextInteger(math.floor(range[1]), math.floor(range[2])),
+				Bonus = true,
+			}
+			st.Active[egg.Key] = egg
+			Net.signal(player, "EggAdded", serialize(egg))
+			spawned += 1
+			local key = egg.Key
+			task.delay(stay, function()
+				if states[player] == st and st.Active[key] then
+					st.Active[key] = nil
+					Net.signal(player, "EggRemoved", { Key = key })
+				end
+			end)
+		end
+	end
+	return spawned
+end
+
 -- ============================================================== handlers
 local function handlePickup(player: Player, p)
 	if not Net.check.str(p.Key, 16) then
@@ -13210,7 +13490,7 @@ local function handlePickup(player: Player, p)
 	if model then
 		slack = (model:GetAttribute("BodyRadius") or 0) * 0.5
 	end
-	local reach = GameConfig.Interaction.EggPickupServerRange * (1 + TreeConfig.bonus(data, "EggMagnet"))
+	local reach = EggReach.range(data, GameConfig.Interaction.EggPickupServerRange)
 	if nearestDistance(player, egg.Position) > reach + slack then
 		return false, "TOO_FAR"
 	end
@@ -13301,8 +13581,10 @@ local function handlePlace(player: Player, p)
 	local hatchTime = def.HatchTime
 	local tree = Services.TreeService
 	if tree and tree.Bonus then
-		hatchTime = math.max(3, math.floor(hatchTime * (1 - tree.Bonus(player, "HatchSpeed")) + 0.5))
+		hatchTime = hatchTime * (1 - tree.Bonus(player, "HatchSpeed"))
 	end
+	-- Fast Hatch potion: the nest works faster while it runs
+	hatchTime = math.max(3, math.floor(hatchTime * EggReach.hatchFactor(data, now()) + 0.5))
 	Data.Set(player, { "Incubator", "Slots", tostring(slot) }, { Type = egg.Type, Start = t, Ready = t + hatchTime, Id = egg.Id, Luck = egg.Luck or 1 })
 	-- the hand is empty now; while nest spots remain, the next egg of the bag is taken
 	-- in hand so several eggs can be placed one after another
@@ -14420,6 +14702,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 
 local MonetizationService = {}
@@ -14464,7 +14747,7 @@ function MonetizationService.GrantPass(player: Player, itemId: string): (boolean
 	end
 	local text
 	if fresh then
-		text = string.format("%s unlocked! x%s LUCK on every roll, forever.", string.upper(pass.Name), tostring(pass.Luck or 1))
+		text = pass.UnlockText or string.format("%s unlocked! x%s LUCK on every roll, forever.", string.upper(pass.Name), tostring(pass.Luck or 1))
 	end
 	return true, text
 end
@@ -14503,6 +14786,34 @@ function MonetizationService.GrantProduct(player: Player, itemId: string): (bool
 			return true, "Your dragon is max level - you got a Luck Potion instead!"
 		end
 		return true, string.format("%s gained %d levels!", record and record.Name or "Your dragon", gained)
+	elseif kind == "LuckyEggs" then
+		-- eggs with big luck appear around the player (only for them), for a few minutes
+		local n = Services.EggService.SpawnBonusEggs(player, product.Count or 3, product.Luck, product.Lifetime or 300)
+		if n <= 0 then
+			Services.EconomyService.Earn(player, 25000, "Purchase")
+			return true, "No room for the eggs right now - you got $25K instead."
+		end
+		return true, string.format("%d lucky eggs appeared around you! Find them before they vanish.", n)
+	elseif kind == "Eggs" then
+		-- eggs straight into the bag (it may overflow: paid eggs are never lost)
+		local given, lost = 0, 0
+		for _ = 1, product.Count or 1 do
+			local ok = Services.EggService.GiveEgg(player, product.Egg, product.Luck or 1, true)
+			if ok then
+				given += 1
+			else
+				lost += 1
+			end
+		end
+		local def = EggConfig.Eggs[product.Egg]
+		local text = string.format("+%d %s with x%d luck in your bag!", given, def and def.Name or "Egg", product.Luck or 1)
+		if lost > 0 then
+			-- cannot happen with a valid egg id; pay the rest out instead of losing it
+			local cash = 100000 * lost
+			Services.EconomyService.Earn(player, cash, "Purchase")
+			text ..= string.format(" %d eggs could not be added and were paid out as %s.", lost, Format.cash(cash))
+		end
+		return true, text
 	elseif kind == "DragonMutation" then
 		local uid = Services.DragonService.PotionTarget(player)
 		local mutation = uid and Services.DragonService.UpgradeMutation(player, uid)
@@ -17722,7 +18033,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local Signal = require(Shared:WaitForChild("Util"):WaitForChild("Signal"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 local WildEggConfig = require(Configs:WaitForChild("WildEggConfig"))
 
 local WildEggService = {}
@@ -17867,7 +18178,7 @@ local function handleClaim(player: Player)
 	if model then
 		slack = (model:GetAttribute("BodyRadius") or 0) * 0.5
 	end
-	local reach = WildEggConfig.PickupRange * (1 + TreeConfig.bonus(data, "EggMagnet")) + slack
+	local reach = EggReach.range(data, WildEggConfig.PickupRange) + slack
 	if Services.EggService.DistanceTo(player, egg.Position) > reach then
 		return false, "TOO_FAR"
 	end
@@ -28848,7 +29159,7 @@ local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 
 local EggController = {}
 
@@ -29053,8 +29364,8 @@ end
 local function step(dt: number)
 	clock += dt
 	local positions, slack = myPositions()
-	-- Great Tree "Egg Magnet" widens the pickup range
-	local range = GameConfig.Interaction.EggPickupRange * (1 + TreeConfig.bonus(registry.DataController.all(), "EggMagnet")) + slack
+	-- Great Tree "Egg Magnet", the Egg Magnet potion and the Egg Hunter pass widen the pickup range
+	local range = EggReach.range(registry.DataController.all(), GameConfig.Interaction.EggPickupRange, Workspace:GetServerTimeNow()) + slack
 	for _, e in eggs do
 		local model = e.Model
 		if model and model.Parent then
@@ -32867,11 +33178,12 @@ end
 -- What powers the radar right now: boost timer, pass, or the Forge upgrade's range.
 local function powerText(data, now: number, range: number): string
 	local left = EggReach.radarSeconds(data, now)
+	local phone = Responsive.Device == "Phone" -- the chip is narrow there: shorter words
 	if left == math.huge then
-		return "EGG HUNTER"
+		return phone and "HUNTER" or "EGG HUNTER"
 	elseif left > 0 then
 		left = math.floor(left)
-		return string.format("EGG RADAR  %d:%02d", left // 60, left % 60)
+		return string.format("%s  %d:%02d", phone and "RADAR" or "EGG RADAR", left // 60, left % 60)
 	end
 	return range >= 100000 and "RADAR  WHOLE MAP" or string.format("RADAR  %d studs", range)
 end
@@ -32887,10 +33199,16 @@ local function layout()
 	local margin = math.floor(short * (phone and 0.03 or 0.022) + 0.5)
 	local top = R.TopInset + math.floor(short * 0.012)
 	local levelH = short * (phone and 0.095 or 0.058)
+	local levelW = short * (phone and 0.36 or 0.235)
 	chip.AnchorPoint = Vector2.new(0, 0)
-	chip.Position = UDim2.new(0, margin, 0, top + math.floor(levelH + short * 0.012))
+	if phone and R.Portrait then
+		-- portrait phone: right of the level badge (below it the cash pill and its pills take the width)
+		chip.Position = UDim2.new(0, margin + math.floor(levelW) + math.floor(short * 0.015), 0, top)
+	else
+		chip.Position = UDim2.new(0, margin, 0, top + math.floor(levelH + short * 0.012))
+	end
 	chip.SizeConstraint = R.Portrait and Enum.SizeConstraint.RelativeXX or Enum.SizeConstraint.RelativeYY
-	chip.Size = phone and UDim2.fromScale(0.36, 0.085) or UDim2.fromScale(0.235, 0.064)
+	chip.Size = phone and UDim2.fromScale(0.36, 0.1) or UDim2.fromScale(0.235, 0.064)
 end
 
 local function buildChip()
@@ -32945,7 +33263,7 @@ local function buildChip()
 		Role = "Micro",
 		Font = Theme.Fonts.Micro,
 		Scaled = true,
-		MinTextSize = 8,
+		MinTextSize = 9,
 		Color = Theme.Hud.TextMuted,
 		Position = UDim2.fromScale(0, 0.58),
 		Size = UDim2.fromScale(1, 0.38),
@@ -33064,7 +33382,7 @@ local function update()
 			markers[key] = nil
 		end
 	end
-	parts.Info.Text = preview and "EGG RADAR  12:34" or powerText(data, now, range)
+	parts.Info.Text = preview and (Responsive.Device == "Phone" and "RADAR  12:34" or "EGG RADAR  12:34") or powerText(data, now, range)
 	if bestEgg and from then
 		parts.Best.Text = string.format("x%d  %s", bestEgg.Luck or 1, distText(bestD))
 		parts.Best.TextColor3 = EggConfig.luckColor(bestEgg.Luck or 1)
@@ -34934,7 +35252,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local EggReach = require(Shared:WaitForChild("EggReach"))
 local WildEggConfig = require(Configs:WaitForChild("WildEggConfig"))
 
 local UI = script.Parent.Parent:WaitForChild("UI")
@@ -35300,7 +35618,7 @@ local function step(dt: number)
 	if preview or pending or clock - lastClaim < WildEggConfig.ClaimThrottle then
 		return
 	end
-	local range = WildEggConfig.PickupRange * (1 + TreeConfig.bonus(registry.DataController.all(), "EggMagnet")) + slack
+	local range = EggReach.range(registry.DataController.all(), WildEggConfig.PickupRange, Workspace:GetServerTimeNow()) + slack
 	for _, p in positions do
 		if (p - info.Position).Magnitude <= range then
 			tryClaim()
@@ -35724,6 +36042,7 @@ local ORDER = {
 	"HatchController",
 	"AnnounceController",
 	"WildEggController",
+	"RadarController",
 	"InventoryController",
 	"TutorialController",
 	"RegionController",
@@ -35999,7 +36318,7 @@ function UIChecks.run(roots: { Frame }, opts: { [string]: any })
 						add("ClippedText", string.format("%s text '%s' does not fit (%dx%d)", name, string.sub(text, 1, 24), w, h))
 					end
 					local size = d.TextScaled and d.TextBounds.Y or d.TextSize
-					if size > 0 and size < 9 then
+					if size > 0 and size < 9 and not string.find(name, ".Icon_", 1, true) then -- icon glyphs are graphics
 						add("TinyText", string.format("%s text size %d px", name, size))
 					end
 				end
@@ -36096,7 +36415,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -36127,6 +36446,14 @@ function UILab.reset()
 	if hud and hud._labRiding then
 		hud._labRiding = false
 		hud:SetRiding(false)
+	end
+	if hud and hud._labBoosts then
+		hud._labBoosts = false
+		hud:PreviewBoosts(false)
+	end
+	local radar = registry.RadarController
+	if radar and radar.preview then
+		radar.preview(false)
 	end
 	if hud and hud._labArena then
 		hud._labArena = false
@@ -36190,6 +36517,24 @@ function UILab.show(screen: string)
 	elseif screen == "RaceTop" or screen == "RaceArena" then
 		ui.Open("Race", { Tab = screen == "RaceTop" and "Monthly" or "Arena" })
 		return "Race"
+	elseif screen == "Radar" then
+		-- the egg radar chip (arrow to the best egg) with sample text
+		local radar = registry.RadarController
+		if radar then
+			radar.preview(true)
+		end
+		return nil
+	elseif screen == "Boosts" then
+		-- every boost pill of the cash row at once (the longest texts)
+		local hud = registry.Hud
+		if hud then
+			hud._labBoosts = true
+			hud:PreviewBoosts(true)
+		end
+		return nil
+	elseif screen == "EggHunter" then
+		ui.Open("Shop", { Focus = "EggHunter" })
+		return "Shop"
 	elseif screen == "ArenaTouch" then
 		-- the duel buttons of the touch cluster (STRIKE / BLAST replace the bond buttons) + the arena panel
 		local hud = registry.Hud
@@ -36742,6 +37087,8 @@ function Hud:BuildCash()
 	-- secondary row: eggs + income
 	local row = Kit.frame({ Name = "Secondary", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 1), Size = UDim2.fromScale(1, 0.32), Parent = root })
 	Kit.list(row, "H", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
+	self.PillRow = row
+	self.PillScale = Create("UIScale", { Parent = row }) -- shrinks the row on phones when many pills are lit
 	local function smallPill(name: string, icon: string, order: number)
 		local p = Create("TextButton", {
 			Name = name,
@@ -36773,11 +37120,15 @@ function Hud:BuildCash()
 	-- active boosts (Owner pass luck, potions): tap to open the shop
 	self.LuckPill, self.LuckText = smallPill("Luck", "Clover", 3)
 	self.CashBoostPill, self.CashBoostText = smallPill("CashBoost", "Coin", 4)
+	-- egg hunting perks (Egg Magnet / Fast Hatch potions, the Egg Hunter pass): one pill
+	self.HuntPill, self.HuntText = smallPill("Hunt", "Magnet", 5)
 	self.LuckText.TextColor3 = Color3.fromRGB(46, 150, 70)
 	self.CashBoostText.TextColor3 = C.AccentDeep
+	self.HuntText.TextColor3 = Color3.fromRGB(214, 112, 40)
 	self.LuckPill.Visible = false
 	self.CashBoostPill.Visible = false
-	for _, pill in { self.LuckPill, self.CashBoostPill } do
+	self.HuntPill.Visible = false
+	for _, pill in { self.LuckPill, self.CashBoostPill, self.HuntPill } do
 		pill.Activated:Connect(function()
 			Kit.hooks.Click()
 			self.UI.Open("Shop")
@@ -36793,7 +37144,60 @@ local function mmss(seconds: number): string
 	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
 end
 
+-- Phones have little width: the icon already says "luck" / "cash", so the word is dropped there.
+local function boostText(value: string, word: string, left: number): string
+	local text = Responsive.Device == "Phone" and value or (value .. " " .. word)
+	return left < math.huge and (text .. "  " .. mmss(left)) or text
+end
+
+-- "HUNTER + FAST HATCH + MAGNET" on a wide screen, "HUNTER +2" on a phone with three perks.
+local function huntText(names: { string }, left: number): string
+	local text
+	if Responsive.Device == "Phone" then
+		if #names > 2 then
+			text = names[1] .. " +" .. tostring(#names - 1)
+		else
+			text = table.concat(names, " + "):gsub("FAST HATCH", "HATCH")
+		end
+	else
+		text = table.concat(names, " + ")
+	end
+	return left < math.huge and (text .. "  " .. mmss(left)) or text
+end
+
+-- Many lit pills do not fit on a phone: the row shrinks a little instead of running off the screen.
+local PILL_FIT = { 1, 1, 1, 0.9, 0.8, 0.72 }
+function Hud:FitPills()
+	local lit = 0
+	for _, pill in { self.EggPill, self.IncomePill, self.LuckPill, self.CashBoostPill, self.HuntPill } do
+		if pill.Visible then
+			lit += 1
+		end
+	end
+	self.PillScale.Scale = Responsive.Device == "Phone" and PILL_FIT[math.clamp(lit, 1, #PILL_FIT)] or 1
+end
+
+-- UI Lab: every boost pill with sample text (the longest case), whatever the data says.
+function Hud:PreviewBoosts(on: boolean)
+	self._previewBoosts = on
+	self:RefreshBoosts()
+	if not on then
+		self:RefreshIncome()
+	end
+end
+
 function Hud:RefreshBoosts()
+	if self._previewBoosts then
+		self.LuckPill.Visible = true
+		self.LuckText.Text = boostText("x6", "LUCK", 842)
+		self.CashBoostPill.Visible = true
+		self.CashBoostText.Text = boostText("x2", "CASH", 581)
+		self.HuntPill.Visible = true
+		self.HuntText.Text = huntText({ "HUNTER", "FAST HATCH", "MAGNET" }, 860)
+		self.IncomePill.Visible = true
+		self:FitPills()
+		return
+	end
 	local data = self.Data.all()
 	if not data then
 		return
@@ -36819,12 +37223,33 @@ function Hud:RefreshBoosts()
 	end
 	self.LuckPill.Visible = luck > 1
 	if luck > 1 then
-		self.LuckText.Text = string.format("x%s LUCK", tostring(math.floor(luck * 10 + 0.5) / 10)) .. (luckLeft < math.huge and ("  " .. mmss(luckLeft)) or "")
+		self.LuckText.Text = boostText("x" .. tostring(math.floor(luck * 10 + 0.5) / 10), "LUCK", luckLeft)
 	end
 	self.CashBoostPill.Visible = cash > 1
 	if cash > 1 then
-		self.CashBoostText.Text = string.format("x%s CASH  %s", tostring(cash), mmss(cashLeft))
+		self.CashBoostText.Text = boostText("x" .. tostring(cash), "CASH", cashLeft)
 	end
+	-- egg hunting: what is running (the radar has its own chip), the shortest timer
+	local hunt, huntLeft = {}, math.huge
+	for id, t in data.Boosts or {} do
+		local def = MonetizationConfig.Boosts[id]
+		local left = (tonumber(t) or 0) - now
+		if def and left > 0 and (def.Magnet or def.HatchFactor) then
+			table.insert(hunt, def.Magnet and "MAGNET" or "FAST HATCH")
+			huntLeft = math.min(huntLeft, left)
+		end
+	end
+	table.sort(hunt)
+	for id, pass in MonetizationConfig.GamePasses do
+		if pass.Kind == "Tool" and MonetizationConfig.ownsPass(data, id) then
+			table.insert(hunt, 1, "HUNTER")
+		end
+	end
+	self.HuntPill.Visible = #hunt > 0
+	if #hunt > 0 then
+		self.HuntText.Text = huntText(hunt, huntLeft)
+	end
+	self:FitPills()
 end
 
 function Hud:PopCash(delta: number)
@@ -37417,6 +37842,10 @@ function Hud:Layout()
 	self.CashRoot.Position = UDim2.new(0.5, 0, 0, phone and (portrait and top + math.floor(S * 0.12) or math.floor(S * 0.03)) or math.floor(S * 0.022))
 	shortSize(self.CashRoot, phone and 0.6 or 0.5, phone and 0.15 or 0.105)
 
+	-- pills under the cash: on a portrait phone nothing else is at that height, so they may use the full width
+	self.PillRow.Size = (phone and portrait) and UDim2.new(0, R.Width - 2 * margin, 0.32, 0) or UDim2.fromScale(1, 0.32)
+	self:FitPills()
+
 	-- side buttons
 	local btnH = phone and 0.15 or 0.074
 	local gap = math.floor(S * (phone and 0.02 or 0.012))
@@ -37584,6 +38013,7 @@ function Hud:RefreshIncome()
 	end
 	self.IncomeText.Text = Format.perSecond(total)
 	self.IncomePill.Visible = total > 0
+	self:FitPills()
 end
 
 function Hud:RefreshEggs()
@@ -38349,6 +38779,24 @@ builders.Radar = function(root, col, acc)
 	rect(root, 0.66, 0.36, 0.42, 0.08, acc, 0.5, -45)
 	circle(root, 0.5, 0.5, 0.16, acc)
 	circle(root, 0.32, 0.66, 0.12, acc)
+end
+
+builders.Magnet = function(root, col, acc)
+	rect(root, 0.28, 0.58, 0.2, 0.5, col, 0.12)
+	rect(root, 0.72, 0.58, 0.2, 0.5, col, 0.12)
+	rect(root, 0.5, 0.2, 0.46, 0.2, col, 0.25)
+	rect(root, 0.3, 0.27, 0.2, 0.2, col, 0.1, 40)
+	rect(root, 0.7, 0.27, 0.2, 0.2, col, 0.1, -40)
+	rect(root, 0.28, 0.86, 0.2, 0.17, acc, 0.1)
+	rect(root, 0.72, 0.86, 0.2, 0.17, acc, 0.1)
+end
+
+builders.Clock = function(root, col, acc, ink)
+	circle(root, 0.5, 0.5, 0.9, col)
+	circle(root, 0.5, 0.5, 0.72, ink)
+	rect(root, 0.5, 0.35, 0.07, 0.3, acc, 0.5)
+	rect(root, 0.62, 0.5, 0.24, 0.07, acc, 0.5)
+	circle(root, 0.5, 0.5, 0.12, acc)
 end
 
 builders.Clover = function(root, col, acc)
@@ -43203,8 +43651,9 @@ return SettingsWindow
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
 	ShopWindow
-	ROBUX tab: the Owner Dragon game pass (featured, 3D preview) + potions and
-	cash packs (developer products). UPGRADES tab: cash upgrades (Forge).
+	ROBUX tab: the exclusive dragon game passes (featured, 3D preview), the Egg Hunter pass
+	(featured, with an egg), then POTIONS, EGG HUNTING and CASH & SPINS (developer products).
+	UPGRADES tab: cash upgrades (Forge).
 
 	Buying: real items prompt MarketplaceService; items whose Id is still 0
 	are free TEST purchases in Studio (server grants them), "coming soon"
@@ -43224,6 +43673,7 @@ local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("DragonVisual"))
+local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
 
 local UI = script.Parent.Parent
@@ -43318,6 +43768,7 @@ end
 -- ============================================================== robux tab
 function ShopWindow:BuildRobux(page: Instance)
 	local scroll = Kit.scroll({ Name = "Scroll", Size = UDim2.fromScale(1, 1), Parent = page })
+	self.RobuxScroll = scroll
 	Kit.padding(scroll, 2, 10, 6, 2)
 	Kit.list(scroll, "V", 12, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
 
@@ -43328,61 +43779,43 @@ function ShopWindow:BuildRobux(page: Instance)
 		self:BuildPassCard(scroll, itemId, order)
 	end
 
-	-- potions & packs
-	local header = Kit.text({ Name = "PotionsHeader", Text = "POTIONS & PACKS", Role = "Heading", Color = C.Gold, LayoutOrder = 20, Parent = scroll })
-	Responsive.bind(header, "Size", function(R)
-		return UDim2.new(1, 0, 0, R.px(26))
-	end)
-	local gridHost = Kit.frame({ Name = "Products", LayoutOrder = 21, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.fromScale(1, 0), Parent = scroll })
-	local grid = Instance.new("UIGridLayout")
-	grid.SortOrder = Enum.SortOrder.LayoutOrder
-	grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	grid.Parent = gridHost
-	Responsive.bind(grid, "CellSize", function(R)
-		local cols = R.Device == "Phone" and (R.Portrait and 2 or 3) or 4
-		return UDim2.new(1 / cols, -R.px(10), 0, R.px(R.Device == "Phone" and 200 or 196))
-	end)
-	Responsive.bind(grid, "CellPadding", function(R)
-		return UDim2.fromOffset(R.px(10), R.px(10))
-	end)
-	for i, itemId in MonetizationConfig.ProductOrder do
-		local def = MonetizationConfig.Products[itemId]
-		local cell = Kit.surface({ Name = itemId, LayoutOrder = i, StrokeColor = def.Color, StrokeTransparency = 0.5, Parent = gridHost })
-		iconDisc(cell, def.Icon, def.Color, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.06), Size = UDim2.fromScale(0.3, 0.3) })
-		Kit.text({ Name = "Name", Text = string.upper(def.Name), Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.05, 0.38), Size = UDim2.fromScale(0.9, 0.12), Parent = cell })
-		Kit.text({
-			Name = "Desc",
-			Text = def.Description,
-			Role = "Caption",
-			Color = C.TextMuted,
-			Wrapped = true,
-			Scaled = true,
-			XAlign = Enum.TextXAlignment.Center,
-			Position = UDim2.fromScale(0.06, 0.51),
-			Size = UDim2.fromScale(0.88, 0.22),
-			Parent = cell,
-		})
-		local b = Kit.button({
-			Name = "Buy",
-			Text = robux(def.Price),
-			Style = "Success",
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.fromScale(0.5, 0.95),
-			Size = UDim2.fromScale(0.8, 0.17),
-			Parent = cell,
-		})
-		b.Activated:Connect(function()
-			self:Buy(itemId)
-		end)
+	-- products, one header + grid per section (potions, egg hunting, cash and spins)
+	self.Cards = self.Cards or {}
+	local order = 20
+	for _, section in MonetizationConfig.Sections do
+		local ids = MonetizationConfig.sectionProducts(section.Id)
+		if #ids > 0 then
+			local header = Kit.text({ Name = section.Id .. "Header", Text = section.Title, Role = "Heading", Color = C.Gold, LayoutOrder = order, Parent = scroll })
+			Responsive.bind(header, "Size", function(R)
+				return UDim2.new(1, 0, 0, R.px(26))
+			end)
+			self.Cards[section.Id] = header
+			local gridHost = Kit.frame({ Name = section.Id, LayoutOrder = order + 1, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.fromScale(1, 0), Parent = scroll })
+			local grid = Instance.new("UIGridLayout")
+			grid.SortOrder = Enum.SortOrder.LayoutOrder
+			grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			grid.Parent = gridHost
+			Responsive.bind(grid, "CellSize", function(R)
+				local cols = R.Device == "Phone" and (R.Portrait and 2 or 3) or 4
+				return UDim2.new(1 / cols, -R.px(10), 0, R.px(R.Device == "Phone" and 200 or 196))
+			end)
+			Responsive.bind(grid, "CellPadding", function(R)
+				return UDim2.fromOffset(R.px(10), R.px(10))
+			end)
+			for i, itemId in ids do
+				self:BuildProductCell(gridHost, itemId, i)
+			end
+			order += 2
+		end
 	end
 	local note = Kit.text({
 		Name = "Note",
-		Text = "Potions stack time when bought again. Level and Mutation potions apply to your equipped dragon.",
+		Text = "Boosts stack time when bought again. Level and Mutation potions apply to your equipped dragon.",
 		Role = "Caption",
 		Color = C.TextDim,
 		Wrapped = true,
 		XAlign = Enum.TextXAlignment.Center,
-		LayoutOrder = 22,
+		LayoutOrder = order,
 		Parent = scroll,
 	})
 	Responsive.bind(note, "Size", function(R)
@@ -43390,18 +43823,54 @@ function ShopWindow:BuildRobux(page: Instance)
 	end)
 end
 
+function ShopWindow:BuildProductCell(parent: Instance, itemId: string, order: number)
+	local def = MonetizationConfig.Products[itemId]
+	local cell = Kit.surface({ Name = itemId, LayoutOrder = order, StrokeColor = def.Color, StrokeTransparency = 0.5, Parent = parent })
+	iconDisc(cell, def.Icon, def.Color, { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.06), Size = UDim2.fromScale(0.3, 0.3) })
+	Kit.text({ Name = "Name", Text = string.upper(def.Name), Role = "Heading", Scaled = true, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.05, 0.38), Size = UDim2.fromScale(0.9, 0.12), Parent = cell })
+	Kit.text({
+		Name = "Desc",
+		Text = def.Description,
+		Role = "Caption",
+		Color = C.TextMuted,
+		Wrapped = true,
+		Scaled = true,
+		XAlign = Enum.TextXAlignment.Center,
+		Position = UDim2.fromScale(0.06, 0.51),
+		Size = UDim2.fromScale(0.88, 0.22),
+		Parent = cell,
+	})
+	local b = Kit.button({
+		Name = "Buy",
+		Text = robux(def.Price),
+		Style = "Success",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.fromScale(0.5, 0.95),
+		Size = UDim2.fromScale(0.8, 0.17),
+		Parent = cell,
+	})
+	b.Activated:Connect(function()
+		self:Buy(itemId)
+	end)
+	self.Cards[itemId] = cell
+end
+
 function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: number)
 	local pass = MonetizationConfig.GamePasses[itemId]
 	local rarity = DragonConfig.Rarities.Exclusive
+	local tool = pass.Kind == "Tool" -- a toolkit instead of a dragon (the preview is an egg)
 	local top = (pass.Price or 0) >= 5000
-	local accent = top and Color3.fromRGB(255, 205, 60) or rarity.Color
-	local card = Kit.surface({ Name = itemId, LayoutOrder = order, StrokeColor = accent, StrokeTransparency = 0.1, Color = Color3.fromRGB(34, 20, 26), Transparency = 0.02, Parent = parent })
+	local accent = pass.Accent or (top and Color3.fromRGB(255, 205, 60) or rarity.Color)
+	self.Cards = self.Cards or {}
+	local card = Kit.surface({ Name = itemId, LayoutOrder = order, StrokeColor = accent, StrokeTransparency = 0.1, Color = tool and Color3.fromRGB(30, 24, 18) or Color3.fromRGB(34, 20, 26), Transparency = 0.02, Parent = parent })
+	self.Cards[itemId] = card
 	Responsive.bind(card, "Size", function(R)
 		return UDim2.new(1, 0, 0, R.px(R.Device == "Phone" and (R.Portrait and 330 or 230) or 250))
 	end)
 	Create("UIGradient", {
 		Rotation = 0,
-		Color = top and ColorSequence.new(Color3.fromRGB(110, 70, 20), Color3.fromRGB(40, 24, 60)) or ColorSequence.new(Color3.fromRGB(90, 30, 30), Color3.fromRGB(30, 22, 40)),
+		Color = tool and ColorSequence.new(Color3.fromRGB(110, 60, 14), Color3.fromRGB(30, 26, 46))
+			or (top and ColorSequence.new(Color3.fromRGB(110, 70, 20), Color3.fromRGB(40, 24, 60)) or ColorSequence.new(Color3.fromRGB(90, 30, 30), Color3.fromRGB(30, 22, 40))),
 		Parent = card,
 	})
 	local pv = Kit.frame({ Name = "PreviewBox", Position = UDim2.fromScale(0.01, 0.04), Size = UDim2.fromScale(0.4, 0.92), Parent = card })
@@ -43424,7 +43893,7 @@ function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: numbe
 	cam.FieldOfView = 30
 	cam.Parent = vp
 	vp.CurrentCamera = cam
-	self.PassViews[itemId] = { Viewport = vp, Camera = cam, Species = pass.Grants, Mutation = pass.Mutation or "None" }
+	self.PassViews[itemId] = { Viewport = vp, Camera = cam, Species = pass.Grants, Mutation = pass.Mutation or "None", Egg = tool and pass.Egg or nil }
 
 	local info = Kit.frame({ Name = "Info", Position = UDim2.fromScale(0.43, 0.06), Size = UDim2.fromScale(0.55, 0.88), Parent = card })
 	local tags = Kit.frame({ Name = "Tags", Size = UDim2.fromScale(1, 0.12), Parent = info })
@@ -43434,13 +43903,18 @@ function ShopWindow:BuildPassCard(parent: Instance, itemId: string, order: numbe
 		Kit.badge({ Text = text, Color = Color3.fromRGB(255, 190, 40), LayoutOrder = nextBadge, Parent = tags })
 		nextBadge += 1
 	end
-	Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = nextBadge, Parent = tags })
-	Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
-	if pass.Mutation == "Omni" then
-		Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = nextBadge + 2, Parent = tags })
+	if tool then
+		Kit.badge({ Text = "PERMANENT", Color = accent, LayoutOrder = nextBadge, Parent = tags })
+		Kit.badge({ Text = "EGG HUNTING", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
+	else
+		Kit.badge({ Text = "EXCLUSIVE", Color = rarity.Color, LayoutOrder = nextBadge, Parent = tags })
+		Kit.badge({ Text = "x" .. tostring(pass.Luck or 1) .. " LUCK", Color = C.Success, LayoutOrder = nextBadge + 1, Parent = tags })
+		if pass.Mutation == "Omni" then
+			Kit.badge({ Text = "ALL MUTATIONS", Color = Color3.fromRGB(190, 90, 255), LayoutOrder = nextBadge + 2, Parent = tags })
+		end
 	end
-	local title = Kit.text({ Name = "Title", Text = string.upper(pass.Name) .. (pass.Grants == "OwnerDragon" and "" or " DRAGON"), Role = "Display", Scaled = true, Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.2), Parent = info })
-	Create("UIGradient", { Rotation = 90, Color = top and ColorSequence.new(Color3.fromRGB(255, 245, 190), Color3.fromRGB(255, 180, 40)) or ColorSequence.new(rarity.Glow, rarity.Color), Parent = title })
+	local title = Kit.text({ Name = "Title", Text = string.upper(pass.Name) .. ((tool or pass.Grants == "OwnerDragon") and "" or " DRAGON"), Role = "Display", Scaled = true, Position = UDim2.fromScale(0, 0.14), Size = UDim2.fromScale(1, 0.2), Parent = info })
+	Create("UIGradient", { Rotation = 90, Color = (top or tool) and ColorSequence.new(Color3.fromRGB(255, 245, 190), tool and accent or Color3.fromRGB(255, 180, 40)) or ColorSequence.new(rarity.Glow, rarity.Color), Parent = title })
 	local perks = Kit.frame({ Name = "Perks", Position = UDim2.fromScale(0, 0.37), Size = UDim2.fromScale(1, 0.4), Parent = info })
 	Kit.list(perks, "V", 2, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top)
 	for i, perk in pass.Perks do
@@ -43472,6 +43946,10 @@ function ShopWindow:BuildPassPreviews()
 	for _, view in self.PassViews do
 		task.defer(function()
 			local ok, model = pcall(function()
+				if view.Egg then
+					-- a toolkit pass: the egg of its package, standing on end and glittering
+					return EggVisual.build(view.Egg, { Scale = 2, Sparkles = true })
+				end
 				local m = DragonVisual.build(view.Species, { Saddle = false, Detail = "Medium", Mutation = view.Mutation })
 				local pose = Animator.samplePose(m, "Roar", 0.85)
 				DragonVisual.pose(m, pose, CFrame.Angles(0, math.rad(150), 0))
@@ -43482,7 +43960,8 @@ function ShopWindow:BuildPassPreviews()
 			end
 			model.Parent = view.Viewport
 			local cf, size = model:GetBoundingBox()
-			local radius = math.max(size.X, size.Y, size.Z) * 0.5 * 0.62
+			-- a dragon fills the frame (wing tips may leave it); an egg is shown whole with a margin
+			local radius = math.max(size.X, size.Y, size.Z) * 0.5 * (view.Egg and 1.12 or 0.62)
 			local dist = radius / math.tan(math.rad(view.Camera.FieldOfView) * 0.5)
 			view.Camera.CFrame = CFrame.lookAt(cf.Position + Vector3.new(dist * 0.35, size.Y * 0.2, dist), cf.Position)
 		end)
@@ -43629,10 +44108,29 @@ function ShopWindow:Refresh()
 	end
 end
 
+-- Scrolls the ROBUX tab so that a pass card / product section is in view (args.Focus = item or section id).
+function ShopWindow:FocusCard(id: string)
+	local card = self.Cards and self.Cards[id]
+	local scroll = self.RobuxScroll
+	if not card or not scroll then
+		return
+	end
+	task.defer(function()
+		task.wait()
+		if card.Parent and scroll.Parent then
+			local y = card.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
+			scroll.CanvasPosition = Vector2.new(0, math.max(0, y - 4))
+		end
+	end)
+end
+
 function ShopWindow:OnOpen(args)
 	self:BuildPassPreviews()
 	self:ShowTab(args and args.Tab == "Upgrades" and "Upgrades" or "Robux")
 	self:Refresh()
+	if args and args.Focus then
+		self:FocusCard(args.Focus)
+	end
 	if not self._observing and self.Data then
 		self._observing = true
 		for _, key in { "Flags", "Upgrades", "Cash" } do
