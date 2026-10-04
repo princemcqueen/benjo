@@ -35,6 +35,7 @@ local ORDER = {
 	"MonetizationService",
 	"QuestService",
 	"DailyService",
+	"IndexService",
 	"RegionService",
 	"LevelService",
 	"LeaderstatsService",

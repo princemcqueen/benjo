@@ -52,6 +52,7 @@ local TEMPLATE = {
 	Upgrades = { EggStorage = 0, DragonStorage = 0, HatchLuck = 0, Radar = 0 },
 	Tree = {}, -- Great Tree levels { [branchId] = level }, see TreeConfig
 	Index = {},
+	IndexClaims = {}, -- Dragon Index milestones already paid, see IndexConfig
 	Regions = { Haven = true },
 	Quests = { Active = {}, Completed = 0, Serial = 0 },
 	Tutorial = { Step = 1, Done = false },

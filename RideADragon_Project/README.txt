@@ -1,4 +1,4 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 7)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 8)
 ======================================================
 
 CONTENTS
@@ -80,6 +80,20 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     arena, on foot, or while racing. A TRAINING DUMMY in the middle takes hits, shows damage
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
+
+DAILY REWARD + DRAGON INDEX (new in TEST 8)  -  the DAILY and INDEX buttons of the HUD work now
+  - DAILY (button on the right, key J): a 7-day calendar. One reward per UTC day; claiming on
+    consecutive days builds a streak that walks through the week (day 1 cash, 2 spins, 3 luck boost,
+    4 cash, 5 spins + cash, 6 Golden Egg x5, 7 big cash + 5 spins + Celestial Egg x10). A whole day
+    missed starts the streak again. Every completed week adds +10% to the cash (up to +100%). Cash is
+    worth seconds of your income, so it grows with you. A red dot lights the button while a reward
+    waits. Numbers: ReplicatedStorage > Configs > DailyConfig. Server: DailyService.
+  - INDEX / Dragon Index (button on the left, key X): the collection book. A card for every species
+    (3D preview when found, "?" when not), how many you found, the mutations you found of each (tap a
+    card for the detail: description, base stats, the 16 mutations), filter ALL / FOUND / MISSING.
+    The 30 hatchable species count; the 4 Robux exclusives are shown after them but do not count.
+    MILESTONE REWARDS for 5 / 10 / 15 / 20 / 25 / 30 species found (cash, spins, luck boost, Golden
+    Egg, and a Rainbow Egg x50 for the whole book). Numbers: IndexConfig. Server: IndexService.
 
 COINS ON THE MAP (new in TEST 7)
   - About 290 coins along the roads and landmarks of Dragon Haven: COPPER coins on trails that
@@ -168,9 +182,9 @@ DONE IN THIS SNAPSHOT (TEST 5 additions first)
   - Passive income, offline earnings, inventory, perches, nest, spawn at own plot
 
 NOT FINISHED YET (planned next, in this order)
-  - The INDEX, QUESTS and DAILY buttons of the HUD (and the Hall of Dragons / Elder Rowan stations)
-    open nothing yet: their windows were never built in the original project. Next: DAILY streak,
-    the Dragon Index (collection book), Quests and the guided tutorial for new players.
+  - The QUESTS button of the HUD (and the Elder Rowan station) opens nothing yet: the window was
+    never built in the original project. Next: Quests and the guided tutorial for new players.
+  - Pokemon-style turn-based duel scene (planned, in this order after the quests).
   - New eggs / dragons and the zones they live in
   - Bigger map with Frostpeak / Ember Caldera / Skyreach regions (their eggs currently
     spawn at the valley's landmark spots: plateau, cave, ruins, pillar, island)
