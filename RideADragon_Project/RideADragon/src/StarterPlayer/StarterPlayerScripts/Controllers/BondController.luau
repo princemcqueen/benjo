@@ -118,6 +118,9 @@ local function tryDash()
 	if not BondController.has("Dash") then
 		return locked("Dash")
 	end
+	if LocalPlayer:GetAttribute("RaceActive") then
+		return -- races are flown with the standard dragon: no bond perks, the boost rings do the job
+	end
 	if not ready("Dash") then
 		return
 	end
@@ -163,6 +166,12 @@ local function startFire()
 	fireStart = os.clock()
 	BreathFX.start(model)
 	registry.AnimationController.play(model, "FireBreath")
+	-- the lunge (0.2 s into the animation): the camera kicks as the flames burst out
+	task.delay(0.2, function()
+		if firing then
+			registry.CameraController.shake(0.12)
+		end
+	end)
 	Net.fire("BondAction", { Action = "FireStart" })
 end
 
@@ -254,6 +263,7 @@ local function onBondUp(payload)
 	if registry.DragonController.isRiding() then
 		registry.CameraController.shake(0.1)
 	end
+	registry.AnimationController.react("LevelUp", 1)
 	local _ = payload
 end
 

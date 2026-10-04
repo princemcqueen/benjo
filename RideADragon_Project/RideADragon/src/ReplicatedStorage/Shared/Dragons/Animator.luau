@@ -60,6 +60,10 @@ local ONESHOTS = {
 	Howl = { Duration = 3.2, FadeIn = 0.35, FadeOut = 0.5 },
 	Cheer = { Duration = 1.5, FadeIn = 0.08, FadeOut = 0.3 },
 	Loop = { Duration = 2.0, FadeIn = 0.12, FadeOut = 0.35 },
+	-- arena duels
+	Strike = { Duration = 0.6, FadeIn = 0.04, FadeOut = 0.2 },
+	Cast = { Duration = 0.9, FadeIn = 0.06, FadeOut = 0.26 },
+	Hurt = { Duration = 0.5, FadeIn = 0.03, FadeOut = 0.2 },
 }
 Animator.OneShots = ONESHOTS
 
@@ -820,27 +824,116 @@ Shots.Dash = function(self, acc, w, t)
 	tail(self, acc, w, 0.3 * k, 0, 0.02, t * 8)
 end
 
--- Fire Breath (held): rear the head back, thrust it forward with the jaw wide open,
--- wings spread, a trembling hold while the flames last.
+-- Fire Breath (held): a real wind-up. The dragon inhales (the head rears back and up, the chest
+-- swells, the wings open), lunges forward with the jaw wide open and then holds the blast: the
+-- chest pumps, the head trembles, the tail whips until Stop().
 Shots.FireBreath = function(self, acc, w, t, shot)
-	local rise = clamp(t / 0.3, 0, 1)
-	local thrust = smooth(0.15, 0.42, t)
+	local s = self.Scale
+	local rear = smooth(0, 0.24, t)
+	local lunge = smooth(0.2, 0.42, t)
 	local hold = shot and shot.HoldTime or 0
-	local shake = hold > 0 and sin((t + hold) * 55) * 0.02 or 0
-	add(acc, "Chest", w, 0.1 * rise - 0.06 * thrust, 0, 0, 0, 0.1 * self.Scale * rise, 0)
-	neck(self, acc, w, 0.55 * rise - 0.95 * thrust, shake * 3)
-	add(acc, "Head", w, -0.2 * rise + 0.45 * thrust, 0, shake)
-	add(acc, "Jaw", w, 0.58 * thrust, 0, 0)
+	local held = clamp(hold / 0.12, 0, 1)
+	local pump = held * (0.5 + 0.5 * sin((t + hold) * 17))
+	local shake = held * sin((t + hold) * 48) * 0.03
+	-- body: swell while inhaling, recoil on the lunge, lean into the blast
+	add(acc, "Chest", w, 0.22 * rear - 0.3 * lunge + pump * 0.05, 0, 0, 0, (0.22 * rear - 0.1 * lunge) * s, 0)
+	add(acc, "Body", w, 0.1 * rear - 0.04 * lunge, shake, shake * 0.8, 0, (0.14 * rear - 0.12 * lunge) * s, 0)
+	-- neck and head: rear back and up, then thrust forward
+	neck(self, acc, w, 0.95 * rear - 1.55 * lunge, shake * 4)
+	add(acc, "Head", w, 0.55 * rear - 0.4 * lunge + shake, 0, shake * 2)
+	add(acc, "Jaw", w, 0.12 * rear + 0.65 * lunge + pump * 0.1, 0, 0)
+	-- legs brace against the blast
 	if self.HasFront then
-		sym(acc, "Arm%1", w, -0.15 * rise, 0, 0)
+		sym(acc, "Arm%1", w, -0.1 * rear + 0.32 * lunge, 0, 0)
+		sym(acc, "Arm%2", w, -0.12 * lunge, 0, 0)
+	end
+	if self.HasBack then
+		sym(acc, "Leg%1", w, -0.18 * lunge, 0, 0)
+		sym(acc, "Foot%", w, 0.1 * lunge, 0, 0)
 	end
 	if self.Params.Mode == "Fly" or self.Params.Mode == "Air" then
 		tuckLegs(self, acc, w, 0.5)
 	end
-	local open = rise * 0.9
-	wingsSpread(self, acc, w * open, 0.55 + shake * 5, 0.4, 0, 0)
+	-- wings flare wide and tremble
+	local open = smooth(0, 0.3, t)
+	wingsSpread(self, acc, w * open, 0.6 + shake * 9 + pump * 0.1, 0.45, 0, 0)
 	wingsFolded(self, acc, w * (1 - open))
-	tail(self, acc, w, -0.15 * rise, 0, 0.04, t * 3)
+	tail(self, acc, w, -0.3 * lunge, 0, 0.05 + 0.05 * held, t * 4 + hold * 4)
+end
+
+-- The quick combat clips do not move the wings: they hold the pose of the moment (folded on the
+-- ground, half open in the air) so the wing animation of the state does not snap while they blend in.
+local function keepWings(self, acc, w: number)
+	local mode = self.Params.Mode
+	if mode == "Fly" or mode == "Air" or mode == "Takeoff" then
+		wingsSpread(self, acc, w, 0.3, 0.25, 0.1, 0.05)
+	else
+		wingsFolded(self, acc, w)
+	end
+end
+
+-- Strike (arena): a quick bite and tail slam - the head snaps forward and the jaw closes on
+-- the target while the body lunges and the tail whips round.
+Shots.Strike = function(self, acc, w, t)
+	local s = self.Scale
+	local wind = smooth(0, 0.12, t) * (1 - smooth(0.12, 0.2, t))
+	local snap = smooth(0.1, 0.22, t) * (1 - smooth(0.3, 0.55, t))
+	local bite = sin(clamp((t - 0.16) / 0.22, 0, 1) * math.pi)
+	local swing = sin(clamp((t - 0.08) / 0.4, 0, 1) * math.pi)
+	add(acc, "Body", w, -0.12 * snap + 0.06 * wind, 0, 0, 0, -0.1 * s * snap, 0)
+	add(acc, "Chest", w, 0.1 * wind - 0.18 * snap, 0, 0)
+	neck(self, acc, w, 0.45 * wind - 1.2 * snap)
+	add(acc, "Head", w, 0.3 * wind - 0.35 * snap, 0, 0)
+	add(acc, "Jaw", w, 0.75 * bite, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, -0.5 * snap, 0, 0)
+		sym(acc, "Arm%2", w, -0.4 * snap, 0, 0)
+	end
+	local air = self.Params.Mode == "Fly" or self.Params.Mode == "Air"
+	if air then
+		tuckLegs(self, acc, w, 0.5)
+	end
+	keepWings(self, acc, w)
+	tail(self, acc, w, 0.15 * swing, 0.7 * swing, 0.1 * swing, t * 8)
+end
+
+-- Cast (arena fireball): rear back and inhale, thrust the head forward and let it go.
+Shots.Cast = function(self, acc, w, t)
+	local s = self.Scale
+	local rear = smooth(0, 0.2, t) * (1 - smooth(0.28, 0.36, t))
+	local lunge = smooth(0.24, 0.38, t) * (1 - smooth(0.5, 0.85, t))
+	add(acc, "Chest", w, 0.22 * rear - 0.28 * lunge, 0, 0, 0, (0.2 * rear - 0.08 * lunge) * s, 0)
+	add(acc, "Body", w, 0.08 * rear - 0.04 * lunge, 0, 0, 0, (0.12 * rear - 0.1 * lunge) * s, 0)
+	neck(self, acc, w, 0.9 * rear - 1.4 * lunge)
+	add(acc, "Head", w, 0.5 * rear - 0.4 * lunge, 0, 0)
+	add(acc, "Jaw", w, 0.12 * rear + 0.6 * lunge, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, -0.1 * rear + 0.3 * lunge, 0, 0)
+	end
+	local air = self.Params.Mode == "Fly" or self.Params.Mode == "Air"
+	if air then
+		tuckLegs(self, acc, w, 0.5)
+		keepWings(self, acc, w)
+	else
+		local open = smooth(0, 0.25, t) * (1 - smooth(0.6, 0.85, t))
+		wingsSpread(self, acc, w * open, 0.55, 0.4, 0, 0)
+		wingsFolded(self, acc, w * (1 - open))
+	end
+	tail(self, acc, w, -0.25 * lunge, 0, 0.06, t * 4)
+end
+
+-- Hurt (arena): the flinch of a dragon that was hit - head thrown back, body jolted, tail flicks.
+Shots.Hurt = function(self, acc, w, t)
+	local s = self.Scale
+	local hit = smooth(0, 0.06, t) * (1 - smooth(0.08, 0.4, t))
+	local shiver = sin(t * 40) * hit
+	add(acc, "Body", w, 0.14 * hit, 0, shiver * 0.05, 0, 0.12 * s * hit, 0)
+	add(acc, "Chest", w, 0.2 * hit, 0, 0)
+	neck(self, acc, w, 0.55 * hit, shiver * 0.15)
+	add(acc, "Head", w, -0.3 * hit, 0, 0)
+	add(acc, "Jaw", w, 0.3 * hit, 0, 0)
+	keepWings(self, acc, w)
+	tail(self, acc, w, 0.1 * hit, 0, 0.3 * hit, t * 11)
 end
 
 -- Sky Dance (bond level 20): a full barrel roll with strong wing beats in the air, a

@@ -11,6 +11,12 @@
 	* Without DataStore access (Studio without API access, outages) the
 	  boards simply rank the players in this server.
 	* Also counts play time (data.Stats.PlayTime, seconds).
+	* Hub boards stand on the plaza ring, Race boards (monthly race, fastest racers, arena warriors)
+	  on the Race Island plaza. Race times are stored as scores (RaceConfig.timeScore) so that the
+	  stores' "highest first" order means "fastest first".
+
+	API: Top(boardId), TopNamed(boardId), TopOfStore(storeName, count), NameOf(userId),
+	     WriteNow(player), RefreshNow(), ArrivalCFrame()
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -24,6 +30,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local LeaderboardConfig = require(Configs:WaitForChild("LeaderboardConfig"))
 local WorldConfig = require(Configs:WaitForChild("WorldConfig"))
+local RaceConfig = require(Configs:WaitForChild("RaceConfig"))
 
 local LeaderboardService = {}
 
@@ -32,9 +39,11 @@ local Data
 local stores: { [string]: OrderedDataStore } = {}
 local storeFailed = false
 local nameCache: { [number]: string } = {}
-local boards: { [string]: { Rows: { any }, Status: TextLabel } } = {}
+local boards: { [string]: { Rows: { any }, Status: TextLabel, Subtitle: TextLabel? } } = {}
 local lastWrite: { [Player]: number } = {}
 local tops: { [string]: { { UserId: number, Value: number } } } = {}
+local globals: { [string]: { { UserId: number, Value: number } }? } = {} -- last read of the global tops
+local MONTHS = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" }
 
 local V3 = Vector3.new
 local FONT_TITLE = Enum.Font.GothamBlack
@@ -57,6 +66,24 @@ local function valueOf(player: Player, stat: string): number
 	elseif stat == "Income" then
 		local econ = Services.EconomyService
 		return econ and econ.IncomeRate(player) or 0
+	elseif stat == "DragonPower" or stat == "DragonLevel" then
+		local best = 0
+		for _, rec in data.Dragons do
+			local v = stat == "DragonPower" and (tonumber(rec.IncomePerSecond) or 0) or (tonumber(rec.Level) or 0)
+			if v > best then
+				best = v
+			end
+		end
+		return best
+	elseif stat == "RaceBest" then
+		local ms = tonumber(data.Race and data.Race.Best) or 0
+		return ms > 0 and RaceConfig.timeScore(ms) or 0
+	elseif stat == "RaceMonthly" then
+		local race = data.Race
+		local ms = (race and race.MonthKey == RaceConfig.monthKey()) and tonumber(race.MonthBest) or 0
+		return ms > 0 and RaceConfig.timeScore(ms) or 0
+	elseif stat == "ArenaKills" then
+		return tonumber(data.Stats and data.Stats.ArenaKills) or 0
 	end
 	return 0
 end
@@ -76,6 +103,10 @@ local function formatValue(fmt: string, v: number): string
 			return string.format("%dh %02dm", h, m)
 		end
 		return string.format("%dm", m)
+	elseif fmt == "Level" then
+		return "LV " .. tostring(math.floor(v))
+	elseif fmt == "RaceTime" then
+		return RaceConfig.formatTime(RaceConfig.scoreTime(v))
 	end
 	return Format.abbreviate(v)
 end
@@ -106,22 +137,31 @@ local function nameFor(userId: number): string
 end
 
 -- ============================================================== datastore
-local function storeFor(board): OrderedDataStore?
+local function storeName(board): string
+	local s = board.Store
+	return type(s) == "function" and s() or s
+end
+
+local function storeByName(name: string): OrderedDataStore?
 	if storeFailed then
 		return nil
 	end
-	if stores[board.Id] then
-		return stores[board.Id]
+	if stores[name] then
+		return stores[name]
 	end
 	local ok, store = pcall(function()
-		return DataStoreService:GetOrderedDataStore(board.Store)
+		return DataStoreService:GetOrderedDataStore(name)
 	end)
 	if ok and store then
-		stores[board.Id] = store
+		stores[name] = store
 		return store
 	end
 	storeFailed = true
 	return nil
+end
+
+local function storeFor(board): OrderedDataStore?
+	return storeByName(storeName(board))
 end
 
 local function writePlayer(player: Player)
@@ -134,10 +174,14 @@ local function writePlayer(player: Player)
 		if not store then
 			return
 		end
-		local value = storeValue(valueOf(player, board.Stat))
-		local ok = pcall(function()
-			store:SetAsync(tostring(player.UserId), value)
-		end)
+		local raw = valueOf(player, board.Stat)
+		local ok = true
+		if not (board.SkipZero and raw <= 0) then
+			local value = storeValue(raw)
+			ok = pcall(function()
+				store:SetAsync(tostring(player.UserId), value)
+			end)
+		end
 		if not ok then
 			storeFailed = RunService:IsStudio() -- no API access in Studio: stop trying
 			if storeFailed then
@@ -188,7 +232,9 @@ local function merged(board, global: { { UserId: number, Value: number } }?)
 	end
 	local list = {}
 	for id, v in byId do
-		table.insert(list, { UserId = id, Value = v })
+		if not board.SkipZero or v > 0 then
+			table.insert(list, { UserId = id, Value = v })
+		end
 	end
 	table.sort(list, function(a, b)
 		if a.Value ~= b.Value then
@@ -296,7 +342,7 @@ local function buildBoard(parent: Instance, board, cf: CFrame)
 	grad.Rotation = 90
 	grad.Color = ColorSequence.new(Color3.fromRGB(44, 50, 86), Color3.fromRGB(18, 20, 36))
 	grad.Parent = bg
-	label({ Text = string.upper(board.Subtitle), TextColor3 = board.Color, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(0.9, 0.055), Position = UDim2.fromScale(0.05, 0.02), Parent = bg })
+	local subtitle = label({ Text = string.upper(board.Subtitle), TextColor3 = board.Color, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(0.9, 0.055), Position = UDim2.fromScale(0.05, 0.02), Parent = bg })
 
 	local rows = {}
 	local top, rowH = 0.095, 0.083
@@ -352,7 +398,7 @@ local function buildBoard(parent: Instance, board, cf: CFrame)
 	})
 	model.PrimaryPart = screen
 	model.Parent = parent
-	boards[board.Id] = { Rows = rows, Status = status }
+	boards[board.Id] = { Rows = rows, Status = status, Subtitle = subtitle }
 	return model
 end
 
@@ -373,14 +419,27 @@ local function buildAll()
 	folder.Name = "Leaderboards"
 	folder.Parent = world or Workspace
 	local center = WorldConfig.Hub.Center
-	for i, board in LeaderboardConfig.Boards do
-		local a = math.rad(LeaderboardConfig.Angles[i] or (180 + (i - 2.5) * 26))
-		local x = center.X + math.sin(a) * LeaderboardConfig.Ring
-		local z = center.Z - math.cos(a) * LeaderboardConfig.Ring
-		local y = groundAt(x, z)
-		-- front (-Z of the frame) faces the plaza centre
-		local cf = CFrame.lookAt(V3(x, y, z), V3(center.X, y, center.Z))
-		buildBoard(folder, board, cf)
+	local hubIndex = 0
+	for _, board in LeaderboardConfig.Boards do
+		if board.Where == "Race" then
+			-- on the Race Island plaza, turned towards the spot where players arrive
+			local arrival = RaceConfig.toWorld(RaceConfig.Arrival)
+			for _, spot in RaceConfig.Boards do
+				if spot.Id == board.Id then
+					local at = RaceConfig.toWorld(spot.Position)
+					buildBoard(folder, board, CFrame.lookAt(at, V3(arrival.X, at.Y, arrival.Z)))
+				end
+			end
+		else
+			hubIndex += 1
+			local a = math.rad(LeaderboardConfig.Angles[hubIndex] or (180 + (hubIndex - 2.5) * 26))
+			local x = center.X + math.sin(a) * LeaderboardConfig.Ring
+			local z = center.Z - math.cos(a) * LeaderboardConfig.Ring
+			local y = groundAt(x, z)
+			-- front (-Z of the frame) faces the plaza centre
+			local cf = CFrame.lookAt(V3(x, y, z), V3(center.X, y, center.Z))
+			buildBoard(folder, board, cf)
+		end
 	end
 end
 
@@ -412,11 +471,16 @@ local function render(board, list)
 		end
 	end
 	ui.Status.Text = storeFailed and "Live ranking of this server" or "Global top 10  -  updates every minute"
+	if board.Monthly and ui.Subtitle then
+		local d = os.date("!*t")
+		ui.Subtitle.Text = string.upper(string.format("%s %d  -  %s", MONTHS[d.month] or "", d.year, RaceConfig.Monthly.PrizeText))
+	end
 end
 
 local function refresh()
 	for _, board in LeaderboardConfig.Boards do
 		local global = readTop(board)
+		globals[board.Id] = global
 		local list = merged(board, global)
 		tops[board.Id] = list
 		render(board, list)
@@ -425,6 +489,59 @@ end
 
 function LeaderboardService.Top(boardId: string)
 	return tops[boardId] or {}
+end
+
+local function boardById(boardId: string)
+	for _, board in LeaderboardConfig.Boards do
+		if board.Id == boardId then
+			return board
+		end
+	end
+	return nil
+end
+
+-- A board as text rows (the Race window): live values of this server merged into the last global read.
+function LeaderboardService.TopNamed(boardId: string)
+	local board = boardById(boardId)
+	if not board then
+		return {}
+	end
+	local out = {}
+	for i, e in merged(board, globals[boardId]) do
+		out[i] = { Rank = i, Name = nameFor(e.UserId), UserId = e.UserId, Value = e.Value, Text = formatValue(board.Format, e.Value) }
+	end
+	return out
+end
+
+function LeaderboardService.NameOf(userId: number): string
+	return nameFor(userId)
+end
+
+-- Top entries of any ordered store (monthly winner lookup). nil without DataStore access.
+function LeaderboardService.TopOfStore(name: string, count: number?): { { UserId: number, Value: number } }?
+	local store = storeByName(name)
+	if not store then
+		return nil
+	end
+	local ok, page = pcall(function()
+		return store:GetSortedAsync(false, count or 1):GetCurrentPage()
+	end)
+	if not ok or type(page) ~= "table" then
+		return nil
+	end
+	local out = {}
+	for _, entry in page do
+		local id = tonumber(entry.key)
+		if id then
+			table.insert(out, { UserId = id, Value = tonumber(entry.value) or 0 })
+		end
+	end
+	return out
+end
+
+-- Writes one player's values to the stores right away (after a new race record).
+function LeaderboardService.WriteNow(player: Player)
+	writePlayer(player)
 end
 
 function LeaderboardService.RefreshNow()

@@ -335,6 +335,9 @@ local function tryClaim()
 			if audio then
 				audio.playUI("LevelUp")
 			end
+			if registry.AnimationController then
+				registry.AnimationController.react("Rare", 1)
+			end
 		elseif res.err == "GONE" then
 			hide()
 		elseif res.err == "EGG_STORAGE_FULL" then

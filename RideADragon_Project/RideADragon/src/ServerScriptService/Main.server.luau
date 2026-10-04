@@ -38,6 +38,8 @@ local ORDER = {
 	"LevelService",
 	"LeaderstatsService",
 	"LeaderboardService",
+	"RaceService",
+	"CombatService",
 	"SpinService",
 	"DevService",
 }

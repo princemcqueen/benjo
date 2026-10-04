@@ -9,11 +9,15 @@
 	colours follow the dragon's mutation (frost breath, toxic breath, hellfire,
 	lightning, holy light, rainbow...), see THEMES.
 
+	The breath has a wind-up that matches the Animator's FireBreath (the dragon inhales for
+	~0.2 s): a glowing ball gathers at the mouth, then it pops and the flames burst out.
+
 	BreathFX.start(model, scale?) / BreathFX.stop(model) / BreathFX.isOn(model)
 ]]
 
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local BreathFX = {}
 
@@ -22,6 +26,8 @@ local TEX = {
 	Smoke = "rbxasset://textures/particles/smoke_main.dds",
 	Sparkle = "rbxasset://textures/particles/sparkles_main.dds",
 }
+
+local WINDUP = 0.2 -- seconds of inhaling before the flames come out
 
 local active: { [Model]: { Folder: Instance, Light: PointLight?, Conn: RBXScriptConnection? } } = {}
 
@@ -80,6 +86,7 @@ function BreathFX.start(model: Model, scale: number?)
 	local function emitter(name: string, props: { [string]: any })
 		local e = Instance.new("ParticleEmitter")
 		e.Name = name
+		e.Enabled = false -- switched on when the wind-up is over
 		e.EmissionDirection = Enum.NormalId.Front
 		e.LightInfluence = 0
 		e.Rotation = NumberRange.new(0, 360)
@@ -140,6 +147,7 @@ function BreathFX.start(model: Model, scale: number?)
 	light.Shadows = false
 	local host = mouth.Parent
 	light.Parent = host and host:IsA("BasePart") and host or folder.Parent
+	light.Enabled = false
 	local entry = { Folder = folder, Light = light, Conn = nil }
 	entry.Conn = RunService.Heartbeat:Connect(function()
 		if light.Parent then
@@ -147,6 +155,63 @@ function BreathFX.start(model: Model, scale: number?)
 		end
 	end)
 	active[model] = entry
+	-- wind-up: a glowing ball gathers at the mouth (follows the jaw), then the flames burst out
+	local ball: Part? = nil
+	if host and host:IsA("BasePart") and mouth:IsA("Attachment") then
+		ball = Instance.new("Part")
+		local b = ball :: Part
+		b.Name = "BreathCharge"
+		b.Shape = Enum.PartType.Ball
+		b.Material = Enum.Material.Neon
+		b.Color = th.Core
+		b.Size = Vector3.one * 0.3 * S
+		b.Transparency = 0.15
+		b.CanCollide = false
+		b.CanQuery = false
+		b.CanTouch = false
+		b.CastShadow = false
+		b.Massless = true
+		b.CFrame = CFrame.new(mouth.WorldPosition)
+		b.Parent = folder
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = host
+		weld.Part1 = b
+		weld.Parent = b
+		TweenService:Create(b, TweenInfo.new(WINDUP, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Size = Vector3.one * 3.2 * S,
+			Transparency = 0.35,
+		}):Play()
+		light.Enabled = true
+		light.Brightness = 3
+	end
+	task.delay(WINDUP, function()
+		if active[model] ~= entry then
+			if ball then
+				ball:Destroy()
+			end
+			return
+		end
+		light.Enabled = true
+		for _, d in folder:GetChildren() do
+			if d:IsA("ParticleEmitter") then
+				d.Enabled = true
+				if d.Name == "Flame" then
+					d:Emit(16)
+				end
+			end
+		end
+		if ball then
+			local b = ball :: Part
+			local pop = TweenService:Create(b, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.one * 6 * S,
+				Transparency = 1,
+			})
+			pop:Play()
+			task.delay(0.25, function()
+				b:Destroy()
+			end)
+		end
+	end)
 	model.AncestryChanged:Once(function(_, parent)
 		if parent == nil then
 			BreathFX.stop(model)

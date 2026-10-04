@@ -742,6 +742,20 @@ function Hud:SetBond(info)
 	end
 end
 
+-- Arena duels (CombatController): touch buttons + their cooldown fills.
+function Hud:SetArena(on: boolean)
+	self.InArena = on
+	if self.Mobile then
+		self.Mobile:SetArena(on)
+	end
+end
+
+function Hud:SetArenaCooldowns(strike01: number, blast01: number)
+	if self.Mobile then
+		self.Mobile:SetCooldowns(strike01, blast01)
+	end
+end
+
 function Hud:SetRiding(riding: boolean)
 	self.RidePanel.Visible = riding and Responsive.Device == "Desktop"
 	self.Mobile:SetVisible(riding)

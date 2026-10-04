@@ -6,7 +6,7 @@
 	moves, the rider stays seated); on foot, the companion is brought along.
 
 	Net (domain "Travel"): To { Place } -> { Place }
-	Places: Sanctuary, Spawn (leaderboards), SpinIsland, Shop, Forge, Quests, Library
+	Places: Sanctuary, Spawn (leaderboards), SpinIsland, RaceIsland, Shop, Forge, Quests, Library
 ]]
 
 local Players = game:GetService("Players")
@@ -18,6 +18,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local Net = require(Shared:WaitForChild("Net"))
 local WorldConfig = require(Configs:WaitForChild("WorldConfig"))
 local SpinConfig = require(Configs:WaitForChild("SpinConfig"))
+local RaceConfig = require(Configs:WaitForChild("RaceConfig"))
 
 local TravelService = {}
 
@@ -39,6 +40,10 @@ end
 function TravelService.Destination(player: Player, place: string): CFrame?
 	if place == "SpinIsland" then
 		return SpinConfig.arrival()
+	end
+	if place == "RaceIsland" then
+		local at = RaceConfig.toWorld(RaceConfig.Arrival)
+		return CFrame.lookAt(at, at + Vector3.new(0, 0, -10))
 	end
 	if place == "Spawn" then
 		local lb = Services.LeaderboardService
@@ -63,6 +68,9 @@ end
 local function travel(player: Player, p)
 	if not Net.check.str(p.Place, 20) then
 		return false, "BAD_REQUEST"
+	end
+	if player:GetAttribute("RaceActive") then
+		return false, "RACING", "You can't travel during a race."
 	end
 	local now = os.clock()
 	if now - (lastTravel[player] or -100) < COOLDOWN then

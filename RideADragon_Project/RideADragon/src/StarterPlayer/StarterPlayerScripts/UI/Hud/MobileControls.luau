@@ -44,6 +44,9 @@ local BUTTONS = {
 	{ Id = "Dash", Action = "Dash", Icon = "Wind", Text = "DASH", Perk = "Dash" },
 	{ Id = "Fire", Action = "Fire", Icon = "Flame", Text = "FIRE", Perk = "Fire" },
 	{ Id = "Dance", Action = "Flourish", Icon = "Star", Text = "DANCE", Perk = "Flourish" },
+	-- Arena duels (replace the bond buttons while you are a fighter)
+	{ Id = "Strike", Action = "Strike", Icon = "Sword", Text = "STRIKE", Arena = true },
+	{ Id = "Blast", Action = "Blast", Icon = "Fireball", Text = "BLAST", Arena = true },
 	{ Id = "Dismount", Action = nil, Icon = "Dismount", Text = "LEAVE" },
 }
 
@@ -69,7 +72,7 @@ local function roundButton(def, parent: Instance)
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 		Size = UDim2.fromScale(1, 1),
-		Visible = def.Id == "Boost" or def.Perk ~= nil,
+		Visible = def.Id == "Boost" or def.Perk ~= nil or def.Arena == true,
 		Parent = root,
 	})
 	Kit.corner(fillHolder, "pill")
@@ -92,7 +95,7 @@ local function roundButton(def, parent: Instance)
 		Parent = root,
 	})
 	Kit.aspect(iconHolder, 1)
-	local icon = Icons.make(def.Icon, { Color = H.Icon, Accent = def.Big and C.Accent or C.BlueDeep, Ink = H.Panel })
+	local icon = Icons.make(def.Icon, { Color = H.Icon, Accent = (def.Big or def.Arena) and C.Accent or C.BlueDeep, Ink = H.Panel })
 	icon.Parent = iconHolder
 	local caption = Kit.text({
 		Name = "Caption",
@@ -133,6 +136,10 @@ function MobileControls.new(parent: Instance, registry)
 			b.Instance.Visible = false -- until the dragon's bond unlocks it (SetPerks)
 			b.Fill.Size = UDim2.fromScale(1, 0)
 			b.Fill.BackgroundColor3 = C.Disabled
+		elseif def.Arena then
+			b.Instance.Visible = false -- only while the rider is a fighter in the arena (SetArena)
+			b.Fill.Size = UDim2.fromScale(1, 0)
+			b.Fill.BackgroundColor3 = C.Danger
 		end
 	end
 	-- speed readout: big number with the unit underneath
@@ -244,6 +251,10 @@ function MobileControls:Layout()
 	place(B.Dash.Instance, small, small, perkRight, midRow)
 	place(B.Fire.Instance, small, small, perkRight, midRow + small + gap)
 	place(B.Dance.Instance, small, small, perkRight, midRow + (small + gap) * 2)
+	-- duel buttons sit in the same column, a little bigger: the right thumb has work to do
+	local duel = small * 1.2
+	place(B.Strike.Instance, duel, duel, perkRight - (duel - small) * 0.5, midRow - (duel - small) * 0.5)
+	place(B.Blast.Instance, duel, duel, perkRight - (duel - small) * 0.5, midRow + duel + gap * 1.5 - (duel - small) * 0.5)
 	if R.Portrait then
 		place(B.Boost.Instance, small, small, margin + big + gap, midRow)
 		place(B.Descend.Instance, small, small, centerUp, bottom + big + gap)
@@ -307,16 +318,39 @@ end
 -- Dragon Bond: show the ability buttons the bond level has unlocked, with their cooldown.
 -- info = BondController.info()
 function MobileControls:SetPerks(info)
+	self.PerkInfo = info
 	for _, def in BUTTONS do
 		if def.Perk then
 			local b = self.Buttons[def.Id]
-			local unlocked = info and info.Unlocked and info.Unlocked[def.Perk] == true
-			b.Instance.Visible = unlocked
+			local unlocked = (info ~= nil and info.Unlocked ~= nil and info.Unlocked[def.Perk] == true)
+			b.Instance.Visible = unlocked and not self.Arena
 			if unlocked then
 				b.Fill.Size = UDim2.fromScale(1, math.clamp((info.Cooldown and info.Cooldown[def.Perk]) or 0, 0, 1))
 			end
 		end
 	end
+end
+
+-- Arena duels: the STRIKE / BLAST buttons replace the bond buttons while you are a fighter.
+function MobileControls:SetArena(on: boolean)
+	if self.Arena == on then
+		return
+	end
+	self.Arena = on
+	self.Buttons.Strike.Instance.Visible = on
+	self.Buttons.Blast.Instance.Visible = on
+	self.Buttons.Roar.Instance.Visible = not on
+	if not on then
+		self.Buttons.Strike.Fill.Size = UDim2.fromScale(1, 0)
+		self.Buttons.Blast.Fill.Size = UDim2.fromScale(1, 0)
+	end
+	self:SetPerks(self.PerkInfo)
+end
+
+-- Remaining cooldown of the two attacks (fractions 0..1, 1 = just used).
+function MobileControls:SetCooldowns(strike01: number, blast01: number)
+	self.Buttons.Strike.Fill.Size = UDim2.fromScale(1, math.clamp(strike01, 0, 1))
+	self.Buttons.Blast.Fill.Size = UDim2.fromScale(1, math.clamp(blast01, 0, 1))
 end
 
 function MobileControls:SetStats(speed: number, boost01: number, boosting: boolean)

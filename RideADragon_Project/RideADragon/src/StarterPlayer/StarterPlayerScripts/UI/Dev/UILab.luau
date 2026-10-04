@@ -38,7 +38,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -70,6 +70,10 @@ function UILab.reset()
 		hud._labRiding = false
 		hud:SetRiding(false)
 	end
+	if hud and hud._labArena then
+		hud._labArena = false
+		hud:SetArena(false)
+	end
 	if hud and hud._labHeld then
 		hud._labHeld = false
 		hud:SetHeldEgg(nil)
@@ -81,6 +85,14 @@ function UILab.reset()
 	local wild = registry.WildEggController
 	if wild then
 		wild.clear()
+	end
+	local race = registry.RaceController
+	if race and race.clear then
+		race.clear()
+	end
+	local combat = registry.CombatController
+	if combat and combat.clear then
+		combat.clear()
 	end
 end
 
@@ -109,6 +121,38 @@ function UILab.show(screen: string)
 		local announce = registry.AnnounceController
 		if announce then
 			announce.preview(true)
+		end
+		return nil
+	elseif screen == "RaceLobby" or screen == "RaceCount" or screen == "RaceHud" or screen == "RaceFinish" then
+		local race = registry.RaceController
+		if race then
+			race.preview(({ RaceLobby = "Lobby", RaceCount = "Count", RaceHud = "Race", RaceFinish = "Finish" })[screen])
+		end
+		return nil
+	elseif screen == "RaceTop" or screen == "RaceArena" then
+		ui.Open("Race", { Tab = screen == "RaceTop" and "Monthly" or "Arena" })
+		return "Race"
+	elseif screen == "ArenaTouch" then
+		-- the duel buttons of the touch cluster (STRIKE / BLAST replace the bond buttons) + the arena panel
+		local hud = registry.Hud
+		if hud then
+			hud._labRiding = true
+			hud._labArena = true
+			hud:SetRiding(true)
+			hud:SetRideMode("Fly")
+			hud:SetFlightStats(124, 0.62, false)
+			hud:SetArena(true)
+			hud:SetArenaCooldowns(0.4, 0.8)
+		end
+		local combat = registry.CombatController
+		if combat then
+			combat.preview("Arena")
+		end
+		return nil
+	elseif screen == "ArenaHud" or screen == "ArenaDown" then
+		local combat = registry.CombatController
+		if combat then
+			combat.preview(screen == "ArenaDown" and "Down" or "Arena")
 		end
 		return nil
 	elseif screen == "Riding" then
@@ -305,12 +349,12 @@ local function buildPanel()
 		end
 	end)
 	label("TEST (Studio only)", 16)
-	grid({ "+$1M", "ALL 30 DRAGONS", "FILL EGGS", "HATCH NOW", "WILD EGG", "BOND MAX", "MEGA BANNER" }, function(i)
-		local actions = { "Cash", "Dragons", "Eggs", "HatchNow", "WildEgg", "BondMax", "Banner" }
+	grid({ "+$1M", "ALL 30 DRAGONS", "FILL EGGS", "HATCH NOW", "WILD EGG", "BOND MAX", "MEGA BANNER", "RACE TIME", "CHAMPION" }, function(i)
+		local actions = { "Cash", "Dragons", "Eggs", "HatchNow", "WildEgg", "BondMax", "Banner", "RaceTime", "RaceChampion" }
 		task.spawn(function()
 			local Net = require(game:GetService("ReplicatedStorage").Shared.Net)
 			local res = Net.request("Dev", actions[i], {})
-			ui.HandleResult(res, res.ok and ({ "+$1,000,000", "+5 dragons", "Egg bag filled", "Eggs are ready to hatch", "A wild egg appeared!", "Bond level 50 - try Q / E / Z", "Banner sent" })[i] or nil)
+			ui.HandleResult(res, res.ok and ({ "+$1,000,000", "+5 dragons", "Egg bag filled", "Eggs are ready to hatch", "A wild egg appeared!", "Bond level 50 - try Q / E / Z", "Banner sent", "Race time set - see the boards on the Race Island", "You are the race champion!" })[i] or nil)
 		end)
 	end)
 	output = label("", 120)

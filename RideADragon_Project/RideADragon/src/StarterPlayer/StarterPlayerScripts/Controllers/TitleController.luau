@@ -39,6 +39,13 @@ local function label(parent: Instance, name: string, y: number, h: number, font:
 	return t
 end
 
+-- The race champion of the last month wears a crown line over the dragon (RaceService sets the attribute).
+local function isChampion(model: Model): boolean
+	local uid = model:GetAttribute("OwnerUserId")
+	local owner = uid and Players:GetPlayerByUserId(uid)
+	return owner ~= nil and owner:GetAttribute("RaceChampion") ~= nil
+end
+
 local function fill(model: Model, gui: BillboardGui)
 	local speciesId = model:GetAttribute("SpeciesId")
 	local species = speciesId and DragonConfig.Species[speciesId]
@@ -72,7 +79,12 @@ local function fill(model: Model, gui: BillboardGui)
 	elseif not top and shimmer then
 		shimmer:Destroy()
 	end
-	if mutation and mutationId ~= "None" then
+	local hasMutation = mutation ~= nil and mutationId ~= "None"
+	if isChampion(model) then
+		tag.Visible = true
+		tag.Text = "RACE CHAMPION" .. (hasMutation and ("  -  " .. string.upper(mutation.Name)) or "")
+		tag.TextColor3 = Color3.fromRGB(255, 214, 80)
+	elseif hasMutation then
 		tag.Visible = true
 		tag.Text = string.upper(mutation.Name)
 		tag.TextColor3 = mutation.Color
@@ -171,6 +183,11 @@ function TitleController.Start()
 			task.wait(2)
 			for _, m in folder:GetChildren() do
 				track(m)
+			end
+			for model, t in titles do
+				if t.Gui.Parent and t.Gui:FindFirstChild("Tag") then
+					fill(model, t.Gui) -- picks up a champion crown that arrived after the dragon
+				end
 			end
 		end
 	end)

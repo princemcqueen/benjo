@@ -88,6 +88,13 @@ function CameraController.getLook(): Vector3
 	return CFrame.fromOrientation(pitch, yaw, 0).LookVector
 end
 
+-- Turns the view to `heading` (radians, 0 = north) straight away: race start grid.
+function CameraController.setView(heading: number, newPitch: number?)
+	yaw = MathUtil.wrapAngle(heading)
+	pitch = math.clamp(newPitch or -0.22, CAM.PitchMin, CAM.PitchMax)
+	lastManual = clock
+end
+
 -- amount 0..1 (adds trauma; shake = trauma^2)
 function CameraController.shake(amount: number)
 	if CameraController.Options.Shake then

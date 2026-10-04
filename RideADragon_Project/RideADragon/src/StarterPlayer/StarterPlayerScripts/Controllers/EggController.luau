@@ -189,6 +189,10 @@ local function tryPickup(e)
 			if held and res.data.Held then
 				held.flyIn(res.data.Type, e.Position)
 			end
+			local reactLuck = tonumber(res.data.Luck) or 1
+			if registry.AnimationController then
+				registry.AnimationController.react(reactLuck >= 25 and "Rare" or "Egg", math.clamp(reactLuck / 100, 0, 1))
+			end
 			if uic then
 				local luck = tonumber(res.data.Luck) or 1
 				local where = res.data.Held and "  -  in your hand" or "  -  in your bag"

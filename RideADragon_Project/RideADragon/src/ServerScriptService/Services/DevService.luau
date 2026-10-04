@@ -4,7 +4,7 @@
 	Nothing is registered on live servers: every handler is behind
 	RunService:IsStudio(), so clients can never reach these in a real game.
 
-	Net (domain "Dev"): Cash, Dragons, Eggs, HatchNow, WildEgg, BondMax, Banner
+	Net (domain "Dev"): Cash, Dragons, Eggs, HatchNow, WildEgg, BondMax, Banner, RaceTime, RaceChampion
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,6 +19,7 @@ local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
+local RaceConfig = require(Configs:WaitForChild("RaceConfig"))
 
 local DevService = {}
 
@@ -136,6 +137,26 @@ function DevService.Init(services)
 			Odds = 12500000,
 			Mega = true,
 		})
+		return true
+	end, RATE)
+
+	-- Race Island: a fake best time (the boards and the window show it) ...
+	Net.handle("Dev", "RaceTime", function(player)
+		local ms = 41234 + math.random(0, 3000)
+		Data.Set(player, { "Race", "Best" }, ms)
+		Data.Set(player, { "Race", "MonthKey" }, RaceConfig.monthKey())
+		Data.Set(player, { "Race", "MonthBest" }, ms)
+		Data.Increment(player, { "Race", "Runs" }, 1)
+		return true
+	end, RATE)
+
+	-- ... and the monthly champion ceremony (banner, podium, trophy, reward)
+	Net.handle("Dev", "RaceChampion", function(player)
+		local race = services.RaceService
+		if not race or not race.DevCrown then
+			return false, "NO_RACE"
+		end
+		race.DevCrown(player)
 		return true
 	end, RATE)
 

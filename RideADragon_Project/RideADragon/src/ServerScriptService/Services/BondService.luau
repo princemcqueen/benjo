@@ -293,7 +293,7 @@ local function onAction(player: Player, p)
 	local mount = Services.MountService
 	local action = p.Action
 	if action == "Dash" then
-		if BondConfig.has(points, "Dash") and t >= (cd.Dash or 0) then
+		if BondConfig.has(points, "Dash") and t >= (cd.Dash or 0) and not player:GetAttribute("RaceActive") then
 			cd.Dash = t + cooldownFor(player, ab.Dash.Cooldown)
 			comp.DashUntil = t + ab.Dash.Duration + ab.Dash.Allowance
 			mount.PlayShot(player, "Dash")

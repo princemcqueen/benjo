@@ -79,10 +79,13 @@ local TEMPLATE = {
 		Released = 0,
 		MutateTries = 0,
 		Spins = 0,
+		ArenaKills = 0,
+		ArenaDeaths = 0,
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},
 	Spin = { NextFree = 0, Tickets = 3 },
+	Race = { Best = 0, Runs = 0, Wins = 0, MonthKey = "", MonthBest = 0, Crowns = {} }, -- see RaceService
 	Purchases = { Receipts = {}, Robux = 0 },
 	CreatedAt = 0,
 	LastLogin = 0,

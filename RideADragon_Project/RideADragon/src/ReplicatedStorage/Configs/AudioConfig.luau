@@ -46,6 +46,17 @@ AudioConfig.Sounds = {
 	Hatch = { Id = "", Group = "SFX", Volume = 0.9 }, -- "magic burst"
 	RareHatch = { Id = "", Group = "SFX", Volume = 1 }, -- "epic reveal fanfare"
 
+	-- Race & duels (Race Island)
+	RaceCount = { Id = "", Group = "UI", Volume = 0.8 }, -- "countdown beep"
+	RaceGo = { Id = "", Group = "UI", Volume = 0.9 }, -- "race start horn"
+	RaceGate = { Id = "", Group = "UI", Volume = 0.4 }, -- "checkpoint ding"
+	RaceBoost = { Id = "", Group = "SFX", Volume = 0.7 }, -- "speed boost whoosh"
+	RaceFinish = { Id = "", Group = "UI", Volume = 0.9 }, -- "finish fanfare"
+	Strike = { Id = "", Group = "SFX", Volume = 0.8, RollOffMax = 200 }, -- "claw swipe" / "bite"
+	Blast = { Id = "", Group = "SFX", Volume = 0.9, RollOffMax = 260 }, -- "fireball cast"
+	Hit = { Id = "", Group = "SFX", Volume = 0.8, RollOffMax = 200 }, -- "punch impact"
+	Knockout = { Id = "", Group = "UI", Volume = 0.9 }, -- "knockout sting"
+
 	-- Economy & UI
 	Collect = { Id = "", Group = "SFX", Volume = 0.7 }, -- "coins collect"
 	Purchase = { Id = "", Group = "UI", Volume = 0.7 }, -- "purchase success"

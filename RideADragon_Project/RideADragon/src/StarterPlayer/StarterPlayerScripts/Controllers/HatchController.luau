@@ -20,6 +20,8 @@
 	driven and tested in the simulator.
 
 	HatchController.Phase: "" | Approach | Charge | Burst | Walk | Roar | Card
+	During the roar the dragon's FULL NAME (mutation + species) appears letter by letter with a
+	puff of sparks per letter, together with its Index number ("DRAGON No. 07 / 34").
 	HatchController.Stage / .Dragon: the live stage folder and hatchling (tests, tools)
 ]]
 
@@ -58,6 +60,7 @@ HatchController.Phase = ""
 HatchController.Stage = nil :: Folder?
 HatchController.Dragon = nil :: any
 HatchController.Framing = nil :: any
+HatchController.NameFx = nil :: any
 
 local registry
 local busy = false
@@ -522,8 +525,10 @@ local function resultCard(record, isNew: boolean, onEquip: () -> (), onContinue:
 		local m = MutationConfig.Mutations[record.Mutation]
 		Kit.badge({ Text = string.upper(m and m.Name or record.Mutation), Color = m and m.Color or C.Gold, LayoutOrder = 2, Parent = top })
 	end
+	local order = DragonConfig.Species[record.SpeciesId] and DragonConfig.Species[record.SpeciesId].Order or 0
+	Kit.badge({ Text = string.format("No. %02d", order), Color = C.Surface, LayoutOrder = 3, Parent = top })
 	if isNew then
-		Kit.badge({ Text = "NEW!", Color = C.Accent, LayoutOrder = 3, Parent = top })
+		Kit.badge({ Text = "NEW!", Color = C.Accent, LayoutOrder = 4, Parent = top })
 	end
 	local name = Kit.text({
 		Name = "Name",
@@ -679,6 +684,188 @@ local function rollStrip(layer: Instance, eggType: string, record)
 	return self
 end
 
+-- ============================================================== name reveal
+-- "GOLDEN FROST DRAGON" + "DRAGON No. 07 / 34": the letters pop in one after another, each with
+-- a puff of sparks, then a shimmer sweeps under the name. Finish() completes it at once (SKIP).
+local function fullNameOf(record): string
+	local m = record.Mutation ~= nil and record.Mutation ~= "None" and MutationConfig.Mutations[record.Mutation] or nil
+	return string.upper((m and (m.Name .. " ") or "") .. record.Name)
+end
+
+local function indexNumber(record): (number, number)
+	local species = DragonConfig.Species[record.SpeciesId]
+	return species and species.Order or 0, #DragonConfig.speciesList()
+end
+
+local function nameReveal(layer: Instance, record, rarity, accent: Color3, instant: boolean?)
+	local text = fullNameOf(record)
+	local order, total = indexNumber(record)
+	local short = math.min(Responsive.Width, Responsive.Height)
+	local chars = #text
+	local px = math.floor(math.clamp(short * (Responsive.Device == "Phone" and 0.085 or 0.1), 22, 96))
+	px = math.floor(math.min(px, Responsive.Width * 0.92 / math.max(8, chars * 0.7)))
+	local root = Kit.frame({
+		Name = "HatchName",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.fromScale(0.5, Responsive.Portrait and 0.12 or 0.08),
+		Size = UDim2.new(1, 0, 0, px * 2.6),
+		Parent = layer,
+	})
+	local tag = Kit.text({
+		Name = "Number",
+		Text = string.format("DRAGON  No. %02d / %d", order, total),
+		Role = "Title",
+		Color = accent:Lerp(Color3.new(1, 1, 1), 0.4),
+		XAlign = Enum.TextXAlignment.Center,
+		Position = UDim2.new(0, 0, 0, 0),
+		Size = UDim2.new(1, 0, 0, math.floor(px * 0.55)),
+		Parent = root,
+	})
+	tag.TextTransparency = 1
+	tag.TextStrokeTransparency = 1
+	local row = Kit.frame({ Name = "Letters", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, math.floor(px * 0.62)), Size = UDim2.new(1, 0, 0, math.floor(px * 1.15)), Parent = root })
+	local list = Instance.new("UIListLayout")
+	list.FillDirection = Enum.FillDirection.Horizontal
+	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	list.VerticalAlignment = Enum.VerticalAlignment.Center
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = row
+	local letters = {}
+	for i = 1, chars do
+		local ch = string.sub(text, i, i)
+		local label = Instance.new("TextLabel")
+		label.Name = "Letter"
+		label.LayoutOrder = i
+		label.BackgroundTransparency = 1
+		label.AutomaticSize = Enum.AutomaticSize.X
+		label.Size = UDim2.new(0, 0, 1, 0)
+		label.Font = Enum.Font.GothamBlack
+		label.TextSize = px
+		label.Text = ch == " " and "\u{2002}" or ch
+		label.TextColor3 = Color3.new(1, 1, 1)
+		label.TextStrokeColor3 = Color3.fromRGB(14, 12, 24)
+		label.TextStrokeTransparency = 1
+		label.TextTransparency = 1
+		local grad = Instance.new("UIGradient")
+		grad.Rotation = 90
+		grad.Color = ColorSequence.new(rarity.Glow, rarity.Color)
+		grad.Parent = label
+		local scale = Instance.new("UIScale")
+		scale.Scale = 0.25
+		scale.Parent = label
+		label.Parent = row
+		table.insert(letters, { Label = label, Scale = scale, Char = ch })
+	end
+	-- shimmer bar under the name
+	local bar = Kit.frame({
+		Name = "Shimmer",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, math.floor(px * 1.8)),
+		Size = UDim2.new(0.5, 0, 0, math.max(3, math.floor(px * 0.07))),
+		Parent = root,
+	})
+	bar.BackgroundTransparency = 1
+	bar.BackgroundColor3 = Color3.new(1, 1, 1)
+	local barGrad = Instance.new("UIGradient")
+	barGrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, accent), ColorSequenceKeypoint.new(0.5, Color3.new(1, 1, 1)), ColorSequenceKeypoint.new(1, accent) })
+	barGrad.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 1) })
+	barGrad.Parent = bar
+	local api = { Root = root, Done = false, Text = text }
+	local alive = true
+
+	local function showLetter(l, withSparks: boolean)
+		TweenService:Create(l.Label, TweenInfo.new(0.22, Enum.EasingStyle.Quad), { TextTransparency = 0, TextStrokeTransparency = 0.25 }):Play()
+		TweenService:Create(l.Scale, TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		if not withSparks or l.Char == " " then
+			return
+		end
+		task.defer(function()
+			if not alive or not l.Label.Parent then
+				return
+			end
+			local centre = l.Label.AbsolutePosition + l.Label.AbsoluteSize / 2 - root.AbsolutePosition
+			for k = 1, 5 do
+				local spark = Instance.new("Frame")
+				spark.Name = "Spark"
+				spark.AnchorPoint = Vector2.new(0.5, 0.5)
+				local size = math.max(3, math.floor(px * (0.07 + math.random() * 0.08)))
+				spark.Size = UDim2.fromOffset(size, size)
+				spark.Position = UDim2.fromOffset(centre.X, centre.Y)
+				spark.BackgroundColor3 = ({ Color3.new(1, 1, 1), accent, rarity.Glow })[(k % 3) + 1]
+				spark.BorderSizePixel = 0
+				spark.Rotation = math.random(0, 90)
+				spark.ZIndex = 5
+				local corner = Instance.new("UICorner")
+				corner.CornerRadius = UDim.new(0.5, 0)
+				corner.Parent = spark
+				spark.Parent = root
+				local a = math.random() * math.pi * 2
+				local dist = px * (0.35 + math.random() * 0.55)
+				TweenService:Create(spark, TweenInfo.new(0.5 + math.random() * 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Position = UDim2.fromOffset(centre.X + math.cos(a) * dist, centre.Y + math.sin(a) * dist - px * 0.2),
+					BackgroundTransparency = 1,
+					Size = UDim2.fromOffset(0, 0),
+				}):Play()
+				task.delay(0.9, function()
+					spark:Destroy()
+				end)
+			end
+		end)
+	end
+
+	local function shimmer()
+		bar.BackgroundTransparency = 0
+		barGrad.Offset = Vector2.new(-1, 0)
+		TweenService:Create(barGrad, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Offset = Vector2.new(1, 0) }):Play()
+		TweenService:Create(bar, TweenInfo.new(0.6, Enum.EasingStyle.Quad), { Size = UDim2.new(0.9, 0, 0, bar.Size.Y.Offset) }):Play()
+	end
+
+	function api.Finish()
+		if api.Done then
+			return
+		end
+		api.Done = true
+		alive = false
+		for _, l in letters do
+			l.Label.TextTransparency = 0
+			l.Label.TextStrokeTransparency = 0.25
+			l.Scale.Scale = 1
+		end
+		tag.TextTransparency = 0
+		tag.TextStrokeTransparency = 0.4
+		bar.BackgroundTransparency = 0
+		bar.Size = UDim2.new(0.9, 0, 0, bar.Size.Y.Offset)
+		barGrad.Offset = Vector2.zero
+	end
+
+	function api.Destroy()
+		alive = false
+		api.Done = true
+		root:Destroy()
+	end
+
+	if instant then
+		api.Finish()
+		return api
+	end
+	task.spawn(function()
+		TweenService:Create(tag, TweenInfo.new(0.3), { TextTransparency = 0, TextStrokeTransparency = 0.4 }):Play()
+		for _, l in letters do
+			if not alive then
+				return
+			end
+			showLetter(l, true)
+			task.wait(l.Char == " " and 0.03 or 0.055)
+		end
+		if alive then
+			shimmer()
+			task.wait(0.4)
+			api.Done = true
+		end
+	end)
+	return api
+end
+
 -- ============================================================== cinematic
 local function play(slot: number, result)
 	local camera = Workspace.CurrentCamera
@@ -716,6 +903,7 @@ local function play(slot: number, result)
 	local roll = nil
 	local card = nil
 	local conn = nil
+	local nameFx = nil
 	local fov0 = camera.FieldOfView
 	local showCompanion = hideCompanion()
 	-- the "E / F" bubbles of the world must not hang over the show
@@ -733,6 +921,10 @@ local function play(slot: number, result)
 		if roll then
 			roll.Destroy()
 			roll = nil
+		end
+		if nameFx then
+			nameFx.Destroy()
+			nameFx = nil
 		end
 		skip.Instance:Destroy()
 		fx.Cleanup()
@@ -979,8 +1171,12 @@ local function play(slot: number, result)
 		camera.CFrame = walkShot * CFrame.Angles(0, math.sin(t * 0.6) * 0.012, 0)
 	end)
 
-	-- ---- 5) ROAR: stop, rear up, shake the world
+	-- ---- 5) ROAR: stop, rear up, shake the world - and the name appears
 	HatchController.Phase = "Roar"
+	if walkDone then
+		nameFx = nameReveal(modal, record, rarity, accent, false)
+		HatchController.NameFx = nameFx
+	end
 	local roarPos = startPos + faceDir * walkDist
 	-- the camera looks at the roaring head, not at the hips
 	local roarFocus = Vector3.new(roarPos.X, focusBase.Y, roarPos.Z) + faceDir * (headReach * 0.5) + Vector3.new(0, hip * 0.4, 0)
@@ -1018,6 +1214,13 @@ local function play(slot: number, result)
 
 	-- ---- 6) CARD: the dragon idles, the camera orbits slowly, the card shows the result
 	HatchController.Phase = "Card"
+	if not nameFx then
+		-- skipped: the name is simply there
+		nameFx = nameReveal(modal, record, rarity, accent, true)
+		HatchController.NameFx = nameFx
+	else
+		nameFx.Finish()
+	end
 	fx.Darken(false, 0.8)
 	if dragon then
 		dragon.Root.CFrame = CFrame.lookAt(roarPos, roarPos + faceDir)
@@ -1076,6 +1279,9 @@ local function play(slot: number, result)
 	cleanup()
 	active = nil
 	uic.SetHudVisible(true)
+	if registry.AnimationController then
+		registry.AnimationController.react("Hatch", rare and 1 or 0.5)
+	end
 	if cam then
 		cam.endCinematic()
 	end

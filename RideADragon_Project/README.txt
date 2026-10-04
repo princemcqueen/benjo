@@ -1,4 +1,4 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 2)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 5)
 ======================================================
 
 CONTENTS
@@ -10,14 +10,18 @@ CONTENTS
                                                     ServerScriptService, StarterPlayer
   toolchain/              Offline tools used to build and test the game (Python 3):
                             build_place.py  - builds the .rbxlx from default.project.json
+                                              (refuses to build when the real Luau compiler finds
+                                              a syntax / type error in any script)
                             luau_lint.py    - Luau linter
-                            tests/          - simulation tests (shop, spin, eggs, inventory...)
+                            tests/          - simulation tests (shop, spin, eggs, inventory, race,
+                                              combat, animations...)
                             worldgen/       - terrain / layout generator for Dragon Haven
 
 OPEN / TEST IN STUDIO
   1. Open RideADragon_Dev.rbxlx in Roblox Studio and press Play.
   2. UI Lab (Studio only, ` key) > TEST row: +$1M, ALL 30 DRAGONS, FILL EGGS, HATCH NOW.
   3. Robux items with Id = 0 are free TEST purchases inside Studio.
+  4. If something does not start, the red Diagnostics panel (Studio only) lists the script errors.
 
 REBUILD THE PLACE FROM SOURCE
   cd toolchain
@@ -28,11 +32,64 @@ ROBUX ITEMS (before publishing)
   Create the game pass / developer products on create.roblox.com with the same
   prices and paste their IDs into
   ReplicatedStorage > Configs > MonetizationConfig (field Id):
-    Game passes: Owner Dragon 3000, PRINCE 8999, N2RC1S 8999
+    Game passes: Owner Dragon 3000, PRINCE 8999, N2RC1S 8999, LEGENDARY M0NICA DRAGON 11999
     Products: Luck Potion 49, Super Luck Potion 149, Cash Potion 49, Level Potion 39,
               Mutation Potion 99, 5 Spins 49, 25 Spins 199, Cash packs 25 / 99 / 249
 
-DONE IN THIS SNAPSHOT (TEST 2 additions first)
+SOUNDS
+  Every sound is a key in ReplicatedStorage > Configs > AudioConfig; an empty Id is skipped
+  silently. New keys in this snapshot: EggPlace, RaceCount, RaceGo, RaceGate, RaceBoost,
+  RaceFinish, Strike, Blast, Hit, Knockout (paste Creator Store ids to give them a sound).
+
+RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly north-east)
+  A floating LEGO island with a plaza, start grid, a sky circuit, a duel arena, a podium and
+  three leaderboard screens.
+  - SKY CIRCUIT: 2 laps of 26 ring gates (about 2,750 studs a lap) with 5 cyan BOOST rings. Join at
+    the red pad (or in the Race window): a 20 s lobby fills, everybody is put on the start grid,
+    3-2-1-GO. A lone racer can press START NOW (time trial). EVERYBODY RACES THE SAME STANDARD
+    DRAGON (no bond perks, no tree bonuses): the line you fly and the boost rings decide.
+    The server checks every racer 10 times a second: rings in order and forward only, speed,
+    dismounting, leaving the course. HUD: timer, gate / lap counter, place, a marker on the
+    next ring (an arrow at the screen edge when it is out of view; the next ring glows).
+    Finish card: place, time, personal best, rewards (cash from your income + XP) and everybody's
+    results. Cheaters / people who leave get no result.
+  - LEADERBOARDS on the island plaza (and the Race window): FASTEST RACERS (best time ever),
+    MONTHLY RACE (this month's best time), ARENA WARRIORS (knockouts). The hub plaza also has
+    STRONGEST DRAGON and HIGHEST LEVEL DRAGON.
+  - MONTHLY PRIZE ("$50"): the fastest racer of a month wins. Roblox cannot pay real money from
+    a game script, so the game RECORDS the winner and gives the in-game honours:
+      * the first server that runs on the 1st (UTC) reads last month's top time and writes the
+        winner (month, UserId, name, time) once to the DataStore "RaceWinners_v1", key "history"
+        (open it in Creator Hub > your experience > Data Stores), prints
+        "[Race] MONTHLY WINNER 2026xx: Name (id N) in m:ss.mmm" to the server log and shows the
+        winner on the podium of the island and in the Race window (PAST CHAMPIONS);
+      * the whole server gets a banner, the winner gets a trophy flag, +cash +XP, and a gold
+        "RACE CHAMPION" line over their dragon for the next month.
+    YOU pay the prize outside the game (for example by sending the winner a Robux gift or a
+    PayPal / gift card): look the winner up in "RaceWinners_v1" and check their run if you wish.
+    Change the text / amount in RaceConfig.Monthly (PrizeText, Headline).
+  - DUEL ARENA (PvP): fly into the arena on your dragon and other riders can hit you - and you
+    can hit them. STRIKE (F / left click / gamepad X): a bite and tail slam in front of you.
+    BLAST (G / gamepad R3): a fireball you aim (slower to recharge). Touch: two buttons.
+    Hit points and damage come from the dragon's level and rarity; the server decides every hit
+    (cooldowns, reach, cone, projectile flight). Knockout: 3 s on a respawn pad, then back with
+    full hit points and a few seconds of protection. A knockout pays cash + XP (not twice for
+    the same opponent within 45 s) and counts for ARENA WARRIORS. Nobody can be hit outside the
+    arena, on foot, or while racing. A TRAINING DUMMY in the middle takes hits, shows damage
+    numbers and a hit point bar, falls and stands up again, pays nothing.
+  - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
+
+DONE IN THIS SNAPSHOT (TEST 5 additions first)
+  - LEGENDARY M0NICA DRAGON (game pass 11,999 R$): +50T income, x20 luck.
+  - ALL your dragons can rest on perches now (also the last one), RIDE brings the strongest
+    one down; nicer LEGO perches and a bigger LEGO nest with lanterns and banners.
+  - FIRE BREATH has a real animation (inhale, rear back, lunge, held blast) with a glowing ball
+    gathering at the mouth first; hatching shows the dragon's FULL NAME and its NUMBER (No. NN)
+    with letter-by-letter particles; 10 new everyday animations (yawn, stretch, tail swish,
+    sniff, shake, twirl, bow, howl, cheer, loop) that perch dragons and companions play on their
+    own and as reactions (a greeting when you walk up, a cheer when you find an egg).
+  - Startup is protected: every script step runs in its own pcall and the build is checked with
+    the real Luau compiler, so one broken script can no longer stop the game.
   - THE GREAT TREE (plaza, north-east of the statue): big LEGO tree with 5 pods (Luck, Wealth,
     Flight, Nest, Bond) whose orbs light up as you upgrade. 20 branches / 194 levels bought with
     cash (prices follow the economy). Every branch has a real effect: roll luck, mutation luck,
@@ -52,8 +109,7 @@ DONE IN THIS SNAPSHOT (TEST 2 additions first)
   - NEW HATCHING: the room darkens, the egg lifts and glows, cracks open one by one (camera
     shake, sparks), bursts in a flash + pillar of light, the dragon steps out and WALKS TO THE
     CAMERA, rears up and ROARS (shock wave, push-in), then the result card. Rare results get a
-    longer charge and more cracks. SKIP button for impatient hatchers. The camera finds a clear
-    spot in the plot (walls / gate / shrine) and frames every dragon size and screen shape.
+    longer charge and more cracks. SKIP button for impatient hatchers.
   - 6 NEW MUTATIONS (18 in total): Neon, Infernal, Corrupted, Crystal, Lightning, Angelic.
     Each one really changes the dragon: palette, glowing / glass materials, particles, a light in
     its colour, ribbons behind the wings, a halo (Angelic), crystal clusters (Crystal). The fire
@@ -62,13 +118,11 @@ DONE IN THIS SNAPSHOT (TEST 2 additions first)
     (after the hatcher's reveal, so nobody is spoiled); "1 in 1,000,000"+ gets a MEGA banner.
   - LUCKY WILD EGGS: every 10-20 minutes one special egg (Lucky / Epic / Mythic / Rainbow, x25 ...
     x2000 luck) appears somewhere in the world for the whole server: "A MYTHIC EGG HAS SPAWNED!
-    02:00", a pillar of light, a countdown, an arrow and the distance. First to reach it wins; the
-    egg goes straight into their hand. Nobody in time: it vanishes.
+    02:00", a pillar of light, a countdown, an arrow and the distance. First to reach it wins.
   - Studio test buttons (UI Lab, ` key): WILD EGG, BOND MAX, MEGA BANNER next to +$1M, ALL 30
     DRAGONS, FILL EGGS, HATCH NOW.
-  - Menu blur is now optional (Settings) and the Spin Wheel prize shows on a clean card.
   - Earlier snapshot:
-  - 30 LEGO dragons (6 body types) + 10 mutations with effects, "1 in N" rarity titles,
+  - 30 LEGO dragons (6 body types) + mutations with effects, "1 in N" rarity titles,
     RNG roll animation when hatching
   - Exclusive dragons: Owner Dragon (x2 luck), PRINCE and N2RC1S (x3 luck, Omni = all mutations)
   - Robux shop (passes, potions, spin packs, cash packs) + cash upgrades
@@ -80,8 +134,10 @@ DONE IN THIS SNAPSHOT (TEST 2 additions first)
   - Passive income, offline earnings, inventory, perches, nest, spawn at own plot
 
 NOT FINISHED YET (planned next, in this order)
-  - New eggs / dragons / Robux items (Egg Radar, Egg Magnet, Lucky Egg Call, Hatch Boost, bundles)
+  - Robux egg-hunting items (Egg Radar, Egg Magnet, Lucky Egg Call, Hatch Boost, bundles) and
+    new eggs / dragons (work in progress, kept in a git stash)
   - Bigger map with Frostpeak / Ember Caldera / Skyreach regions (their eggs currently
     spawn at the valley's landmark spots: plateau, cave, ruins, pillar, island)
-  - Nicer perches/nest, extra animations, coins on the map
-  - Dragon races and the fastest / strongest / highest-level leaderboards
+  - Hidden eggs / treasure, weather and events, Golden Dragon, adventure + boss, collection
+    book, titles, daily streak, coins on the map
+  - Audio ids (see SOUNDS) still have to be pasted in

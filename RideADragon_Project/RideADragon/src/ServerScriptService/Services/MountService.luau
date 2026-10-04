@@ -31,6 +31,7 @@ local Odds = require(Shared:WaitForChild("Odds"))
 local Builder = require(Shared:WaitForChild("Dragons"):WaitForChild("Builder"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
 local BondConfig = require(Configs:WaitForChild("BondConfig"))
+local RaceConfig = require(Configs:WaitForChild("RaceConfig"))
 
 local MountService = {}
 MountService.Mounted = Signal.new() -- (player, model)
@@ -45,7 +46,7 @@ local folder: Folder
 local companions: { [Player]: any } = {}
 
 local MODES = { Ground = true, Air = true, Takeoff = true, Fly = true, Landing = true }
-local SHOTS = { Jump = true, Takeoff = true, Landing = true, Roar = true }
+local SHOTS = { Jump = true, Takeoff = true, Landing = true, Roar = true, Cheer = true, Loop = true, Howl = true }
 local VALIDATE_INTERVAL = 0.25
 
 local rayParams = RaycastParams.new()
@@ -367,6 +368,33 @@ function MountService.IsRiding(player: Player): boolean
 	return comp ~= nil and comp.Riding
 end
 
+-- Holds the dragon in place (race start grid): anchored, nobody steers it. Releasing gives the
+-- rider the physics back.
+function MountService.Freeze(player: Player, on: boolean): boolean
+	local comp = companions[player]
+	if not comp or not comp.Root.Parent then
+		return false
+	end
+	local root = comp.Root
+	if on then
+		pcall(function()
+			root:SetNetworkOwner(nil)
+		end)
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.Anchored = true
+	else
+		root.Anchored = false
+		pcall(function()
+			root:SetNetworkOwner(player)
+		end)
+	end
+	comp.Frozen = on
+	comp.LastPos = root.Position
+	comp.LastT = os.clock()
+	comp.Violations = 0
+	return true
+end
+
 -- Server teleport of the companion (fast travel while riding): moves the
 -- physics root (the rider follows through the joint) and resets the
 -- movement validation so the jump is not treated as a speed violation.
@@ -389,6 +417,9 @@ end
 -- ============================================================== validation
 local function maxSpeedFor(comp): number
 	local cruise = DragonStats.cruiseSpeed(comp.Record, treeBonus(comp.Player, "FlySpeed"))
+	if comp.Player:GetAttribute("RaceActive") then
+		cruise = math.max(cruise, RaceConfig.Standard.Cruise) -- everybody flies the standard dragon in a race
+	end
 	local run = DragonStats.runSpeed(comp.Record, treeBonus(comp.Player, "RunSpeed"))
 	local m = GameConfig.Movement
 	-- boost + dive bonus + generous slack for latency (+ the Wind Dash window)

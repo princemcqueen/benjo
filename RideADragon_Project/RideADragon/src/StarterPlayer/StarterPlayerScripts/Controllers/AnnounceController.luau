@@ -10,7 +10,9 @@
 	From HatchConfig.Announce.Mega on the banner is bigger, stays longer and gets a
 	rainbow outline. Banners queue up (at most 3 waiting) and slide in one by one.
 
-	Net signal "RareHatch" { Player, UserId, Species, Mutation, Rarity, Odds, Mega }
+	Net signal "RareHatch" { Player, UserId, Species, Mutation, Rarity, Odds, Mega, Text?, Sub? }
+	(Text / Sub replace the two lines of the banner: used for other big server news, e.g. the
+	monthly race champion)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -127,7 +129,7 @@ local function build(info): Frame
 	Kit.scalePadding(pad, 0.04, 0.08, 0.04, 0.08)
 	local line1 = Kit.text({
 		Name = "Headline",
-		Text = string.format("%s hatched %s %s!", info.Player, article(what), what),
+		Text = info.Text or string.format("%s hatched %s %s!", info.Player, article(what), what),
 		Role = "Heading",
 		Scaled = true,
 		MinTextSize = 10,
@@ -142,7 +144,7 @@ local function build(info): Frame
 	grad.Parent = line1
 	Kit.text({
 		Name = "Odds",
-		Text = (info.Mega and "MEGA RARE  -  " or "") .. Odds.format(info.Odds),
+		Text = info.Sub or ((info.Mega and "MEGA RARE  -  " or "") .. Odds.format(info.Odds)),
 		Role = "Title",
 		Scaled = true,
 		MinTextSize = 9,

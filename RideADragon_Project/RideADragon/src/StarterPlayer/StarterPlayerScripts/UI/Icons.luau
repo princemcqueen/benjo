@@ -353,6 +353,21 @@ builders.Map = function(root, col, acc)
 	rect(root, 0.74, 0.5, 0.26, 0.76, col, 0.1, -4)
 end
 
+builders.Sword = function(root, col, acc, ink)
+	rect(root, 0.58, 0.4, 0.14, 0.64, col, 0.3, 45) -- blade
+	rect(root, 0.38, 0.62, 0.38, 0.1, acc, 0.4, -45) -- guard
+	rect(root, 0.27, 0.73, 0.1, 0.22, ink, 0.4, 45) -- grip
+	circle(root, 0.21, 0.79, 0.14, acc) -- pommel
+end
+
+builders.Fireball = function(root, col, acc, ink)
+	rect(root, 0.3, 0.7, 0.4, 0.14, acc, 0.5, -42) -- trail
+	rect(root, 0.22, 0.56, 0.3, 0.1, col, 0.5, -28)
+	circle(root, 0.6, 0.42, 0.54, col)
+	circle(root, 0.62, 0.4, 0.32, acc)
+	circle(root, 0.64, 0.38, 0.14, ink)
+end
+
 builders.Flame = function(root, col, acc)
 	rect(root, 0.5, 0.6, 0.62, 0.62, acc, 0.5)
 	rect(root, 0.5, 0.42, 0.36, 0.36, acc, 0.15, 45)

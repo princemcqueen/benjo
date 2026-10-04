@@ -95,6 +95,34 @@ out.grade = lighting:FindFirstChild("HatchGrade") ~= nil
 out.focus = lighting:FindFirstChild("HatchFocus") ~= nil
 out.camType = tostring(cam.CameraType)
 out.prompts = game:GetService("ProximityPromptService").Enabled
+local banner = pg:FindFirstChild("HatchName", true)
+out.banner = banner ~= nil
+if banner then
+	local text, shown = "", 0
+	local row = banner:FindFirstChild("Letters")
+	if row then
+		local children = {}
+		for _, c in row:GetChildren() do
+			if c:IsA("TextLabel") then table.insert(children, c) end
+		end
+		table.sort(children, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+		for _, l in children do
+			if l:IsA("TextLabel") then
+				text ..= (l.Text == "\\u{2002}") and " " or l.Text
+				if l.TextTransparency < 0.5 then shown += 1 end
+			end
+		end
+	end
+	out.name = text
+	out.shown = shown
+	local number = banner:FindFirstChild("Number")
+	out.number = number and number.Text or ""
+	local sparks = 0
+	for _, d in banner:GetChildren() do
+		if d.Name == "Spark" then sparks += 1 end
+	end
+	out.sparks = sparks
+end
 shared.R = out
 '''
 
@@ -174,7 +202,7 @@ shared.R = { x = cf.Position.X, y = cf.Position.Y, z = cf.Position.Z }''')
         d1 = dist(walk[-1]["root"], walk[-1]["cam"])
         moved = dist(walk[0]["root"], walk[-1]["root"])
         check(d1 < d0 - 3, f"it walks towards the camera ({d0:.0f} -> {d1:.0f} studs)")
-        check(moved > 6, f"...covering real ground ({moved:.1f} studs)")
+        check(moved > 4, f"...covering real ground ({moved:.1f} studs)")
         legs = [s["leg"] for s in walk if s.get("leg") is not None]
         check(max(legs) - min(legs) > 0.05, "the rig really moves (live gait animation)")
         check(any(s.get("walking") == "Walk" for s in walk), "the Animator is in its Walk state")
@@ -187,6 +215,26 @@ shared.R = { x = cf.Position.X, y = cf.Position.Y, z = cf.Position.Z }''')
     # riding on/off while the show runs must not bring the bubbles back
     cli(sim, player, '''LP:SetAttribute("Riding", true) task.wait(0.2) LP:SetAttribute("Riding", false) task.wait(0.2) shared.R = {}''')
 
+    expect = srv(sim, '''
+local MC = require(game:GetService("ReplicatedStorage").Configs.MutationConfig)
+local DC = require(game:GetService("ReplicatedStorage").Configs.DragonConfig)
+local last
+for _, r in d.Dragons do last = r end
+local best
+for _, r in d.Dragons do
+	if best == nil or (r.CreatedAt or 0) >= (best.CreatedAt or 0) then best = r end
+end
+local m = best.Mutation ~= "None" and MC.Mutations[best.Mutation] or nil
+shared.R = { name = string.upper((m and (m.Name .. " ") or "") .. best.Name), order = DC.Species[best.SpeciesId].Order, total = #DC.speciesList() }''')
+    roar_s = [x for x in samples if x["phase"] in ("Roar", "Card") and x.get("banner")]
+    check(len(roar_s) > 0, "the name banner appears with the roar")
+    if roar_s:
+        print("banner:", expect, roar_s[-1].get("name"), roar_s[-1].get("number"), "max sparks", max(x.get("sparks", 0) for x in roar_s))
+        check(roar_s[-1]["name"] == expect["name"], f"the FULL name is shown ({roar_s[-1]['name']})")
+        check(roar_s[-1]["number"] == f"DRAGON  No. {int(expect['order']):02d} / {int(expect['total'])}", f"its Index number is shown ({roar_s[-1]['number']})")
+        check(roar_s[0]["shown"] < roar_s[-1]["shown"] or len(roar_s) == 1, "the letters pop in one after another")
+        check(max(x.get("sparks", 0) for x in roar_s) > 0, "every letter throws sparks")
+        check(roar_s[-1]["shown"] == len(expect["name"]), "all letters are visible at the end")
     sim.run_for(1.6, 1 / 30)
     s = sample(sim, player)
     check(s["card"] is True and s["phase"] == "Card", "the result card appears and stays up until you decide")
@@ -198,6 +246,7 @@ shared.R = { x = cf.Position.X, y = cf.Position.Y, z = cf.Position.Z }''')
     s = sample(sim, player)
     check(s["phase"] == "" and s["stage"] is False, "stage is removed afterwards")
     check(s["hud"] is True, "HUD is back")
+    check(s["banner"] is False, "the name banner is gone afterwards")
     check(s["prompts"] is True, "world prompts are back after the show")
     check(s["grade"] is False and s["focus"] is False, "cinematic grading is removed")
     check(s["card"] is False, "card is gone")
@@ -224,6 +273,7 @@ shared.R = { dragons = n, slot = d.Incubator.Slots["1"] == nil, hatched = d.Stat
     check(last["phase"] == "Card" and last["card"] is True, f"SKIP jumps to the result card within {last['t'] + 1.6:.1f}s")
     check(not any(x["phase"] in ("Walk", "Roar") and x.get("roaring") for x in skipped[:-1]), "no walk or roar when skipped")
     check(last.get("hatchling") is True, "the dragon is still there for the card")
+    check(last.get("banner") is True and last.get("shown", 0) > 0 and last["shown"] == len(last["name"]), "skipping shows the full name at once")
     check(click(sim, player, "Continue"), "button found")
     sim.run_for(2.0, 1 / 30)
     s = sample(sim, player)

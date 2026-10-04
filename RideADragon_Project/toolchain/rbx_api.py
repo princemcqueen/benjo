@@ -1219,6 +1219,15 @@ def install(sim):
     def cas_unbind_all(self):
         sim.ctx().cas_binds.clear()
 
+    @M("ContextActionService", "GetAllBoundActionInfo")
+    def cas_get_all(self):
+        out = LuaTable()
+        for name, bind in sim.ctx().cas_binds.items():
+            info = LuaTable()
+            info.set("priority", bind["priority"])
+            out.set(name, info)
+        return out
+
     @M("ContextActionService", "GetButton")
     def cas_getbutton(self, name):
         return None

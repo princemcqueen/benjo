@@ -26,6 +26,7 @@ local DragonStats = require(Shared:WaitForChild("DragonStats"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
 local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local RaceConfig = require(Configs:WaitForChild("RaceConfig"))
 
 local DragonController = {}
 DragonController.RidingChanged = Signal.new() -- (riding)
@@ -96,7 +97,7 @@ local function buildStats()
 	local tree = function(id: string)
 		return TreeConfig.bonus(data, id)
 	end
-	return {
+	local stats = {
 		RunSpeed = record and DragonStats.runSpeed(record, tree("RunSpeed")) or (m:GetAttribute("RunSpeed") or 40),
 		CruiseSpeed = record and DragonStats.cruiseSpeed(record, tree("FlySpeed")) or (m:GetAttribute("CruiseSpeed") or 77),
 		BoostLong = 1 + tree("BoostLong"),
@@ -108,6 +109,18 @@ local function buildStats()
 		Accel = handling.Accel or 1,
 		Agility = handling.Agility or 1,
 	}
+	if LocalPlayer:GetAttribute("RaceActive") then
+		-- a race is flown with the same standard dragon by everybody (the server validates the same)
+		local std = RaceConfig.Standard
+		stats.RunSpeed = std.Run
+		stats.CruiseSpeed = std.Cruise
+		stats.BoostLong = std.BoostLong
+		stats.BoostRegen = std.BoostRegen
+		stats.Turn = std.Turn
+		stats.Accel = std.Accel
+		stats.Agility = std.Agility
+	end
+	return stats
 end
 
 local function character()
@@ -524,6 +537,40 @@ function DragonController.dash(duration: number, multiplier: number): boolean
 	return true
 end
 
+-- The server put the dragon somewhere and froze it (race grid, arena respawn pad): stand there,
+-- facing `yaw` (radians, 0 = north; the current heading when omitted), with no speed left over.
+function DragonController.stand(yaw: number?)
+	local s, r = state, root
+	if not s or not r then
+		return
+	end
+	s.Yaw = yaw or s.Yaw
+	s.YawRate = 0
+	s.Velocity = Vector3.zero
+	s.Speed = 0
+	s.Boosting = false
+	s.Boost = 1
+	s.DashLeft = 0
+	s.Position = r.Position
+	Locomotion.setMode(s, "Ground")
+end
+
+-- Race start: leave the grid with a real takeoff (a short crouch, then the leap) already moving
+-- along the heading at `speed`.
+function DragonController.launch(speed: number): boolean
+	local s, m, r = state, model, root
+	if not riding or not s or not m or not r then
+		return false
+	end
+	s.Position = r.Position
+	s.Grounded = true
+	Locomotion.setMode(s, "Takeoff")
+	s.Speed = speed
+	s.Velocity = Vector3.new(-sin(s.Yaw), 0, -cos(s.Yaw)) * speed
+	table.insert(s.Events, { Kind = "Takeoff" })
+	return true
+end
+
 function DragonController.isRiding(): boolean
 	return riding
 end
@@ -552,6 +599,12 @@ function DragonController.Start()
 				settings.set("MouseLock", on)
 				registry.UIController.Notify("info", on and "Mouse steering ON  (hold Alt for the cursor)" or "Mouse steering OFF  (hold right mouse to look)")
 			end
+		end
+	end)
+	-- the race switches everybody to the standard dragon while RaceActive is set
+	LocalPlayer:GetAttributeChangedSignal("RaceActive"):Connect(function()
+		if state and model then
+			Locomotion.setStats(state, buildStats())
 		end
 	end)
 	registry.DataController.observe("Dragons", function()
