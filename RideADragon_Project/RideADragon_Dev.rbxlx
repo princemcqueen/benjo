@@ -9053,7 +9053,7 @@ EggConfig.IncubatorPrices = { 0, 0, 1500, 20000, 250000, 3000000 }
 EggConfig.IncubatorStart = 2
 
 -- Spawn areas that roll their luck twice (keep the best).
-EggConfig.RareAreas = { Ruins = true, Cave = true, Pillar = true, Island = true, Falls = true, Plateau = true, Pass = true }
+EggConfig.RareAreas = { Ruins = true, Cave = true, Pillar = true, Island = true, Falls = true, Plateau = true, Pass = true, CrystalIsle = true, BloomIsle = true, EmberIsle = true, FrostIsle = true }
 
 -- Which egg types spawn in each region (weights).
 EggConfig.Regions = {
@@ -9086,12 +9086,14 @@ EggConfig.LuckRolls = {
 
 -- Personal egg spawning (each player has their own eggs in the world).
 EggConfig.Spawning = {
-	MaxActive = 18,
+	MaxActive = 24,
 	MaxActivePerRegion = 18, -- (legacy name)
 	ScatterRadius = 70, -- eggs appear around a spawn area, not on one exact spot
 	-- Roaming eggs: this share of every egg appears at a completely random place of the land (the
 	-- rest scatter around the named areas, where the rare finds are). Wild eggs always roam.
 	RoamingShare = 0.5,
+	IslandShare = 0.3, -- of the roaming eggs: this share appears on a sky island (WorldConfig.SkyIslands)
+	IslandInset = 0.8, -- eggs stay this far inside the island's plate (share of its radius)
 	WorldBox = { MinX = -980, MaxX = 860, MinZ = -960, MaxZ = 900 },
 	RoamAvoid = { "Pillar", "Island" }, -- areas that never name a roaming egg (sky / island spots)
 	RoamMinSeparation = 260, -- a roaming wild egg appears at least this far from the previous one
@@ -11168,6 +11170,30 @@ WorldConfig.Bridges = {
 	{ Name = "East Bridge", Road = "East" },
 }
 
+-- Floating sky islands (World/SkyIslands builds them, IslandService registers their egg areas).
+-- Center = the middle of the top surface; Radius = the grass plate; Region = which eggs grow there
+-- (EggConfig.Regions); every island is a RARE egg area (luck rolls twice) and a Travel place (Id).
+-- They float well away from the race circuit (north-east) and the sky pillar (far west).
+WorldConfig.SkyIslands = {
+	{ Id = "CrystalIsle", Name = "Crystal Isle", Sub = "Glowing crystals and Skyreach eggs", Theme = "Crystal", Center = Vector3.new(-430, 330, 560), Radius = 64, Region = "Skyreach", Color = Color3.fromRGB(150, 225, 255), Icon = "Sparkle" },
+	{ Id = "BloomIsle", Name = "Bloom Isle", Sub = "Giant flowers and mushrooms", Theme = "Bloom", Center = Vector3.new(380, 290, 330), Radius = 60, Region = "Haven", Color = Color3.fromRGB(255, 160, 210), Icon = "Clover" },
+	{ Id = "EmberIsle", Name = "Ember Isle", Sub = "A small volcano and Ember eggs", Theme = "Ember", Center = Vector3.new(-780, 380, -330), Radius = 66, Region = "EmberCaldera", Color = Color3.fromRGB(255, 130, 60), Icon = "Flame" },
+	{ Id = "FrostIsle", Name = "Frost Isle", Sub = "Ice spikes and Frostpeak eggs", Theme = "Frost", Center = Vector3.new(60, 430, -880), Radius = 62, Region = "Frostpeak", Color = Color3.fromRGB(190, 235, 255), Icon = "Wind" },
+}
+-- The statue in the middle of the plaza is the owner (StatueService): built from this player's avatar,
+-- or a marble king when the avatar cannot be loaded. Scale = times the size of a normal avatar.
+WorldConfig.PlazaStatue = { Username = "Bendzaminoo", UserId = 0, Scale = 3.6 }
+
+WorldConfig.SkyIslandById = {}
+for _, isle in WorldConfig.SkyIslands do
+	WorldConfig.SkyIslandById[isle.Id] = isle
+end
+-- Where Travel puts you on an island (a landing pad), facing the middle.
+function WorldConfig.islandArrival(isle): CFrame
+	local at = isle.Center + Vector3.new(0, 3.4, isle.Radius * 0.55)
+	return CFrame.lookAt(at, isle.Center + Vector3.new(0, 3.4, 0))
+end
+
 return WorldConfig
 ]]></ProtectedString>
 				</Properties>
@@ -11851,6 +11877,8 @@ local ORDER = {
 	"BondService",
 	"EggService",
 	"WildEggService",
+	"IslandService",
+	"StatueService",
 	"CoinService",
 	"ShopService",
 	"MonetizationService",
@@ -15491,7 +15519,9 @@ EggService.Hatched = Signal.new() -- (player, record, eggType)
 
 local Data
 local Services
-local areas: { { Name: string, Position: Vector3, Region: string } } = {}
+local areas: { any } = {} -- { Name, Position, Region, Label?, Radius?, Island? }
+local extraAreas: { any } = {} -- areas added by other services (sky islands): they survive a reload
+local areasLoaded = false -- the fixed areas of the world are in (eggs are only spawned after that)
 local states: { [Player]: any } = {}
 local rng = Random.new()
 
@@ -15515,6 +15545,21 @@ local function loadAreas()
 			table.insert(areas, { Name = name, Position = p.Position, Region = region })
 		end
 	end
+	for _, a in extraAreas do
+		table.insert(areas, a)
+	end
+	areasLoaded = true
+end
+
+-- Eggs rest on the terrain (not in water) or on a part marked EggSurface (the plate of a sky island).
+local function eggGround(hit): boolean
+	if not hit or hit.Normal.Y <= 0.6 then
+		return false
+	end
+	if hit.Instance == Workspace.Terrain then
+		return hit.Material ~= Enum.Material.Water
+	end
+	return hit.Instance:GetAttribute("EggSurface") == true
 end
 
 local rayParams = RaycastParams.new()
@@ -15543,7 +15588,7 @@ local function findSpot(area): Vector3?
 		end
 	end
 	rayParams.FilterDescendantsInstances = exclude
-	local radius = area.Name == "Pillar" and 8 or EggConfig.Spawning.ScatterRadius
+	local radius = area.Radius or (area.Name == "Pillar" and 8 or EggConfig.Spawning.ScatterRadius)
 	for _ = 1, 8 do
 		local a = rng:NextNumber(0, math.pi * 2)
 		local r = math.sqrt(rng:NextNumber()) * radius
@@ -15551,7 +15596,7 @@ local function findSpot(area): Vector3?
 		local z = area.Position.Z + math.sin(a) * r
 		local origin = Vector3.new(x, area.Position.Y + 160, z)
 		local hit = Workspace:Raycast(origin, Vector3.new(0, -400, 0), rayParams)
-		if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+		if eggGround(hit) then
 			return hit.Position + Vector3.new(0, 2.6, 0)
 		end
 	end
@@ -15564,6 +15609,22 @@ end
 local function randomSpot(avoid: Vector3?): (Vector3?, any?)
 	if #areas == 0 then
 		return nil, nil
+	end
+	-- a share of the roaming eggs lands on a sky island (its own area: rare luck, its region's eggs)
+	local islands = {}
+	for _, a in areas do
+		if a.Island then
+			table.insert(islands, a)
+		end
+	end
+	if #islands > 0 and rng:NextNumber() < EggConfig.Spawning.IslandShare then
+		for _ = 1, 8 do
+			local isle = islands[rng:NextInteger(1, #islands)]
+			local spot = findSpot({ Name = isle.Name, Position = isle.Position, Radius = isle.Radius * EggConfig.Spawning.IslandInset / 0.78 })
+			if spot and (not avoid or (Vector2.new(spot.X, spot.Z) - Vector2.new(avoid.X, avoid.Z)).Magnitude >= 40) then
+				return spot, isle
+			end
+		end
 	end
 	local box = EggConfig.Spawning.WorldBox
 	local skip = {}
@@ -15595,7 +15656,7 @@ local function randomSpot(avoid: Vector3?): (Vector3?, any?)
 		local z = rng:NextNumber(box.MinZ, box.MaxZ)
 		if not avoid or (Vector2.new(x, z) - Vector2.new(avoid.X, avoid.Z)).Magnitude >= EggConfig.Spawning.RoamMinSeparation then
 			local hit = Workspace:Raycast(Vector3.new(x, 520, z), Vector3.new(0, -900, 0), rayParams)
-			if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+			if eggGround(hit) then
 				local nearest, best = nil, math.huge
 				for _, a in areas do
 					if not skip[a.Name] then
@@ -15922,6 +15983,15 @@ end
 
 function EggService.FindSpot(area): Vector3?
 	return findSpot(area)
+end
+
+-- Adds an egg area from another service (a sky island): { Name, Label?, Position, Region, Radius?, Island? }.
+-- Kept across a reload of the world areas, so the order of the services does not matter.
+function EggService.AddArea(area)
+	table.insert(extraAreas, area)
+	if areasLoaded then
+		table.insert(areas, area)
+	end
 end
 
 -- A completely random spot on the land + an area record for it (see randomSpot).
@@ -16261,7 +16331,7 @@ local function onLoaded(player: Player)
 	end
 	states[player] = { Active = {}, Serial = 0 }
 	task.spawn(function()
-		while #areas == 0 and player.Parent == Players do
+		while not areasLoaded and player.Parent == Players do
 			task.wait(0.5)
 		end
 		fillEggs(player)
@@ -16426,6 +16496,83 @@ return IndexService
 				</Properties>
 			</Item>
 			<Item class="ModuleScript" referent="RBX000081">
+				<Properties>
+					<string name="Name">IslandService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	IslandService
+	Builds the floating sky islands (WorldConfig.SkyIslands, World/SkyIslands) into Workspace.World and
+	registers an egg area for each with EggService (a rare area: its luck rolls twice). Eggs then grow on
+	the islands like anywhere else: the personal egg cycle picks island areas, a share of the roaming
+	eggs and every other wild egg may appear on one (EggConfig.Spawning.IslandShare).
+
+	API: IslandService.Ready (bool), IslandService.Models() -> { [id] = Model }
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+
+local WorldConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WorldConfig"))
+
+local IslandService = {}
+IslandService.Ready = false
+
+local Services
+local models: { [string]: Model } = {}
+
+function IslandService.Models()
+	return models
+end
+
+function IslandService.Init(services)
+	Services = services
+end
+
+function IslandService.Start()
+	task.spawn(function()
+		local world = Workspace:WaitForChild("World", 180)
+		if not world then
+			warn("[Islands] no World folder: the sky islands are not built")
+			return
+		end
+		local ok, SkyIslands = pcall(function()
+			return require(ServerScriptService:WaitForChild("World"):WaitForChild("SkyIslands"))
+		end)
+		if not ok then
+			warn("[Islands] SkyIslands module failed: " .. tostring(SkyIslands))
+			return
+		end
+		local folder = Instance.new("Folder")
+		folder.Name = "SkyIslands"
+		folder.Parent = world
+		local eggs = Services and Services.EggService
+		for _, def in WorldConfig.SkyIslands do
+			local built, model = pcall(SkyIslands.build, folder, def)
+			if built then
+				models[def.Id] = model
+				if eggs and eggs.AddArea then
+					eggs.AddArea({
+						Name = def.Id,
+						Label = def.Name,
+						Position = def.Center + Vector3.new(0, 2.5, 0),
+						Region = def.Region,
+						Radius = def.Radius * 0.78,
+						Island = true,
+					})
+				end
+			else
+				warn("[Islands] " .. def.Id .. " failed: " .. tostring(model))
+			end
+		end
+		IslandService.Ready = true
+	end)
+end
+
+return IslandService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000082">
 				<Properties>
 					<string name="Name">LeaderboardService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17023,7 +17170,7 @@ return LeaderboardService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000082">
+			<Item class="ModuleScript" referent="RBX000083">
 				<Properties>
 					<string name="Name">LeaderstatsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17113,7 +17260,7 @@ return LeaderstatsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000083">
+			<Item class="ModuleScript" referent="RBX000084">
 				<Properties>
 					<string name="Name">LevelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17305,7 +17452,7 @@ return LevelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000084">
+			<Item class="ModuleScript" referent="RBX000085">
 				<Properties>
 					<string name="Name">MonetizationService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -17585,7 +17732,7 @@ return MonetizationService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000085">
+			<Item class="ModuleScript" referent="RBX000086">
 				<Properties>
 					<string name="Name">MountService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18223,7 +18370,7 @@ return MountService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000086">
+			<Item class="ModuleScript" referent="RBX000087">
 				<Properties>
 					<string name="Name">PhysicsGroups</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18309,7 +18456,7 @@ return PhysicsGroups
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000087">
+			<Item class="ModuleScript" referent="RBX000088">
 				<Properties>
 					<string name="Name">PlayerDataService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18780,7 +18927,7 @@ return PlayerDataService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000088">
+			<Item class="ModuleScript" referent="RBX000089">
 				<Properties>
 					<string name="Name">RaceService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19717,7 +19864,7 @@ return RaceService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000089">
+			<Item class="ModuleScript" referent="RBX000090">
 				<Properties>
 					<string name="Name">RankService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20030,7 +20177,7 @@ return RankService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000090">
+			<Item class="ModuleScript" referent="RBX000091">
 				<Properties>
 					<string name="Name">SanctuaryService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20292,7 +20439,7 @@ return SanctuaryService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000091">
+			<Item class="ModuleScript" referent="RBX000092">
 				<Properties>
 					<string name="Name">SettingsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20350,7 +20497,7 @@ return SettingsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000092">
+			<Item class="ModuleScript" referent="RBX000093">
 				<Properties>
 					<string name="Name">ShopService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20404,7 +20551,7 @@ return ShopService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000093">
+			<Item class="ModuleScript" referent="RBX000094">
 				<Properties>
 					<string name="Name">SpinService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20703,7 +20850,329 @@ return SpinService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000094">
+			<Item class="ModuleScript" referent="RBX000095">
+				<Properties>
+					<string name="Name">StatueService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	StatueService
+	The statue in the middle of the plaza is the OWNER: it stands on the plinth of the fountain instead of
+	the stone dragon. It is built from the owner's real Roblox avatar (WorldConfig.PlazaStatue.Username /
+	UserId): Players:GetHumanoidDescriptionFromUserId + CreateHumanoidModelFromDescription, scaled up,
+	posed (right fist raised, standing tall), anchored. If the avatar cannot be loaded (no web access, the
+	name is wrong) a marble-and-gold "Dragon King" built from parts stands there instead. A plaque on the
+	plinth and a floating title ("OWNER - Dragon King", the rank colours of RankConfig) say whose it is.
+
+	Change who it is in WorldConfig > PlazaStatue ({ Username, UserId?, Scale }).
+
+	API: StatueService.Ready (bool), StatueService.Kind ("Avatar" | "Fallback")
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local WorldConfig = require(Configs:WaitForChild("WorldConfig"))
+local RankConfig = require(Configs:WaitForChild("RankConfig"))
+
+local StatueService = {}
+StatueService.Ready = false
+StatueService.Kind = ""
+
+local V = Vector3.new
+local CF = CFrame.new
+local ANG = CFrame.Angles
+
+-- ============================================================== the avatar
+local function ownerUserId(def): number?
+	if def.UserId and def.UserId > 0 then
+		return def.UserId
+	end
+	local ok, id = pcall(function()
+		return Players:GetUserIdFromNameAsync(def.Username)
+	end)
+	return ok and tonumber(id) or nil
+end
+
+local function loadAvatar(userId: number): Model?
+	local ok, model = pcall(function()
+		local description = Players:GetHumanoidDescriptionFromUserId(userId)
+		return Players:CreateHumanoidModelFromDescription(description, Enum.HumanoidRigType.R15)
+	end)
+	if ok and typeof(model) == "Instance" and model:IsA("Model") then
+		return model
+	end
+	return nil
+end
+
+-- Swings a whole limb about its joint so that it points along `direction` (given in the model's own
+-- frame: x right, y up, -z forward). It works from where the limb IS, so it does not matter how the rig
+-- rests (T-pose or arms down). Only the joint's C0 changes: the engine moves the limb with everything
+-- that hangs on it (forearm, hand, gloves, accessories) because they are joined to it.
+local function aim(model: Model, jointName: string, tipName: string, direction: Vector3, frame: CFrame)
+	local joint = nil
+	for _, d in model:GetDescendants() do
+		if d.Name == jointName and d:IsA("Motor6D") then
+			joint = d
+			break
+		end
+	end
+	local tip = model:FindFirstChild(tipName, true)
+	if not joint or not joint.Part0 or not joint.Part1 or not tip then
+		return
+	end
+	local part0 = joint.Part0.CFrame
+	local pivot = (part0 * joint.C0).Position
+	local current = tip.Position - pivot
+	local target = frame:VectorToWorldSpace(direction)
+	if current.Magnitude < 0.05 or target.Magnitude < 0.05 then
+		return
+	end
+	local axis = current.Unit:Cross(target.Unit)
+	if axis.Magnitude < 1e-4 then
+		return
+	end
+	local angle = math.acos(math.clamp(current.Unit:Dot(target.Unit), -1, 1))
+	local swing = CF(pivot) * CFrame.fromAxisAngle(axis.Unit, angle) * CF(-pivot)
+	-- Part1 = Part0 * C0 * C1^-1 must become swing * (the old Part1)
+	joint.C0 = part0:Inverse() * swing * part0 * joint.C0
+end
+
+-- Right fist raised, left arm by the side, feet a little apart.
+local function pose(model: Model, frame: CFrame)
+	aim(model, "RightShoulder", "RightHand", V(0.22, 0.95, -0.2), frame)
+	aim(model, "LeftShoulder", "LeftHand", V(-0.16, -1, -0.04), frame)
+	aim(model, "RightHip", "RightFoot", V(0.12, -1, 0), frame)
+	aim(model, "LeftHip", "LeftFoot", V(-0.12, -1, 0), frame)
+end
+
+-- Takes out the scripts and the humanoid; only the root stays anchored (the limbs hang on it through their
+-- joints, so the pose holds and nothing falls); nothing collides.
+local function freeze(model: Model)
+	local root = model:FindFirstChild("HumanoidRootPart")
+	for _, d in model:GetDescendants() do
+		if d:IsA("Script") or d:IsA("LocalScript") then
+			d:Destroy()
+		end
+	end
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = (d == root)
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CastShadow = true
+		end
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:Destroy()
+	end
+end
+
+-- After the engine has moved the posed limbs: put the lowest foot exactly on the plate.
+local function settle(model: Model, feetY: number)
+	task.wait(0.3)
+	local lowest = math.huge
+	for _, name in { "LeftFoot", "RightFoot" } do
+		local foot = model:FindFirstChild(name, true)
+		if foot and foot:IsA("BasePart") then
+			lowest = math.min(lowest, foot.Position.Y - foot.Size.Y / 2)
+		end
+	end
+	if lowest < math.huge then
+		model:PivotTo(model:GetPivot() + V(0, feetY - lowest, 0))
+	end
+end
+
+-- ============================================================== the fallback king (marble and gold)
+local function fallbackKing(parent: Instance, base: CFrame, scale: number): Model
+	local Kit = require(ServerScriptService:WaitForChild("World"):WaitForChild("Kit"))
+	local b = Kit.new(parent, base, "OwnerStatue")
+	local s = scale
+	local marble = Color3.fromRGB(226, 220, 206)
+	local gold = Color3.fromRGB(236, 190, 70)
+	local cape = Color3.fromRGB(170, 40, 50)
+	local M = Kit.M
+	local props = { CanCollide = false, CanTouch = false }
+	for _, sx in { -1, 1 } do
+		b:box(V(1.05 * s, 2.2 * s, 1.1 * s), V(sx * 0.62 * s, 1.1 * s, 0), marble, M.Marble, props)
+		b:box(V(1.15 * s, 0.4 * s, 1.8 * s), V(sx * 0.62 * s, 0.2 * s, -0.3 * s), marble, M.Marble, props)
+	end
+	b:box(V(2.5 * s, 2.3 * s, 1.3 * s), V(0, 3.35 * s, 0), marble, M.Marble, props)
+	b:box(V(2.6 * s, 0.35 * s, 1.4 * s), V(0, 2.3 * s, 0), gold, M.Foil, props)
+	b:box(V(2.7 * s, 2.7 * s, 0.35 * s), V(0, 3.2 * s, 0.85 * s), cape, M.Fabric, props)
+	-- left arm by the side, right arm raised
+	b:box(V(0.85 * s, 2.3 * s, 0.9 * s), CF(-1.75 * s, 3.3 * s, 0) * ANG(0, 0, 0.1), marble, M.Marble, props)
+	b:box(V(0.85 * s, 2.5 * s, 0.9 * s), CF(1.95 * s, 4.7 * s, -0.2 * s) * ANG(0.2, 0, -0.32), marble, M.Marble, props)
+	b:ball(1.1 * s, V(2.5 * s, 6.1 * s, -0.5 * s), marble, M.Marble, props)
+	-- head and crown
+	b:ball(1.5 * s, V(0, 5.15 * s, 0), marble, M.Marble, props)
+	b:cyl(0.45 * s, 1.55 * s, V(0, 5.95 * s, 0), gold, M.Foil, props)
+	for i = 0, 4 do
+		local a = i / 5 * math.pi * 2
+		b:box(V(0.22 * s, 0.6 * s, 0.22 * s), V(math.cos(a) * 0.6 * s, 6.35 * s, math.sin(a) * 0.6 * s), gold, M.Foil, props)
+	end
+	return b.Model
+end
+
+-- ============================================================== plaque + floating title
+local function plaque(statueModel: Model, base: Vector3, facing: Vector3, def)
+	local rank = RankConfig.ByLevel[RankConfig.MaxLevel]
+	-- the plinth is a square block: put the plaque on the face that looks at the spawn
+	local out = math.abs(facing.X) > math.abs(facing.Z) and V(facing.X > 0 and 1 or -1, 0, 0) or V(0, 0, facing.Z > 0 and 1 or -1)
+	local at = base + V(0, 9.5, 0) + out * 5.62
+	local part = Instance.new("Part")
+	part.Name = "OwnerPlaque"
+	part.Anchored = true
+	part.CanCollide = false
+	part.Size = V(8.6, 3, 0.4)
+	part.Color = Color3.fromRGB(46, 40, 34)
+	part.Material = Enum.Material.Slate
+	part.CFrame = CFrame.lookAt(at, at + out)
+	part.Parent = statueModel
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "PlaqueGui"
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 60
+	gui.LightInfluence = 0
+	gui.Parent = part
+	local function line(name: string, text: string, color: Color3, y: number, h: number)
+		local t = Instance.new("TextLabel")
+		t.Name = name
+		t.BackgroundTransparency = 1
+		t.Position = UDim2.fromScale(0.04, y)
+		t.Size = UDim2.fromScale(0.92, h)
+		t.Font = Enum.Font.GothamBlack
+		t.Text = text
+		t.TextScaled = true
+		t.TextColor3 = color
+		t.Parent = gui
+	end
+	line("Owner", string.upper(def.Username), Color3.fromRGB(255, 226, 150), 0.06, 0.52)
+	line("Rank", string.format("%s  -  %s", rank.Title, string.upper(rank.Epithet)), rank.Color, 0.6, 0.32)
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 220, 150)
+	light.Range = 22
+	light.Brightness = 1.4
+	light.Parent = part
+end
+
+local function titleSign(statueModel: Model, top: Vector3, height: number, def)
+	local rank = RankConfig.ByLevel[RankConfig.MaxLevel]
+	local anchor = Instance.new("Part")
+	anchor.Name = "TitleAnchor"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Transparency = 1
+	anchor.Size = V(1, 1, 1)
+	anchor.Position = top + V(0, height + 4, 0)
+	anchor.Parent = statueModel
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "TitleGui"
+	gui.Size = UDim2.fromOffset(300, 76)
+	gui.MaxDistance = 260
+	gui.LightInfluence = 0
+	gui.Adornee = anchor
+	gui.Parent = anchor
+	local function line(name: string, text: string, color: Color3, y: number, h: number, font: Enum.Font)
+		local t = Instance.new("TextLabel")
+		t.Name = name
+		t.BackgroundTransparency = 1
+		t.Position = UDim2.fromScale(0, y)
+		t.Size = UDim2.fromScale(1, h)
+		t.Font = font
+		t.Text = text
+		t.TextScaled = true
+		t.TextColor3 = color
+		t.Parent = gui
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2.5
+		stroke.Color = Color3.fromRGB(18, 20, 34)
+		stroke.Parent = t
+	end
+	line("Title", "★ " .. rank.Title .. " ★", rank.Color, 0, 0.6, Enum.Font.GothamBlack)
+	line("Epithet", rank.Epithet .. "  -  " .. def.Username, Color3.fromRGB(235, 238, 250), 0.62, 0.36, Enum.Font.GothamMedium)
+end
+
+-- ============================================================== build
+local function build()
+	local def = WorldConfig.PlazaStatue
+	local hub = Workspace:WaitForChild("World", 180):WaitForChild("Hub", 180)
+	local plinth = hub and hub:WaitForChild("DragonStatue", 180)
+	if not plinth then
+		warn("[Statue] no plaza statue to replace")
+		return
+	end
+	local base = V(0, WorldConfig.Hub.Height, 0)
+	local top = base + V(0, 14, 0) -- the gold plate of the plinth
+	local spawn = WorldConfig.Spawn.Position
+	local facing = V(spawn.X - base.X, 0, spawn.Z - base.Z)
+	if facing.Magnitude < 1 then
+		facing = V(0, 0, 1)
+	end
+	local frame = CFrame.lookAt(top, top + facing)
+	local height = 5.4 * def.Scale
+
+	local avatar = nil
+	local userId = ownerUserId(def)
+	if userId then
+		avatar = loadAvatar(userId)
+	end
+	local model: Model
+	if avatar then
+		model = avatar
+		model.Name = "OwnerStatue"
+		pcall(function()
+			model:ScaleTo(def.Scale)
+		end)
+		model:PivotTo(frame * CF(0, 6 * def.Scale, 0))
+		local okPose, err = pcall(pose, model, frame)
+		if not okPose then
+			warn("[Statue] pose failed: " .. tostring(err))
+		end
+		freeze(model)
+		model.Parent = plinth
+		StatueService.Kind = "Avatar"
+		pcall(settle, model, top.Y)
+	else
+		model = fallbackKing(plinth, frame, def.Scale * 0.9)
+		StatueService.Kind = "Fallback"
+		height = 6.6 * def.Scale * 0.9
+	end
+	-- the stone dragon makes room for the owner
+	local dragon = plinth:FindFirstChild("StatueDragon")
+	if dragon then
+		dragon:Destroy()
+	end
+	plaque(plinth, base, facing, def)
+	titleSign(plinth, top, height, def)
+	model:SetAttribute("Owner", def.Username)
+	StatueService.Ready = true
+end
+
+-- (exposed for the tests: the posing runs on a rig built by hand)
+StatueService._test = { pose = pose, freeze = freeze, settle = settle }
+
+function StatueService.Init(_services) end
+
+function StatueService.Start()
+	task.spawn(function()
+		local ok, err = pcall(build)
+		if not ok then
+			warn("[Statue] failed: " .. tostring(err))
+		end
+	end)
+end
+
+return StatueService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000096">
 				<Properties>
 					<string name="Name">TravelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20714,7 +21183,8 @@ return SpinService
 	moves, the rider stays seated); on foot, the companion is brought along.
 
 	Net (domain "Travel"): To { Place } -> { Place }
-	Places: Sanctuary, Spawn (leaderboards), SpinIsland, RaceIsland, Shop, Forge, Quests, Library
+	Places: Sanctuary, Spawn (leaderboards), SpinIsland, RaceIsland, the sky islands (WorldConfig.SkyIslands),
+	        Shop, Forge, Quests, Library
 ]]
 
 local Players = game:GetService("Players")
@@ -20752,6 +21222,10 @@ function TravelService.Destination(player: Player, place: string): CFrame?
 	if place == "RaceIsland" then
 		local at = RaceConfig.toWorld(RaceConfig.Arrival)
 		return CFrame.lookAt(at, at + Vector3.new(0, 0, -10))
+	end
+	local isle = WorldConfig.SkyIslandById[place]
+	if isle then
+		return WorldConfig.islandArrival(isle)
 	end
 	if place == "Spawn" then
 		local lb = Services.LeaderboardService
@@ -20826,7 +21300,7 @@ return TravelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000095">
+			<Item class="ModuleScript" referent="RBX000097">
 				<Properties>
 					<string name="Name">TreeService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20948,7 +21422,7 @@ return TreeService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000096">
+			<Item class="ModuleScript" referent="RBX000098">
 				<Properties>
 					<string name="Name">WildEggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21099,7 +21573,7 @@ function WildEggService.Spawn(tierId: string?)
 		Egg = eggType,
 		Luck = luck,
 		Position = position + Vector3.new(0, 2.2, 0),
-		Area = area.Name,
+		Area = area.Label or area.Name,
 		Region = area.Region,
 		EndsAt = Workspace:GetServerTimeNow() + WildEggConfig.Lifetime,
 		Claimed = false,
@@ -21195,7 +21669,7 @@ return WildEggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000097">
+			<Item class="ModuleScript" referent="RBX000099">
 				<Properties>
 					<string name="Name">WorldService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21352,11 +21826,11 @@ return WorldService
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000098">
+		<Item class="Folder" referent="RBX000100">
 			<Properties>
 				<string name="Name">World</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000099">
+			<Item class="ModuleScript" referent="RBX000101">
 				<Properties>
 					<string name="Name">GreatTree</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21557,7 +22031,7 @@ return GreatTree
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000100">
+			<Item class="ModuleScript" referent="RBX000102">
 				<Properties>
 					<string name="Name">Haven</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21732,7 +22206,7 @@ return Haven
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000101">
+			<Item class="ModuleScript" referent="RBX000103">
 				<Properties>
 					<string name="Name">HavenLayout</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/layout.py - do not edit by hand.
@@ -26118,7 +26592,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000102">
+			<Item class="ModuleScript" referent="RBX000104">
 				<Properties>
 					<string name="Name">HavenTerrainData</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/terrain_data.py - do not edit by hand.
@@ -26169,7 +26643,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000103">
+			<Item class="ModuleScript" referent="RBX000105">
 				<Properties>
 					<string name="Name">Kit</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -26515,7 +26989,7 @@ return Kit
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000104">
+			<Item class="ModuleScript" referent="RBX000106">
 				<Properties>
 					<string name="Name">Landmarks</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -26877,7 +27351,7 @@ return Landmarks
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000105">
+			<Item class="ModuleScript" referent="RBX000107">
 				<Properties>
 					<string name="Name">Props</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -27073,7 +27547,7 @@ return Props
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000106">
+			<Item class="ModuleScript" referent="RBX000108">
 				<Properties>
 					<string name="Name">RaceIsland</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -27513,7 +27987,7 @@ return RaceIsland
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000107">
+			<Item class="ModuleScript" referent="RBX000109">
 				<Properties>
 					<string name="Name">Sanctuaries</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -27901,7 +28375,347 @@ return Sanctuaries
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000108">
+			<Item class="ModuleScript" referent="RBX000110">
+				<Properties>
+					<string name="Name">SkyIslands</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	SkyIslands - the floating LEGO islands of the sky (WorldConfig.SkyIslands), one theme each:
+	  Crystal  glowing crystal spires and a shimmering pool (Skyreach eggs)
+	  Bloom    giant flowers, mushrooms and round trees (Haven eggs)
+	  Ember    a small volcano with a lava staircase, charred trees, floating embers (Ember Caldera eggs)
+	  Frost    ice spikes, snowy pines, a frozen pond and an igloo (Frostpeak eggs)
+	Every island is: a grass / stone plate (the part "Surface" carries the attribute EggSurface, so the
+	egg spawner may put eggs on it), dirt and a stack of rock below, studs round the rim, glowing
+	stalactites underneath, a landing pad (Travel place = island Id), a floating name sign, and the
+	decoration of its theme. Decoration is solid but CanQuery = false, so eggs and the camera never
+	bump into it. The model is Persistent (always visible from far away).
+	Built by IslandService; the egg areas are registered there.
+]]
+
+local Kit = require(script.Parent:WaitForChild("Kit"))
+
+local V = Vector3.new
+local CF = CFrame.new
+local ANG = CFrame.Angles
+local C3 = Color3.fromRGB
+local M = Kit.M
+
+local SkyIslands = {}
+
+local NO_COLLIDE = { CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false }
+local DECOR = { CanQuery = false, CanTouch = false }
+local WHITE = C3(242, 243, 242)
+local TRUNK = C3(110, 78, 50)
+
+local THEMES = {
+	Crystal = { Top = C3(112, 196, 206), Dirt = C3(86, 72, 130), Rock = C3(120, 112, 160), RockDark = C3(88, 82, 128), Glow = C3(150, 230, 255) },
+	Bloom = { Top = C3(96, 190, 84), Dirt = C3(124, 80, 46), Rock = C3(163, 162, 165), RockDark = C3(99, 95, 98), Glow = C3(255, 170, 215) },
+	Ember = { Top = C3(72, 60, 64), Dirt = C3(52, 40, 40), Rock = C3(96, 72, 66), RockDark = C3(62, 48, 48), Glow = C3(255, 120, 40) },
+	Frost = { Top = C3(236, 243, 250), Dirt = C3(150, 185, 215), Rock = C3(188, 214, 236), RockDark = C3(140, 172, 204), Glow = C3(170, 230, 255) },
+}
+
+-- ============================================================== shared pieces
+local function base(b, r: number, theme)
+	local cap = b:cyl(3, r * 2, V(0, -1.5, 0), theme.Top)
+	cap.Name = "Surface"
+	cap:SetAttribute("EggSurface", true)
+	b:cyl(3, r * 2 - 3, V(0, -4.5, 0), theme.Dirt)
+	local y = -6
+	for i, d in { r * 1.7, r * 1.4, r * 1.05, r * 0.72, r * 0.42, r * 0.18 } do
+		local h = 9 + i * 2
+		b:cyl(h, d, V(0, y - h / 2, 0), i % 2 == 0 and theme.RockDark or theme.Rock)
+		y -= h
+	end
+	-- studs round the rim
+	for i = 0, 35 do
+		local a = i / 36 * math.pi * 2
+		b:cyl(0.6, 3.2, V(math.sin(a) * (r - 3.2), 0.3, math.cos(a) * (r - 3.2)), theme.Top, nil, NO_COLLIDE)
+	end
+end
+
+-- glowing stalactites under the island
+local function stalactites(b, r: number, theme, rng: Random)
+	for i = 1, 9 do
+		local a = rng:NextNumber(0, math.pi * 2)
+		local rr = rng:NextNumber(r * 0.1, r * 0.55)
+		local len = rng:NextNumber(10, 22)
+		b:box(V(1.6, len, 1.6), CF(math.sin(a) * rr, -30 - len / 2 - (r - rr) * 0.15, math.cos(a) * rr) * ANG(math.pi + rng:NextNumber(-0.12, 0.12), rng:NextNumber(0, 6), rng:NextNumber(-0.12, 0.12)),
+			theme.Glow, M.Neon, NO_COLLIDE)
+	end
+end
+
+local function landingPad(b, def, theme)
+	local at = V(0, 0, def.Radius * 0.55)
+	b:roundBrick(1.2, 15, at + V(0, 0.6, 0), theme.RockDark, { Studs = "None" })
+	local top = b:roundBrick(0.5, 12.5, at + V(0, 1.45, 0), def.Color, { Studs = "Ring", RingRadius = 5, StudColor = WHITE })
+	top.Name = "LandingPad"
+	b:cyl(0.3, 5, at + V(0, 1.85, 0), WHITE, M.Neon, NO_COLLIDE)
+end
+
+-- the floating name of the island (seen from far away)
+local function nameSign(b, def, height: number)
+	local anchor = b:box(V(1, 1, 1), V(0, height, 0), WHITE, nil, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+	anchor.Name = "NameSign"
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "NameGui"
+	gui.Size = UDim2.fromOffset(320, 78)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 1600
+	gui.LightInfluence = 0
+	gui.Adornee = anchor
+	gui.Parent = anchor
+	local function line(name: string, text: string, color: Color3, y: number, h: number, font: Enum.Font)
+		local t = Instance.new("TextLabel")
+		t.Name = name
+		t.BackgroundTransparency = 1
+		t.Position = UDim2.fromScale(0, y)
+		t.Size = UDim2.fromScale(1, h)
+		t.Font = font
+		t.Text = text
+		t.TextScaled = true
+		t.TextColor3 = color
+		t.Parent = gui
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2.5
+		stroke.Color = C3(18, 20, 34)
+		stroke.Parent = t
+	end
+	line("Title", string.upper(def.Name), def.Color, 0, 0.62, Enum.Font.GothamBlack)
+	line("Sub", def.Sub, WHITE, 0.64, 0.34, Enum.Font.GothamMedium)
+end
+
+-- Random point on the plate: not too close to the middle, the landing pad or the rim.
+local function scatterPoint(rng: Random, r: number, minR: number, maxR: number, padR: number?): Vector3
+	for _ = 1, 20 do
+		local a = rng:NextNumber(0, math.pi * 2)
+		local d = rng:NextNumber(minR, maxR)
+		local x, z = math.sin(a) * d, math.cos(a) * d
+		local px, pz = 0, r * 0.55
+		if (x - px) ^ 2 + (z - pz) ^ 2 > (padR or 14) ^ 2 then
+			return V(x, 0, z)
+		end
+	end
+	return V(r * 0.5, 0, -r * 0.5)
+end
+
+-- ============================================================== decoration pieces
+-- A tall crystal: translucent body, neon core, a diamond point. lean = (rotX, rotZ).
+local function crystal(b, pos: Vector3, height: number, width: number, color: Color3, leanX: number, leanZ: number, yaw: number, material: Enum.Material?, alpha: number?)
+	local lean = ANG(leanX, yaw, leanZ)
+	local at = CF(pos + V(0, height / 2, 0)) * lean
+	b:box(V(width, height, width), at, color, material or M.Glass, { Transparency = alpha or 0.28, CanQuery = false })
+	b:box(V(width * 0.4, height * 0.86, width * 0.4), at, color, M.Neon, NO_COLLIDE)
+	local tip = CF(pos) * lean * CF(0, height, 0) * ANG(math.rad(45), 0, math.rad(45))
+	b:box(V(width * 0.72, width * 0.72, width * 0.72), tip, color, M.Neon, NO_COLLIDE)
+end
+
+local function mushroom(b, pos: Vector3, h: number, capD: number, capColor: Color3)
+	b:cyl(h, capD * 0.28, pos + V(0, h / 2, 0), C3(246, 238, 214), nil, DECOR)
+	b:ball(capD, pos + V(0, h, 0), capColor, nil, DECOR)
+	for i = 1, 5 do
+		local a = i / 5 * math.pi * 2
+		b:ball(capD * 0.17, pos + V(math.cos(a) * capD * 0.3, h + capD * 0.4, math.sin(a) * capD * 0.3), WHITE, nil, NO_COLLIDE)
+	end
+end
+
+local function flower(b, pos: Vector3, h: number, petal: Color3)
+	b:cyl(h, 0.6, pos + V(0, h / 2, 0), C3(60, 140, 60), nil, NO_COLLIDE)
+	local top = pos + V(0, h, 0)
+	b:ball(1.8, top, C3(255, 214, 60), nil, NO_COLLIDE)
+	for i = 0, 5 do
+		local a = i / 6 * math.pi * 2
+		b:ball(1.5, top + V(math.cos(a) * 1.9, 0, math.sin(a) * 1.9), petal, nil, NO_COLLIDE)
+	end
+end
+
+local function roundTree(b, pos: Vector3, h: number, leaf: Color3)
+	b:cyl(h, 2.2, pos + V(0, h / 2, 0), TRUNK, nil, DECOR)
+	b:ball(h * 0.95, pos + V(0, h + h * 0.12, 0), leaf, nil, DECOR)
+	b:ball(h * 0.6, pos + V(h * 0.34, h * 0.86, h * 0.1), leaf, nil, DECOR)
+	b:ball(h * 0.5, pos + V(-h * 0.3, h * 0.82, -h * 0.12), leaf, nil, DECOR)
+end
+
+local function pine(b, pos: Vector3, h: number, needles: Color3, snow: Color3)
+	b:cyl(h * 0.3, 1.6, pos + V(0, h * 0.15, 0), TRUNK, nil, DECOR)
+	local d = h * 0.7
+	local y = h * 0.3
+	for i = 1, 4 do
+		b:cyl(h * 0.17, d, pos + V(0, y + h * 0.085, 0), i % 2 == 0 and snow or needles, nil, DECOR)
+		y += h * 0.17
+		d *= 0.72
+	end
+end
+
+local function pointLight(parent: BasePart, color: Color3, range: number, brightness: number)
+	local l = Instance.new("PointLight")
+	l.Color = color
+	l.Range = range
+	l.Brightness = brightness
+	l.Parent = parent
+end
+
+-- ============================================================== themes
+local function crystalIsle(b, def, theme, rng: Random)
+	local r = def.Radius
+	local colors = { C3(150, 230, 255), C3(190, 150, 255), C3(255, 150, 230), C3(130, 255, 220) }
+	-- the central spire group
+	local heights = { 30, 22, 19, 16 }
+	for i, h in heights do
+		local a = (i - 1) / #heights * math.pi * 2 + 0.4
+		local off = i == 1 and V(0, 0, -r * 0.12) or V(math.sin(a) * 6.5, 0, -r * 0.12 + math.cos(a) * 6.5)
+		crystal(b, off, h, 5.2 - i * 0.4, colors[(i - 1) % #colors + 1], (i - 1) * 0.05 * (i % 2 == 0 and 1 or -1), 0.08 * (i - 2), a)
+	end
+	pointLight(b:ball(3, V(0, 14, -r * 0.12), theme.Glow, M.Neon, NO_COLLIDE), theme.Glow, 60, 2.2)
+	-- smaller crystals scattered over the plate
+	for _ = 1, 16 do
+		local p = scatterPoint(rng, r, r * 0.3, r * 0.82)
+		crystal(b, p, rng:NextNumber(7, 15), rng:NextNumber(2, 3.4), colors[rng:NextInteger(1, #colors)], rng:NextNumber(-0.25, 0.25), rng:NextNumber(-0.25, 0.25), rng:NextNumber(0, 6))
+	end
+	-- the shimmering pool
+	local pool = b:cyl(0.4, 22, V(-r * 0.38, 0.2, r * 0.18), C3(120, 230, 255), M.Neon, { Transparency = 0.55, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+	pool.Name = "Pool"
+	b:cyl(0.7, 25, V(-r * 0.38, 0.1, r * 0.18), theme.RockDark, nil, DECOR)
+end
+
+local function bloomIsle(b, def, theme, rng: Random)
+	local r = def.Radius
+	-- the big flower in the middle: eight petals round a golden heart
+	local mid = V(0, 0, -r * 0.1)
+	for i = 0, 7 do
+		local a = i / 8 * math.pi * 2
+		local at = CF(mid + V(math.sin(a) * 11, 0.9, math.cos(a) * 11)) * ANG(0, a, 0)
+		b:box(V(6.5, 1.2, 11), at, i % 2 == 0 and C3(255, 150, 200) or C3(255, 190, 220), nil, DECOR)
+	end
+	b:cyl(2, 9, mid + V(0, 1.2, 0), C3(255, 205, 60), nil, DECOR)
+	for i = 0, 11 do
+		local a = i / 12 * math.pi * 2
+		b:ball(1.1, mid + V(math.sin(a) * 3.2, 2.5, math.cos(a) * 3.2), C3(214, 150, 20), nil, NO_COLLIDE)
+	end
+	-- mushrooms, flowers, trees
+	local caps = { C3(220, 60, 70), C3(255, 140, 190), C3(255, 190, 60), C3(150, 110, 230) }
+	for i = 1, 9 do
+		local p = scatterPoint(rng, r, r * 0.42, r * 0.84)
+		mushroom(b, p, rng:NextNumber(5, 9), rng:NextNumber(6, 11), caps[(i - 1) % #caps + 1])
+	end
+	local petals = { C3(255, 120, 170), C3(255, 235, 110), C3(255, 255, 255), C3(170, 130, 255), C3(110, 200, 255) }
+	for _ = 1, 34 do
+		local p = scatterPoint(rng, r, r * 0.2, r * 0.9, 12)
+		flower(b, p, rng:NextNumber(2.5, 5), petals[rng:NextInteger(1, #petals)])
+	end
+	for _ = 1, 6 do
+		local p = scatterPoint(rng, r, r * 0.5, r * 0.82)
+		roundTree(b, p, rng:NextNumber(8, 12), C3(70 + rng:NextInteger(0, 30), 170 + rng:NextInteger(0, 30), 80))
+	end
+end
+
+local function emberIsle(b, def, theme, rng: Random)
+	local r = def.Radius
+	local lava = C3(255, 110, 30)
+	local rock = { C3(70, 56, 58), C3(88, 66, 62) }
+	-- the volcano: five tiers, a glowing crater, a lava staircase down one side
+	local cx, cz = 0, -r * 0.18
+	local tiers = { { d = 54, h = 7 }, { d = 43, h = 7 }, { d = 33, h = 7 }, { d = 24, h = 7 }, { d = 16, h = 6 } }
+	local y = 0
+	local edges = {}
+	for i, t in tiers do
+		b:cyl(t.h, t.d, V(cx, y + t.h / 2, cz), rock[i % 2 + 1], M.Slate, DECOR)
+		y += t.h
+		table.insert(edges, { r = t.d / 2, top = y, h = t.h })
+	end
+	local crater = b:cyl(0.8, 11, V(cx, y + 0.4, cz), lava, M.Neon, NO_COLLIDE)
+	crater.Name = "Crater"
+	pointLight(crater, lava, 70, 3)
+	local theta = math.rad(35)
+	for _, flow in { math.rad(35), math.rad(215) } do
+		for _, e in edges do
+			local px, pz = cx + math.sin(flow) * (e.r - 1.6), cz + math.cos(flow) * (e.r - 1.6)
+			b:box(V(3.6, 0.5, 5), CF(px, e.top + 0.3, pz) * ANG(0, flow, 0), lava, M.Neon, NO_COLLIDE)
+			local fx, fz = cx + math.sin(flow) * e.r, cz + math.cos(flow) * e.r
+			b:box(V(3.6, e.h, 0.6), CF(fx, e.top - e.h / 2, fz) * ANG(0, flow, 0), lava, M.Neon, NO_COLLIDE)
+		end
+	end
+	-- the lava pool at the foot
+	local px, pz = cx + math.sin(theta) * (edges[1].r + 8), cz + math.cos(theta) * (edges[1].r + 8)
+	local pool = b:cyl(0.5, 18, V(px, 0.25, pz), lava, M.Neon, NO_COLLIDE)
+	pool.Name = "LavaPool"
+	pointLight(pool, lava, 36, 2)
+	-- charred trees and glowing rocks
+	for _ = 1, 9 do
+		local p = scatterPoint(rng, r, r * 0.48, r * 0.86)
+		local h = rng:NextNumber(7, 12)
+		b:cyl(h, 1.5, p + V(0, h / 2, 0), C3(34, 28, 30), nil, DECOR)
+		b:box(V(0.9, h * 0.5, 0.9), CF(p + V(1.4, h * 0.82, 0)) * ANG(0, 0, -0.7), C3(34, 28, 30), nil, NO_COLLIDE)
+		b:box(V(0.9, h * 0.4, 0.9), CF(p + V(-1.2, h * 0.7, 0.5)) * ANG(0.4, 0, 0.6), C3(34, 28, 30), nil, NO_COLLIDE)
+	end
+	for _ = 1, 12 do
+		local p = scatterPoint(rng, r, r * 0.45, r * 0.88)
+		local s = rng:NextNumber(2.5, 5)
+		b:ball(s, p + V(0, s * 0.3, 0), C3(60, 46, 46), M.Slate, DECOR)
+		b:ball(s * 0.5, p + V(s * 0.1, s * 0.5, s * 0.1), lava, M.Neon, NO_COLLIDE)
+	end
+	-- embers drifting above the crater
+	for i = 1, 8 do
+		local a = i / 8 * math.pi * 2
+		b:ball(rng:NextNumber(0.7, 1.4), V(cx + math.sin(a) * rng:NextNumber(3, 9), y + rng:NextNumber(4, 16), cz + math.cos(a) * rng:NextNumber(3, 9)), C3(255, 170, 70), M.Neon, NO_COLLIDE)
+	end
+end
+
+local function frostIsle(b, def, theme, rng: Random)
+	local r = def.Radius
+	local ice = C3(170, 225, 255)
+	-- a ring of ice spikes round a tall central one
+	crystal(b, V(0, 0, -r * 0.12), 34, 6, ice, 0.04, 0.05, 0.3, M.Ice, 0.2)
+	for i = 0, 6 do
+		local a = i / 7 * math.pi * 2
+		crystal(b, V(math.sin(a) * 10, 0, -r * 0.12 + math.cos(a) * 10), rng:NextNumber(14, 22), rng:NextNumber(3, 4.4), ice, math.sin(a) * 0.22, math.cos(a) * 0.22, a, M.Ice, 0.2)
+	end
+	for _ = 1, 12 do
+		local p = scatterPoint(rng, r, r * 0.4, r * 0.84)
+		crystal(b, p, rng:NextNumber(5, 10), rng:NextNumber(1.6, 2.6), ice, rng:NextNumber(-0.25, 0.25), rng:NextNumber(-0.25, 0.25), rng:NextNumber(0, 6), M.Ice, 0.2)
+	end
+	-- snowy pines
+	for _ = 1, 14 do
+		local p = scatterPoint(rng, r, r * 0.45, r * 0.86)
+		pine(b, p, rng:NextNumber(9, 15), C3(60, 110, 90), WHITE)
+	end
+	-- the frozen pond
+	local pond = b:cyl(0.5, 24, V(-r * 0.34, 0.25, r * 0.16), C3(190, 235, 255), M.Ice, { Transparency = 0.15, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+	pond.Name = "Pond"
+	b:cyl(0.8, 27, V(-r * 0.34, 0.1, r * 0.16), theme.RockDark, nil, DECOR)
+	-- an igloo
+	local ig = V(r * 0.4, 0, r * 0.1)
+	b:ball(15, ig + V(0, 1, 0), WHITE, nil, DECOR)
+	b:box(V(4.2, 5, 4), CF(ig + V(-r * 0.0, 2.5, 7)) , C3(40, 60, 90), nil, DECOR)
+end
+
+local THEME_BUILDERS = { Crystal = crystalIsle, Bloom = bloomIsle, Ember = emberIsle, Frost = frostIsle }
+
+-- ============================================================== public
+function SkyIslands.build(parent: Instance, def): Model
+	local theme = THEMES[def.Theme] or THEMES.Bloom
+	local b = Kit.new(parent, CF(def.Center), def.Id)
+	pcall(function()
+		(b.Model :: any).ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	end)
+	local rng = Random.new(#def.Id * 977 + def.Radius)
+	base(b, def.Radius, theme)
+	landingPad(b, def, theme)
+	local decorate = THEME_BUILDERS[def.Theme]
+	if decorate then
+		decorate(b, def, theme, rng)
+	end
+	stalactites(b, def.Radius, theme, rng)
+	nameSign(b, def, 62)
+	b.Model:SetAttribute("IslandId", def.Id)
+	b.Model:SetAttribute("Island", "Sky")
+	return b.Model
+end
+
+return SkyIslands
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000111">
 				<Properties>
 					<string name="Name">TerrainWriter</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -28315,7 +29129,7 @@ return TerrainWriter
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000109">
+			<Item class="ModuleScript" referent="RBX000112">
 				<Properties>
 					<string name="Name">Village</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -28773,7 +29587,7 @@ return Village
 			</Item>
 		</Item>
 	</Item>
-	<Item class="StarterPlayer" referent="RBX000110">
+	<Item class="StarterPlayer" referent="RBX000113">
 		<Properties>
 			<string name="Name">StarterPlayer</string>
 			<bool name="EnableMouseLockOption">false</bool>
@@ -28781,15 +29595,15 @@ return Village
 			<float name="CameraMinZoomDistance">6.0</float>
 			<float name="CharacterWalkSpeed">20.0</float>
 		</Properties>
-		<Item class="StarterPlayerScripts" referent="RBX000111">
+		<Item class="StarterPlayerScripts" referent="RBX000114">
 			<Properties>
 				<string name="Name">StarterPlayerScripts</string>
 			</Properties>
-			<Item class="Folder" referent="RBX000112">
+			<Item class="Folder" referent="RBX000115">
 				<Properties>
 					<string name="Name">Controllers</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000113">
+				<Item class="ModuleScript" referent="RBX000116">
 					<Properties>
 						<string name="Name">AnimationController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29394,7 +30208,7 @@ return AnimationController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000114">
+				<Item class="ModuleScript" referent="RBX000117">
 					<Properties>
 						<string name="Name">AnnounceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29658,7 +30472,7 @@ return AnnounceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000115">
+				<Item class="ModuleScript" referent="RBX000118">
 					<Properties>
 						<string name="Name">AudioController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29831,7 +30645,7 @@ return AudioController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000116">
+				<Item class="ModuleScript" referent="RBX000119">
 					<Properties>
 						<string name="Name">BondController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30159,7 +30973,7 @@ return BondController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000117">
+				<Item class="ModuleScript" referent="RBX000120">
 					<Properties>
 						<string name="Name">CameraController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30529,7 +31343,7 @@ return CameraController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000118">
+				<Item class="ModuleScript" referent="RBX000121">
 					<Properties>
 						<string name="Name">ChatController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30622,7 +31436,7 @@ return ChatController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000119">
+				<Item class="ModuleScript" referent="RBX000122">
 					<Properties>
 						<string name="Name">CoinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31057,7 +31871,7 @@ return CoinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000120">
+				<Item class="ModuleScript" referent="RBX000123">
 					<Properties>
 						<string name="Name">CombatController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31897,7 +32711,7 @@ return CombatController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000121">
+				<Item class="ModuleScript" referent="RBX000124">
 					<Properties>
 						<string name="Name">DailyController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31959,7 +32773,7 @@ return DailyController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000122">
+				<Item class="ModuleScript" referent="RBX000125">
 					<Properties>
 						<string name="Name">DataController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32090,7 +32904,7 @@ return DataController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000123">
+				<Item class="ModuleScript" referent="RBX000126">
 					<Properties>
 						<string name="Name">DragonController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32739,7 +33553,7 @@ return DragonController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000124">
+				<Item class="ModuleScript" referent="RBX000127">
 					<Properties>
 						<string name="Name">DuelController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34081,7 +34895,7 @@ return DuelController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000125">
+				<Item class="ModuleScript" referent="RBX000128">
 					<Properties>
 						<string name="Name">EggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34396,7 +35210,7 @@ return EggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000126">
+				<Item class="ModuleScript" referent="RBX000129">
 					<Properties>
 						<string name="Name">GraphicsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34533,7 +35347,7 @@ return GraphicsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000127">
+				<Item class="ModuleScript" referent="RBX000130">
 					<Properties>
 						<string name="Name">HatchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35885,7 +36699,7 @@ return HatchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000128">
+				<Item class="ModuleScript" referent="RBX000131">
 					<Properties>
 						<string name="Name">HeldEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36282,7 +37096,7 @@ return HeldEggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000129">
+				<Item class="ModuleScript" referent="RBX000132">
 					<Properties>
 						<string name="Name">InputController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36505,7 +37319,7 @@ return InputController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000130">
+				<Item class="ModuleScript" referent="RBX000133">
 					<Properties>
 						<string name="Name">InteractionController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36568,7 +37382,7 @@ return InteractionController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000131">
+				<Item class="ModuleScript" referent="RBX000134">
 					<Properties>
 						<string name="Name">PerchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37032,7 +37846,7 @@ return PerchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000132">
+				<Item class="ModuleScript" referent="RBX000135">
 					<Properties>
 						<string name="Name">RaceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -38066,7 +38880,7 @@ return RaceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000133">
+				<Item class="ModuleScript" referent="RBX000136">
 					<Properties>
 						<string name="Name">RadarController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -38379,7 +39193,7 @@ return RadarController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000134">
+				<Item class="ModuleScript" referent="RBX000137">
 					<Properties>
 						<string name="Name">SanctuaryController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -38888,7 +39702,7 @@ return SanctuaryController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000135">
+				<Item class="ModuleScript" referent="RBX000138">
 					<Properties>
 						<string name="Name">SettingsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -38976,7 +39790,7 @@ return SettingsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000136">
+				<Item class="ModuleScript" referent="RBX000139">
 					<Properties>
 						<string name="Name">SpinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39404,7 +40218,7 @@ return SpinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000137">
+				<Item class="ModuleScript" referent="RBX000140">
 					<Properties>
 						<string name="Name">TitleController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39608,7 +40422,7 @@ return TitleController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000138">
+				<Item class="ModuleScript" referent="RBX000141">
 					<Properties>
 						<string name="Name">TreeController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39748,7 +40562,7 @@ return TreeController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000139">
+				<Item class="ModuleScript" referent="RBX000142">
 					<Properties>
 						<string name="Name">UIController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40166,7 +40980,7 @@ return UIController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000140">
+				<Item class="ModuleScript" referent="RBX000143">
 					<Properties>
 						<string name="Name">WildEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40667,7 +41481,7 @@ return WildEggController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000141">
+			<Item class="ModuleScript" referent="RBX000144">
 				<Properties>
 					<string name="Name">Diagnostics</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -40924,7 +41738,7 @@ return Diagnostics
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="LocalScript" referent="RBX000142">
+			<Item class="LocalScript" referent="RBX000145">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -41060,16 +41874,16 @@ end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000143">
+			<Item class="Folder" referent="RBX000146">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000144">
+				<Item class="Folder" referent="RBX000147">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000145">
+				<Item class="ModuleScript" referent="RBX000148">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41149,11 +41963,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000146">
+				<Item class="Folder" referent="RBX000149">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000147">
+					<Item class="ModuleScript" referent="RBX000150">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -41320,7 +42134,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000148">
+					<Item class="ModuleScript" referent="RBX000151">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -41753,7 +42567,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000149">
+				<Item class="ModuleScript" referent="RBX000152">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41819,11 +42633,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000150">
+				<Item class="Folder" referent="RBX000153">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000151">
+					<Item class="ModuleScript" referent="RBX000154">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -43121,7 +43935,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000152">
+					<Item class="ModuleScript" referent="RBX000155">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -43494,7 +44308,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000153">
+				<Item class="ModuleScript" referent="RBX000156">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -43925,7 +44739,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000154">
+				<Item class="ModuleScript" referent="RBX000157">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -45259,11 +46073,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000155">
+				<Item class="Folder" referent="RBX000158">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000156">
+					<Item class="ModuleScript" referent="RBX000159">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45480,7 +46294,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000157">
+					<Item class="ModuleScript" referent="RBX000160">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45686,7 +46500,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000158">
+					<Item class="ModuleScript" referent="RBX000161">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -45775,7 +46589,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000159">
+				<Item class="ModuleScript" referent="RBX000162">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -46033,7 +46847,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000160">
+				<Item class="ModuleScript" referent="RBX000163">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -46163,7 +46977,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000161">
+				<Item class="ModuleScript" referent="RBX000164">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -46339,11 +47153,11 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000162">
+				<Item class="Folder" referent="RBX000165">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000163">
+					<Item class="ModuleScript" referent="RBX000166">
 						<Properties>
 							<string name="Name">DailyWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -46612,7 +47426,7 @@ return DailyWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000164">
+					<Item class="ModuleScript" referent="RBX000167">
 						<Properties>
 							<string name="Name">DuelWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -46847,7 +47661,7 @@ return DuelWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000165">
+					<Item class="ModuleScript" referent="RBX000168">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -47139,7 +47953,7 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000166">
+					<Item class="ModuleScript" referent="RBX000169">
 						<Properties>
 							<string name="Name">IndexWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -47589,7 +48403,7 @@ return IndexWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000167">
+					<Item class="ModuleScript" referent="RBX000170">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -49079,7 +49893,7 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000168">
+					<Item class="ModuleScript" referent="RBX000171">
 						<Properties>
 							<string name="Name">RaceWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -49545,7 +50359,7 @@ return RaceWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000169">
+					<Item class="ModuleScript" referent="RBX000172">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -49761,7 +50575,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000170">
+					<Item class="ModuleScript" referent="RBX000173">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -50262,7 +51076,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000171">
+					<Item class="ModuleScript" referent="RBX000174">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -50594,7 +51408,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000172">
+					<Item class="ModuleScript" referent="RBX000175">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -50607,6 +51421,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
+local WorldConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WorldConfig"))
 
 local UI = script.Parent.Parent
 local Theme = require(UI.Theme)
@@ -50632,6 +51447,10 @@ TeleportWindow.Places = {
 	{ Id = "Quests", Title = "ELDER ROWAN", Sub = "Quests and rewards", Icon = "Scroll", Color = Color3.fromRGB(205, 164, 222) },
 	{ Id = "Library", Title = "HALL OF DRAGONS", Sub = "Dragon Index", Icon = "Book", Color = Color3.fromRGB(64, 236, 214) },
 }
+-- the floating sky islands (WorldConfig.SkyIslands): rare eggs grow on them
+for _, isle in WorldConfig.SkyIslands do
+	table.insert(TeleportWindow.Places, { Id = isle.Id, Title = string.upper(isle.Name), Sub = isle.Sub, Icon = isle.Icon, Color = isle.Color })
+end
 
 function TeleportWindow.new(ui, registry)
 	local self = WindowBase.new({
@@ -50765,7 +51584,7 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000173">
+					<Item class="ModuleScript" referent="RBX000176">
 						<Properties>
 							<string name="Name">TreeWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -51310,7 +52129,7 @@ return TreeWindow
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000174">
+	<Item class="Workspace" referent="RBX000177">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -51319,7 +52138,7 @@ return TreeWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000175">
+		<Item class="Terrain" referent="RBX000178">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -51331,7 +52150,7 @@ return TreeWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000176">
+	<Item class="Lighting" referent="RBX000179">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -51343,18 +52162,18 @@ return TreeWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000177">
+	<Item class="SoundService" referent="RBX000180">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000178">
+	<Item class="StarterGui" referent="RBX000181">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000179">
+	<Item class="Players" referent="RBX000182">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>
