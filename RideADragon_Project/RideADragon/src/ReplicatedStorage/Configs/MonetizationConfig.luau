@@ -22,7 +22,7 @@ local MonetizationConfig = {}
 
 MonetizationConfig.GamePasses = {
 	MonicaDragon = {
-		Id = 0,
+		Id = 2006499253,
 		Price = 11999,
 		Name = "LEGENDARY M0NICA",
 		Description = "The strongest dragon of all: 50T per second, every mutation at once and x20 LUCK forever.",
@@ -36,7 +36,7 @@ MonetizationConfig.GamePasses = {
 		Order = 0,
 	},
 	OwnerDragon = {
-		Id = 0,
+		Id = 2005641208,
 		Price = 3000,
 		Name = "Owner Dragon",
 		Description = "The strongest dragon in the game + x2 LUCK forever on every roll (eggs and the Spin Wheel).",
@@ -48,7 +48,7 @@ MonetizationConfig.GamePasses = {
 		Order = 3,
 	},
 	PrinceDragon = {
-		Id = 0,
+		Id = 2005203251,
 		Price = 8999,
 		Name = "PRINCE",
 		Description = "The strongest dragon in the game: every mutation at once and x3 LUCK forever.",
@@ -61,7 +61,7 @@ MonetizationConfig.GamePasses = {
 		Order = 1,
 	},
 	N2RC1SDragon = {
-		Id = 0,
+		Id = 2005911224,
 		Price = 8999,
 		Name = "N2RC1S",
 		Description = "The strongest dragon in the game: every mutation at once and x3 LUCK forever.",
@@ -76,7 +76,7 @@ MonetizationConfig.GamePasses = {
 }
 
 MonetizationConfig.GamePasses.EggHunter = {
-	Id = 0,
+	Id = 2006433199,
 	Price = 1299,
 	Name = "Egg Hunter",
 	Description = "Find more eggs, faster: a permanent radar, a wider pickup range and a bigger bag.",
@@ -140,7 +140,7 @@ end
 
 MonetizationConfig.Products = {
 	LuckPotion = {
-		Id = 0,
+		Id = 2006349151,
 		Price = 49,
 		Name = "Luck Potion",
 		Description = "x2 luck on egg rolls for 15 minutes.",
@@ -151,7 +151,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(110, 208, 104),
 	},
 	SuperLuckPotion = {
-		Id = 0,
+		Id = 2005221226,
 		Price = 149,
 		Name = "Super Luck Potion",
 		Description = "x3 luck on egg rolls for 30 minutes.",
@@ -162,7 +162,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(64, 236, 214),
 	},
 	CashPotion = {
-		Id = 0,
+		Id = 2005287303,
 		Price = 49,
 		Name = "Cash Potion",
 		Description = "x2 income from your sanctuary for 15 minutes.",
@@ -173,7 +173,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 196, 48),
 	},
 	LevelPotion = {
-		Id = 0,
+		Id = 2005299169,
 		Price = 39,
 		Name = "Level Potion",
 		Description = "+5 levels for the dragon you have equipped.",
@@ -183,7 +183,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(77, 163, 255),
 	},
 	MutationPotion = {
-		Id = 0,
+		Id = 2005527247,
 		Price = 99,
 		Name = "Mutation Potion",
 		Description = "Upgrades the mutation of your equipped dragon (always better).",
@@ -192,7 +192,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(190, 120, 255),
 	},
 	SpinPack = {
-		Id = 0,
+		Id = 2006505259,
 		Price = 49,
 		Name = "5 Spins",
 		Description = "+5 spins for the wheel on Spin Island.",
@@ -212,7 +212,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 70, 150),
 	},
 	CashPackSmall = {
-		Id = 0,
+		Id = 2005449230,
 		Price = 25,
 		Name = "Pouch of Cash",
 		Description = "30 minutes of your income (at least $5K).",
@@ -223,7 +223,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 196, 48),
 	},
 	CashPackMedium = {
-		Id = 0,
+		Id = 2005257145,
 		Price = 99,
 		Name = "Chest of Cash",
 		Description = "3 hours of your income (at least $50K).",
@@ -234,7 +234,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 160, 40),
 	},
 	CashPackLarge = {
-		Id = 0,
+		Id = 2005137219,
 		Price = 249,
 		Name = "Vault of Cash",
 		Description = "12 hours of your income (at least $250K).",
@@ -247,7 +247,7 @@ MonetizationConfig.Products = {
 
 	-- egg hunting
 	EggRadar = {
-		Id = 0,
+		Id = 2007081223,
 		Price = 49,
 		Name = "Egg Radar",
 		Description = "Marks every egg on the map, even through walls, for 30 minutes.",
@@ -258,7 +258,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 140, 60),
 	},
 	EggMagnet = {
-		Id = 0,
+		Id = 2005011254,
 		Price = 39,
 		Name = "Egg Magnet",
 		Description = "Pick eggs up from twice as far away for 15 minutes.",
@@ -269,7 +269,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 90, 120),
 	},
 	HatchBoost = {
-		Id = 0,
+		Id = 2006589185,
 		Price = 59,
 		Name = "Fast Hatch",
 		Description = "Eggs you put in your nest hatch twice as fast for 30 minutes.",
@@ -280,7 +280,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(255, 205, 60),
 	},
 	LuckyEggCall = {
-		Id = 0,
+		Id = 2005065190,
 		Price = 99,
 		Name = "Lucky Egg Call",
 		Description = "3 rare eggs with x25 to x100 luck appear around you for 5 minutes.",
@@ -292,7 +292,7 @@ MonetizationConfig.Products = {
 		Color = Color3.fromRGB(190, 120, 255),
 	},
 	MythicBundle = {
-		Id = 0,
+		Id = 2005485189,
 		Price = 249,
 		Name = "Mythic Bundle",
 		Description = "3 Celestial Eggs with x50 luck, straight into your egg bag.",

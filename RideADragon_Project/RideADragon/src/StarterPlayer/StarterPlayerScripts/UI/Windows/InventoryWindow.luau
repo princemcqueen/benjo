@@ -84,26 +84,56 @@ local function frameCamera(cam: Camera, model: Model, tightness: number, orbit: 
 	return center, dist, size
 end
 
--- Shared build queue so scrolling never builds more than a couple of models per frame.
+-- Shared build queue so scrolling never builds too much in one frame: jobs run until the frame
+-- budget is spent (a stale job costs nothing, a clone is cheap, a fresh build is the heavy one).
 local buildQueue: { () -> () } = {}
 local queueConn: RBXScriptConnection? = nil
+local FRAME_BUDGET = 0.006
 local function enqueue(fn: () -> ())
 	table.insert(buildQueue, fn)
 	if not queueConn then
 		queueConn = RunService.Heartbeat:Connect(function()
-			for _ = 1, 2 do
+			local t0 = os.clock()
+			repeat
 				local job = table.remove(buildQueue, 1)
 				if not job then
 					break
 				end
 				job()
-			end
+			until os.clock() - t0 > FRAME_BUDGET
 			if #buildQueue == 0 and queueConn then
 				queueConn:Disconnect()
 				queueConn = nil
 			end
 		end)
 	end
+end
+
+-- A built model is kept per species + mutation and cloned for every card that shows it: a
+-- collection of 36 dragons has far fewer different looks, and a clone costs a fraction of a build.
+local templates: { [string]: Model } = {}
+local templateOrder: { string } = {}
+local MAX_TEMPLATES = 48
+local function cardModel(speciesId: string, mutation: string?, yaw: number): Model?
+	local key = speciesId .. "|" .. (mutation or "None")
+	local t = templates[key]
+	if not t then
+		t = buildPreview(speciesId, mutation, yaw)
+		if not t then
+			return nil
+		end
+		templates[key] = t
+		table.insert(templateOrder, key)
+		if #templateOrder > MAX_TEMPLATES then
+			local old = table.remove(templateOrder, 1)
+			local m = templates[old]
+			templates[old] = nil
+			if m then
+				m:Destroy()
+			end
+		end
+	end
+	return t:Clone()
 end
 
 -- ============================================================== card
@@ -284,7 +314,7 @@ function Card:SetModel(record)
 		if self.Token ~= token or not self.Root.Parent then
 			return
 		end
-		local model = buildPreview(record.SpeciesId, record.Mutation, math.rad(180 - 32))
+		local model = cardModel(record.SpeciesId, record.Mutation, math.rad(180 - 32))
 		if not model then
 			return
 		end
@@ -781,13 +811,22 @@ function InventoryWindow:Relayout()
 	local total = math.max(0, rows * (ch + gap) - gap) + gap
 	grid.CanvasSize = UDim2.fromOffset(0, total)
 	self.Canvas.Size = UDim2.new(1, -(grid.ScrollBarThickness + 2), 0, total)
-	-- force full rebind (positions changed)
-	for i, card in self.Cards do
-		self.Cards[i] = nil
-		card:Unbind()
-		table.insert(self.Pool, card)
-	end
+	-- (UpdateVisible re-places every visible card and recycles the ones that no longer fit; cards keep
+	-- their 3D model, so a relayout never rebuilds the dragons)
 	self:UpdateVisible()
+end
+
+-- A pooled card that already shows this look is reused first (no rebuild of its model).
+function InventoryWindow:TakeCard(record)
+	local key = record.SpeciesId .. "|" .. (record.Mutation or "None")
+	local pool = self.Pool
+	for i = #pool, 1, -1 do
+		local c = pool[i]
+		if c.ModelKey == key and c.Model then
+			return table.remove(pool, i)
+		end
+	end
+	return table.remove(pool) or Card.new(self)
 end
 
 function InventoryWindow:UpdateVisible()
@@ -822,7 +861,7 @@ function InventoryWindow:UpdateVisible()
 		if record then
 			local card = self.Cards[i]
 			if not card then
-				card = table.remove(self.Pool) or Card.new(self)
+				card = self:TakeCard(record)
 				self.Cards[i] = card
 			end
 			local idx = i - 1
@@ -1285,9 +1324,24 @@ function InventoryWindow:OnOpen(args)
 				end
 			end)
 		end
-		for _, k in { "Dragons", "EquippedDragon", "Nests", "Cash", "Upgrades" } do
+		for _, k in { "Dragons", "EquippedDragon", "Nests", "Upgrades" } do
 			D.changed(k):Connect(changed)
 		end
+		-- cash ticks every second: only the buttons that depend on it (FEED / MUTATE) are refreshed
+		-- (a full rebuild here used to rebind every card every second)
+		local cashPending = false
+		D.changed("Cash"):Connect(function()
+			if cashPending or not self.Root.Visible then
+				return
+			end
+			cashPending = true
+			task.delay(0.5, function()
+				cashPending = false
+				if self.Root.Visible then
+					self:RefreshDetails()
+				end
+			end)
+		end)
 		Players.LocalPlayer:GetAttributeChangedSignal("Riding"):Connect(function()
 			if self.Root.Visible then
 				self:RefreshDetails()
