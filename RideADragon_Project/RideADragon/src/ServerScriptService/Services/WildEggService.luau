@@ -146,7 +146,7 @@ function WildEggService.Spawn(tierId: string?)
 		Egg = eggType,
 		Luck = luck,
 		Position = position + Vector3.new(0, 2.2, 0),
-		Area = area.Name,
+		Area = area.Label or area.Name,
 		Region = area.Region,
 		EndsAt = Workspace:GetServerTimeNow() + WildEggConfig.Lifetime,
 		Claimed = false,

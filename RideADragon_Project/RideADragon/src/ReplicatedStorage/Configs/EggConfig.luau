@@ -318,7 +318,7 @@ EggConfig.IncubatorPrices = { 0, 0, 1500, 20000, 250000, 3000000 }
 EggConfig.IncubatorStart = 2
 
 -- Spawn areas that roll their luck twice (keep the best).
-EggConfig.RareAreas = { Ruins = true, Cave = true, Pillar = true, Island = true, Falls = true, Plateau = true, Pass = true }
+EggConfig.RareAreas = { Ruins = true, Cave = true, Pillar = true, Island = true, Falls = true, Plateau = true, Pass = true, CrystalIsle = true, BloomIsle = true, EmberIsle = true, FrostIsle = true }
 
 -- Which egg types spawn in each region (weights).
 EggConfig.Regions = {
@@ -351,12 +351,14 @@ EggConfig.LuckRolls = {
 
 -- Personal egg spawning (each player has their own eggs in the world).
 EggConfig.Spawning = {
-	MaxActive = 18,
+	MaxActive = 24,
 	MaxActivePerRegion = 18, -- (legacy name)
 	ScatterRadius = 70, -- eggs appear around a spawn area, not on one exact spot
 	-- Roaming eggs: this share of every egg appears at a completely random place of the land (the
 	-- rest scatter around the named areas, where the rare finds are). Wild eggs always roam.
 	RoamingShare = 0.5,
+	IslandShare = 0.3, -- of the roaming eggs: this share appears on a sky island (WorldConfig.SkyIslands)
+	IslandInset = 0.8, -- eggs stay this far inside the island's plate (share of its radius)
 	WorldBox = { MinX = -980, MaxX = 860, MinZ = -960, MaxZ = 900 },
 	RoamAvoid = { "Pillar", "Island" }, -- areas that never name a roaming egg (sky / island spots)
 	RoamMinSeparation = 260, -- a roaming wild egg appears at least this far from the previous one

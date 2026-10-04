@@ -16,9 +16,14 @@ HOW WE WORK (the owner writes Bosnian; answer in Bosnian, code and comments in E
   - The owner sends the finished Robux pass / product ids themselves: do NOT touch MonetizationConfig.
     (Cash Potion still has Id 0 - the developer product is missing.)
 
-THE OWNER'S WISHES THAT ARE NOT DONE YET (TEST 10, in this order)
-  1. MORE and NEW EGGS: more eggs on the map (EggConfig.Spawning.MaxActive / RoamingShare) and new egg types
-     (EggConfig.Eggs + region weights + egg look + Index / shop text). Random placement is already in.
+DONE IN TEST 10: four sky islands + random eggs on land and islands, the owner's statue on the plaza.
+
+THE OWNER'S WISHES THAT ARE NOT DONE YET (in this order)
+  0. SOUNDS: the footstep / running sound is heard while flying (find which sound it is: the dragon's
+     Footstep from Animator.OnFootstep, or the default character sounds) and the dragon sounds are missing
+     (AudioConfig WingFlap / Roar / Eat... have empty ids: the owner pastes Creator Store ids; the hooks
+     are in AnimationController.OnFlap / OnFootstep and AudioController.play3D).
+  1. NEW EGG TYPES (EggConfig.Eggs + region weights + egg look + Index / shop text); more islands / maps.
   2. IMPROVE THE MAP: more landmarks / hidden egg spots / ambient life (birds, butterflies), weather and
      events (roadmap "Series B": Frostpeak, Ember Caldera, Skyreach, treasure, Golden Dragon, cinematic
      discoveries, RegionService). World code: ServerScriptService/World (Haven, Landmarks, Props, Village).

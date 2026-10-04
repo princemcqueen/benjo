@@ -30,6 +30,8 @@ local ORDER = {
 	"BondService",
 	"EggService",
 	"WildEggService",
+	"IslandService",
+	"StatueService",
 	"CoinService",
 	"ShopService",
 	"MonetizationService",
