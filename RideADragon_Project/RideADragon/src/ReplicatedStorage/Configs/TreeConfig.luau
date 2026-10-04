@@ -18,7 +18,7 @@
 	  Income         x(1+b) perch income                          BoostService.Multiplier("Coins")
 	  Offline        x(1+b) offline earning rate and cap          EconomyService
 	  Wisdom         x(1+b) player XP                             LevelService
-	  Recycler       x(1+b) cash refunded when releasing          DragonService.Release
+	  Recycler       x(1+b) cash paid when selling a dragon           DragonService.Sell
 	  FlySpeed       x(1+b) cruise speed                          MountService / DragonController
 	  BoostLong      x(1+b) boost duration                        Locomotion (client stats)
 	  BoostRegen     x(1+b) boost refill speed                    Locomotion (client stats)
@@ -85,7 +85,7 @@ local DEFS = {
 	{ Cat = "Wealth", Id = "Income", Name = "Golden Roots", Icon = "Coin", Color = C3(255, 196, 48), Description = "More income from every perch.", Format = "Percent", Levels = 12, Max = 2.0, Price = { 8e3, 8e10 } },
 	{ Cat = "Wealth", Id = "Offline", Name = "Dream Dens", Icon = "Home", Color = C3(170, 140, 255), Description = "Your dragons earn more while you are away.", Format = "Percent", Levels = 10, Max = 1.0, Price = { 2.5e4, 3e10 } },
 	{ Cat = "Wealth", Id = "Wisdom", Name = "Ancient Wisdom", Icon = "Book", Color = C3(120, 190, 255), Description = "You earn player XP faster.", Format = "Percent", Levels = 10, Max = 1.0, Price = { 1.5e4, 1.5e10 } },
-	{ Cat = "Wealth", Id = "Recycler", Name = "Gentle Goodbye", Icon = "Release", Color = C3(150, 230, 170), Description = "Releasing a dragon refunds more cash.", Format = "Percent", Levels = 8, Max = 4.0, Price = { 5e3, 2e9 } },
+	{ Cat = "Wealth", Id = "Recycler", Name = "Gentle Goodbye", Icon = "Release", Color = C3(150, 230, 170), Description = "Selling a dragon pays more cash.", Format = "Percent", Levels = 8, Max = 4.0, Price = { 5e3, 2e9 } },
 	-- FLIGHT
 	{ Cat = "Flight", Id = "FlySpeed", Name = "Wind Wings", Icon = "Wind", Color = C3(77, 163, 255), Description = "Your dragons fly faster.", Format = "Percent", Levels = 12, Max = 0.5, Price = { 6e3, 4e10 } },
 	{ Cat = "Flight", Id = "BoostLong", Name = "Deep Breath", Icon = "Speed", Color = C3(255, 150, 70), Description = "Your boost lasts longer.", Format = "Percent", Levels = 10, Max = 1.5, Price = { 1e4, 1.2e10 } },
@@ -149,9 +149,9 @@ function TreeConfig.eggCapacity(data): number
 		+ MonetizationConfig.passSlots(data)
 end
 
--- Seconds of the dragon's income refunded when it is released (Gentle Goodbye).
+-- Seconds of the dragon's base income paid when it is sold (Gentle Goodbye adds to it).
 function TreeConfig.refundSeconds(data): number
-	return EconomyConfig.ReleaseRefundSeconds * (1 + TreeConfig.bonus(data, "Recycler"))
+	return EconomyConfig.SellSeconds * (1 + TreeConfig.bonus(data, "Recycler"))
 end
 
 -- Levels bought / levels available inside a category (0..1).

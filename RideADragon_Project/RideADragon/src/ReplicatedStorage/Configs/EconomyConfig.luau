@@ -81,18 +81,24 @@ EconomyConfig.StartingNests = 2
 EconomyConfig.OfflineCapSeconds = 2 * 3600
 EconomyConfig.OfflineRate = 0.5
 
--- Releasing a dragon refunds this many seconds of its income.
-EconomyConfig.ReleaseRefundSeconds = 30
+-- SELLING a dragon pays this many seconds of its BASE income (species income x mutation - the level
+-- does not count, so feeding a dragon and selling it can never make money). The Gentle Goodbye branch
+-- of the Great Tree adds to it. Exclusive (Robux) dragons cannot be sold.
+EconomyConfig.SellSeconds = 300
+EconomyConfig.ReleaseRefundSeconds = EconomyConfig.SellSeconds -- (old name)
 
 -- Purchases at/above this fraction of current cash ask for confirmation.
 EconomyConfig.ConfirmFraction = 0.4
 EconomyConfig.ConfirmMinimum = 25000
 
 -- Feeding: every meal gives a fixed share of the XP the dragon needs for its
--- next level (three meals per level at any level); the price grows instead.
+-- next level (three meals per level at any level); the price grows instead. One level costs 3 meals
+-- = 12 x base income x level^1.15 and adds 8% of the base income per second: it pays itself back in
+-- about 150 x level^1.15 seconds (2.5 minutes at level 1, ~35 minutes at level 10, ~3.5 hours at 49).
 EconomyConfig.FeedFraction = 0.34
+EconomyConfig.FeedExponent = 1.15
 function EconomyConfig.feedCost(baseCost: number, level: number): number
-	return math.floor(baseCost * level ^ 1.35 + 0.5)
+	return math.floor(baseCost * level ^ EconomyConfig.FeedExponent + 0.5)
 end
 function EconomyConfig.feedXP(xpToNext: number): number
 	return math.max(1, math.ceil(xpToNext * EconomyConfig.FeedFraction))

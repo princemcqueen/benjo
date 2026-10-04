@@ -91,6 +91,7 @@ local TEMPLATE = {
 	Spin = { NextFree = 0, Tickets = 3 },
 	Race = { Best = 0, Runs = 0, Wins = 0, MonthKey = "", MonthBest = 0, Crowns = {} }, -- see RaceService
 	Purchases = { Receipts = {}, Robux = 0 },
+	Rank = 0, -- 0 = none, 1..5 = RankConfig.Ranks (set by the owner with /rank, see RankService)
 	CreatedAt = 0,
 	LastLogin = 0,
 	LastLogout = 0,

@@ -1,6 +1,17 @@
 RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 9)
 ======================================================
 
+NEW IN TEST 9 (short)
+  - ADMIN /give system (from your TEST8_ADMIN_GIVE zip) is in, with your MonetizationConfig untouched
+    (Cash Potion still has Id 0).
+  - RANKS: five ranks with titles + the chat command  /rank <player|me> <rank|none>  (see RANKS below).
+  - SELL dragons: SELL button with the price on every dragon + SELL SHOWN for a whole filtered list.
+  - ECONOMY lowered: a smoother income ladder, cheaper and fair feeding (see ECONOMY below).
+  - The START / FINISH beam of the race no longer hangs across the first ring.
+  - Eggs appear at random places of the whole land; wild eggs always roam.
+  - The dragon cards in the inventory show their 3D models again (they stayed on the grey icon).
+  - BATTLE HALL duels (Pokemon-style) are in as well (they were TEST 9 before the rest).
+
 CONTENTS
   RideADragon_Dev.rbxlx   Ready-to-open place file (Roblox Studio: File > Open).
                           Built from the source below at the time of this snapshot.
@@ -80,6 +91,48 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     arena, on foot, or while racing. A TRAINING DUMMY in the middle takes hits, shows damage
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
+
+ADMIN COMMANDS + RANKS (new in TEST 9)  -  see ADMIN_COMMANDS.txt
+  Who is the owner: ReplicatedStorage > Configs > AdminConfig (username "Bendzaminoo", extra user ids,
+  the experience creator, and EVERYBODY inside Roblox Studio so it can be tested).
+  Typed in the chat (the new chat: nobody sees the line, the client sends it to the server which checks
+  who you are; the old chat: the server reads Player.Chatted):
+    /give me Cash 10000   /give PlayerName PrinceDragon   /givehelp          (see ADMIN_COMMANDS.txt)
+    /rank PlayerName vip          vip / mod / admin / coowner / owner, or 1-5, or none to remove
+    /rank me owner                (the owner may rank himself)
+    /ranks                        the five ranks and who has one in this server
+    /rankhelp
+  RANKS (ReplicatedStorage > Configs > RankConfig - change titles, epithets, colours there):
+    1 VIP        Friend of the Dragons   gold      tag + chat colour
+    2 MOD        Keeper of the Peace     blue      tag + chat colour
+    3 ADMIN      Warden of the Realm     orange    tag + chat colour
+    4 CO-OWNER   Dragon Lord             purple    tag + chat colour + may use /give and /rank up to ADMIN
+    5 OWNER      Dragon King             red       tag + chat colour + everything
+  A rank shows as a coloured tag over the character (title + epithet; CO-OWNER and OWNER with stars),
+  as a coloured [TITLE] in front of every chat line and in /ranks. It is saved with the player (Rank).
+  The owner can also rank somebody who is not in the server: /rank TheirUsername vip - they get it
+  the next time they join (stored in the DataStore "RankGrants_v1"). A CO-OWNER cannot hand out
+  CO-OWNER / OWNER and cannot change somebody who ranks as high as they do.
+
+SELLING DRAGONS (new in TEST 9)
+  - SELL button in the dragon details shows the price: 300 seconds of the dragon's BASE income
+    (species income x mutation). The level does not count, so feeding a dragon and selling it can
+    never make money. The Gentle Goodbye branch of the Great Tree pays more (up to x5).
+  - SELL SHOWN (bottom of the Dragons window): sells every dragon of the current filter / search at once
+    after ONE confirmation (count + total, a warning when Epic or better are in it). Locked, equipped,
+    resting-on-a-perch and Exclusive dragons are always kept; one dragon always stays.
+  - Exclusive (Robux) dragons cannot be sold. Server: DragonService Sell / SellBulk (Release = old name).
+
+ECONOMY (lowered in TEST 9)  -  ReplicatedStorage > Configs > DragonConfig / EconomyConfig
+  The income of the regular dragons was inflating about x20-x80 per rarity (a Secret dragon made $642M/s
+  while an Epic made $6K/s). New base income per second at level 1, no mutation:
+    Common 2-4.5, Uncommon 9-19, Rare 60-160, Epic 520-1,100, Legendary 6.5K-12.5K, Mythic 55K-85K,
+    Secret 650K-1.1M   (about x5-x12 per rarity; level +8% per level, mutations x1.5 to x25)
+  Feeding was nearly pointless from level 5 on (one level paid back after hours): now a meal costs
+  4 x base income x level^1.15, so a level pays itself back in about 2.5 min at level 1, 35 min at level 10,
+  3.5 h at level 49. Saves are refreshed on load, so existing dragons get the new numbers.
+  The four Robux exclusives (Owner, PRINCE, N2RC1S, M0NICA) keep their own scale: they are the paid,
+  strongest dragons, and their pass descriptions quote those numbers. Tell me if they should come down too.
 
 BATTLE HALL: POKEMON-STYLE DUELS (new in TEST 9)  -  Teleport menu > BATTLE HALL (or the hall in the village)
   A turn-based duel in a fixed scene, like the old Pokemon games: your dragon in front on the left,

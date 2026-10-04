@@ -3,6 +3,11 @@
 	Species definitions, rarity table, level curve and stat formulas.
 	Stats here are BASE values at level 1 with no mutation.
 
+	INCOME LADDER (base $/s at level 1, no mutation): Common 2-4.5, Uncommon 9-19, Rare 60-160, Epic 520-1,100,
+	Legendary 6.5K-12.5K, Mythic 55K-85K, Secret 650K-1.1M (about x5-x12 per rarity). Level adds +8% per level,
+	mutations x1.5 to x25. FeedCost = 4 x base income (see EconomyConfig.feedCost). The four Robux exclusives
+	keep their own scale (they are the paid, strongest dragons).
+
 	Speed / FlightSpeed are "power" stats shown in the UI (can reach millions).
 	Actual movement speed in studs/s is derived with a log curve in GameConfig
 	so higher tiers always feel faster without breaking streaming/physics.
@@ -55,7 +60,7 @@ DragonConfig.Species = {
 		Income = 2,
 		Scale = 1.0,
 		Handling = { Turn = 1.0, Accel = 1.0, Agility = 1.0 },
-		FeedCost = 25,
+		FeedCost = 8,
 		Order = 1,
 	},
 	PebbleDrake = {
@@ -67,7 +72,7 @@ DragonConfig.Species = {
 		Income = 2.5,
 		Scale = 1.0,
 		Handling = { Turn = 1.0, Accel = 1.0, Agility = 1.0 },
-		FeedCost = 30,
+		FeedCost = 10,
 		Order = 2,
 	},
 	EmberPup = {
@@ -79,7 +84,7 @@ DragonConfig.Species = {
 		Income = 3,
 		Scale = 0.95,
 		Handling = { Turn = 1.0, Accel = 1.0, Agility = 1.0 },
-		FeedCost = 36,
+		FeedCost = 12,
 		Order = 3,
 	},
 	SproutDrake = {
@@ -91,7 +96,7 @@ DragonConfig.Species = {
 		Income = 3.5,
 		Scale = 1.0,
 		Handling = { Turn = 1.0, Accel = 1.0, Agility = 1.0 },
-		FeedCost = 42,
+		FeedCost = 14,
 		Order = 4,
 	},
 	PuddleWyrm = {
@@ -103,7 +108,7 @@ DragonConfig.Species = {
 		Income = 4,
 		Scale = 1.0,
 		Handling = { Turn = 1.0, Accel = 1.0, Agility = 1.0 },
-		FeedCost = 48,
+		FeedCost = 16,
 		Order = 5,
 	},
 	SandScuttler = {
@@ -115,7 +120,7 @@ DragonConfig.Species = {
 		Income = 4.5,
 		Scale = 1.0,
 		Handling = { Turn = 1.0, Accel = 1.0, Agility = 1.0 },
-		FeedCost = 54,
+		FeedCost = 18,
 		Order = 6,
 	},
 	ForestWyvern = {
@@ -127,7 +132,7 @@ DragonConfig.Species = {
 		Income = 9,
 		Scale = 1.05,
 		Handling = { Turn = 1.1, Accel = 1.08, Agility = 1.12 },
-		FeedCost = 108,
+		FeedCost = 36,
 		Order = 7,
 	},
 	CoralGlider = {
@@ -139,7 +144,7 @@ DragonConfig.Species = {
 		Income = 11,
 		Scale = 1.05,
 		Handling = { Turn = 1.1, Accel = 1.08, Agility = 1.12 },
-		FeedCost = 132,
+		FeedCost = 44,
 		Order = 8,
 	},
 	Thornback = {
@@ -151,7 +156,7 @@ DragonConfig.Species = {
 		Income = 12.5,
 		Scale = 1.1,
 		Handling = { Turn = 1.1, Accel = 1.08, Agility = 1.12 },
-		FeedCost = 150,
+		FeedCost = 50,
 		Order = 9,
 	},
 	Frostling = {
@@ -163,7 +168,7 @@ DragonConfig.Species = {
 		Income = 14,
 		Scale = 1.05,
 		Handling = { Turn = 1.1, Accel = 1.08, Agility = 1.12 },
-		FeedCost = 168,
+		FeedCost = 56,
 		Order = 10,
 	},
 	SunbeamDrake = {
@@ -175,7 +180,7 @@ DragonConfig.Species = {
 		Income = 16,
 		Scale = 1.05,
 		Handling = { Turn = 1.1, Accel = 1.08, Agility = 1.12 },
-		FeedCost = 192,
+		FeedCost = 64,
 		Order = 11,
 	},
 	NightWyvern = {
@@ -187,7 +192,7 @@ DragonConfig.Species = {
 		Income = 19,
 		Scale = 1.1,
 		Handling = { Turn = 1.1, Accel = 1.08, Agility = 1.12 },
-		FeedCost = 228,
+		FeedCost = 76,
 		Order = 12,
 	},
 	AquaSerpent = {
@@ -199,7 +204,7 @@ DragonConfig.Species = {
 		Income = 60,
 		Scale = 1.15,
 		Handling = { Turn = 1.12, Accel = 1.1, Agility = 1.2 },
-		FeedCost = 720,
+		FeedCost = 240,
 		Order = 13,
 	},
 	CrystalWyvern = {
@@ -211,7 +216,7 @@ DragonConfig.Species = {
 		Income = 95,
 		Scale = 1.1,
 		Handling = { Turn = 1.12, Accel = 1.1, Agility = 1.2 },
-		FeedCost = 1140,
+		FeedCost = 380,
 		Order = 14,
 	},
 	StormHawk = {
@@ -223,7 +228,7 @@ DragonConfig.Species = {
 		Income = 115,
 		Scale = 1.15,
 		Handling = { Turn = 1.12, Accel = 1.1, Agility = 1.2 },
-		FeedCost = 1380,
+		FeedCost = 460,
 		Order = 15,
 	},
 	MagmaBrute = {
@@ -235,7 +240,7 @@ DragonConfig.Species = {
 		Income = 135,
 		Scale = 1.2,
 		Handling = { Turn = 1.12, Accel = 1.1, Agility = 1.2 },
-		FeedCost = 1620,
+		FeedCost = 540,
 		Order = 16,
 	},
 	JadeSerpent = {
@@ -247,7 +252,7 @@ DragonConfig.Species = {
 		Income = 160,
 		Scale = 1.2,
 		Handling = { Turn = 1.12, Accel = 1.1, Agility = 1.2 },
-		FeedCost = 1920,
+		FeedCost = 640,
 		Order = 17,
 	},
 	FrostDragon = {
@@ -256,10 +261,10 @@ DragonConfig.Species = {
 		Description = "Born in blizzards above Frostpeak. Leaves a trail of glittering frost.",
 		Speed = 42000,
 		FlightSpeed = 55000,
-		Income = 1100,
+		Income = 520,
 		Scale = 1.3,
 		Handling = { Turn = 1.05, Accel = 1.15, Agility = 1.1 },
-		FeedCost = 13200,
+		FeedCost = 2080,
 		Order = 18,
 	},
 	ThunderDragon = {
@@ -268,10 +273,10 @@ DragonConfig.Species = {
 		Description = "Rides the storm front. Lightning crackles along its wings.",
 		Speed = 68000,
 		FlightSpeed = 92000,
-		Income = 1650,
+		Income = 640,
 		Scale = 1.3,
 		Handling = { Turn = 1.05, Accel = 1.15, Agility = 1.1 },
-		FeedCost = 19800,
+		FeedCost = 2560,
 		Order = 19,
 	},
 	ToxicWyrm = {
@@ -280,10 +285,10 @@ DragonConfig.Species = {
 		Description = "Do not touch the glowing spikes.",
 		Speed = 76000,
 		FlightSpeed = 100000,
-		Income = 1900,
+		Income = 760,
 		Scale = 1.3,
 		Handling = { Turn = 1.05, Accel = 1.15, Agility = 1.1 },
-		FeedCost = 22800,
+		FeedCost = 3040,
 		Order = 20,
 	},
 	BloodmoonDrake = {
@@ -292,10 +297,10 @@ DragonConfig.Species = {
 		Description = "Appears only when the moon turns red.",
 		Speed = 88000,
 		FlightSpeed = 115000,
-		Income = 2300,
+		Income = 900,
 		Scale = 1.35,
 		Handling = { Turn = 1.05, Accel = 1.15, Agility = 1.1 },
-		FeedCost = 27600,
+		FeedCost = 3600,
 		Order = 21,
 	},
 	SakuraSpirit = {
@@ -304,10 +309,10 @@ DragonConfig.Species = {
 		Description = "Petals swirl in its wake as it dances through the sky.",
 		Speed = 100000,
 		FlightSpeed = 130000,
-		Income = 2800,
+		Income = 1100,
 		Scale = 1.35,
 		Handling = { Turn = 1.05, Accel = 1.15, Agility = 1.1 },
-		FeedCost = 33600,
+		FeedCost = 4400,
 		Order = 22,
 	},
 	InfernoDragon = {
@@ -316,10 +321,10 @@ DragonConfig.Species = {
 		Description = "A walking volcano. The air shimmers wherever it lands.",
 		Speed = 1800000,
 		FlightSpeed = 2400000,
-		Income = 92500,
+		Income = 6500,
 		Scale = 1.55,
 		Handling = { Turn = 0.95, Accel = 1.1, Agility = 1.0 },
-		FeedCost = 1110000,
+		FeedCost = 26000,
 		Order = 23,
 	},
 	GoldenEmperor = {
@@ -328,10 +333,10 @@ DragonConfig.Species = {
 		Description = "Sovereign of the old dragon courts, crowned in living gold.",
 		Speed = 2600000,
 		FlightSpeed = 3100000,
-		Income = 140000,
+		Income = 8500,
 		Scale = 1.6,
 		Handling = { Turn = 0.95, Accel = 1.1, Agility = 1.0 },
-		FeedCost = 1680000,
+		FeedCost = 34000,
 		Order = 24,
 	},
 	AbyssLeviathan = {
@@ -340,10 +345,10 @@ DragonConfig.Species = {
 		Description = "Rises from the deepest trench, glowing like the stars below.",
 		Speed = 3200000,
 		FlightSpeed = 3900000,
-		Income = 175000,
+		Income = 10500,
 		Scale = 1.65,
 		Handling = { Turn = 0.95, Accel = 1.1, Agility = 1.0 },
-		FeedCost = 2100000,
+		FeedCost = 42000,
 		Order = 25,
 	},
 	PhoenixDrake = {
@@ -352,10 +357,10 @@ DragonConfig.Species = {
 		Description = "Burns brighter every time it is reborn.",
 		Speed = 3800000,
 		FlightSpeed = 4600000,
-		Income = 210000,
+		Income = 12500,
 		Scale = 1.6,
 		Handling = { Turn = 0.95, Accel = 1.1, Agility = 1.0 },
-		FeedCost = 2520000,
+		FeedCost = 50000,
 		Order = 26,
 	},
 	CelestialDragon = {
@@ -364,10 +369,10 @@ DragonConfig.Species = {
 		Description = "Swims through the clouds of the upper sky, haloed in starlight.",
 		Speed = 85000000,
 		FlightSpeed = 110000000,
-		Income = 4200000,
+		Income = 55000,
 		Scale = 1.7,
 		Handling = { Turn = 1.1, Accel = 1.25, Agility = 1.15 },
-		FeedCost = 50400000,
+		FeedCost = 220000,
 		Order = 27,
 	},
 	GalaxyDragon = {
@@ -376,10 +381,10 @@ DragonConfig.Species = {
 		Description = "Its wings hold entire constellations.",
 		Speed = 120000000,
 		FlightSpeed = 160000000,
-		Income = 6500000,
+		Income = 85000,
 		Scale = 1.8,
 		Handling = { Turn = 1.1, Accel = 1.25, Agility = 1.15 },
-		FeedCost = 78000000,
+		FeedCost = 340000,
 		Order = 28,
 	},
 	VoidDragon = {
@@ -388,10 +393,10 @@ DragonConfig.Species = {
 		Description = "Seen only at the edge of the world. Light bends around it.",
 		Speed = 2500000000,
 		FlightSpeed = 3200000000,
-		Income = 180000000,
+		Income = 650000,
 		Scale = 1.85,
 		Handling = { Turn = 1.1, Accel = 1.4, Agility = 1.15 },
-		FeedCost = 2160000000,
+		FeedCost = 2600000,
 		Order = 29,
 	},
 	EternalDragon = {
@@ -400,10 +405,10 @@ DragonConfig.Species = {
 		Description = "Older than the mountains. Its runes never stop turning.",
 		Speed = 4000000000,
 		FlightSpeed = 5500000000,
-		Income = 300000000,
+		Income = 1100000,
 		Scale = 2.0,
 		Handling = { Turn = 1.1, Accel = 1.4, Agility = 1.15 },
-		FeedCost = 3600000000,
+		FeedCost = 4400000,
 		Order = 30,
 	},
 	-- Robux exclusive (Owner Dragon game pass): the strongest dragon in the game.

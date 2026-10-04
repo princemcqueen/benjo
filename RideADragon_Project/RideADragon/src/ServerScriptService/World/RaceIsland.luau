@@ -128,12 +128,16 @@ local function startArea(b, model)
 			b:box(V(6, 0.3, 3), line + V(i * 6 + 3, 0, j * 3 - 1.5), dark and BLACK or WHITE, M.SmoothPlastic, NO_COLLIDE)
 		end
 	end
+	-- The sign beam rides ABOVE the Gate_0 ring (centre y 16, radius 34, number plate on top): it used
+	-- to hang at y 31 right across the ring's opening, in the racers' way, and the lettering filled the
+	-- screen at the start. The posts are tall enough to carry it; the beam itself never collides.
+	local beamY = arch.Position.Y + 34 + 16
 	for _, sx in { -1, 1 } do
-		b:box(V(4, 26, 4), V(sx * 44, 13, arch.Position.Z), RED, M.SmoothPlastic)
-		b:box(V(5.2, 1.4, 5.2), V(sx * 44, 26.7, arch.Position.Z), YELLOW, M.SmoothPlastic)
+		b:box(V(4, beamY - 2, 4), V(sx * 44, (beamY - 2) / 2, arch.Position.Z), RED, M.SmoothPlastic)
+		b:box(V(5.2, 1.4, 5.2), V(sx * 44, beamY - 2 + 0.7, arch.Position.Z), YELLOW, M.SmoothPlastic)
 		b:banner(CF(sx * 44, 17, arch.Position.Z + 2.4) * ANG(0, math.pi, 0), 5, 14, BLUE)
 	end
-	local top = b:box(V(92, 5.5, 3.2), V(0, 31, arch.Position.Z), YELLOW, M.SmoothPlastic)
+	local top = b:box(V(92, 5.5, 3.2), V(0, beamY, arch.Position.Z), YELLOW, M.SmoothPlastic, NO_COLLIDE)
 	sign(top, Enum.NormalId.Front, "START / FINISH", RED, 30, "ArchSign")
 	sign(top, Enum.NormalId.Back, "START / FINISH", RED, 30, "ArchSignBack")
 end

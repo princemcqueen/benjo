@@ -15,7 +15,8 @@
 
 	Net (domain "Dragon"):
 	  Equip { Id }            Unequip {}
-	  Lock { Id, Locked }     Release { Id }            -> { Refund }
+	  Lock { Id, Locked }     Sell { Id }               -> { Refund }   (Release = old name)
+	  SellBulk { Ids }        -> { Sold, Cash, Skipped }
 	  Feed { Id }             -> { Levels, Level, Cost }
 	  Mutate { Id }           -> { Improved, Mutation, Cost }
 	  Place { Id, Slot? }     -> { Slot, Swapped? }     (sanctuary perch)
@@ -35,7 +36,6 @@ local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local WorldConfig = require(Configs:WaitForChild("WorldConfig"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local DragonService = {}
 DragonService.Added = Signal.new()
@@ -328,7 +328,22 @@ local function handleLock(player: Player, p)
 	return true, { Locked = p.Locked }
 end
 
-local function handleRelease(player: Player, p)
+-- Why a dragon cannot be sold right now (nil = it can): locked, exclusive, ridden.
+local function saleBlock(player: Player, record, uid: string): (string?, string?)
+	if record.Locked then
+		return "LOCKED", "Unlock this dragon before selling it."
+	end
+	if not DragonStats.canSellSpecies(record.SpeciesId) then
+		return "EXCLUSIVE", "Exclusive dragons cannot be sold."
+	end
+	if ridingThis(player, uid) then
+		return "RIDING", "Dismount before selling the dragon you are riding."
+	end
+	return nil, nil
+end
+
+-- Sell { Id } (also: Release, the old name) -> { Refund }
+local function handleSell(player: Player, p)
 	if not Net.check.str(p.Id, 40) then
 		return false, "BAD_REQUEST"
 	end
@@ -337,25 +352,74 @@ local function handleRelease(player: Player, p)
 	if not data or not record then
 		return false, "NOT_FOUND"
 	end
-	if record.Locked then
-		return false, "LOCKED", "Unlock this dragon before releasing it."
+	local code, msg = saleBlock(player, record, p.Id)
+	if code then
+		return false, code, msg
 	end
 	if DragonService.Count(player) <= 1 then
-		return false, "LAST_DRAGON", "You can't release your only dragon."
+		return false, "LAST_DRAGON", "You can't sell your only dragon."
 	end
-	if ridingThis(player, p.Id) then
-		return false, "RIDING", "Dismount before releasing the dragon you are riding."
-	end
-	local refund = math.floor(record.IncomePerSecond * TreeConfig.refundSeconds(data) + 0.5)
+	local refund = DragonStats.sellValue(record, data)
 	DragonService.Remove(player, p.Id)
 	Data.Increment(player, { "Stats", "Released" }, 1)
 	if refund > 0 then
-		Services.EconomyService.Earn(player, refund, "Release")
+		Services.EconomyService.Earn(player, refund, "Sell")
 	end
 	if validateEquipped(player, Data.Get(player)) then
 		DragonService.EquippedChanged:Fire(player, Data.Get(player).EquippedDragon)
 	end
 	return true, { Refund = refund }
+end
+
+-- SellBulk { Ids = { uid, ... } } -> { Sold, Cash, Skipped }
+-- Sells every listed dragon that may be sold: not locked, not exclusive, not ridden, not the equipped
+-- one and not resting on a perch (those are kept); one dragon always stays. At most BULK_MAX per call.
+local BULK_MAX = 60
+local function handleSellBulk(player: Player, p)
+	if type(p.Ids) ~= "table" then
+		return false, "BAD_REQUEST"
+	end
+	local data = Data.Get(player)
+	if not data then
+		return false, "NOT_LOADED"
+	end
+	local seen, ids = {}, {}
+	for _, id in p.Ids do
+		if Net.check.str(id, 40) and not seen[id] then
+			seen[id] = true
+			table.insert(ids, id)
+			if #ids >= BULK_MAX then
+				break
+			end
+		end
+	end
+	if #ids == 0 then
+		return false, "BAD_REQUEST"
+	end
+	local total, sold, skipped = 0, 0, 0
+	for _, id in ids do
+		local record = DragonService.Get(player, id)
+		local ok = record ~= nil
+			and saleBlock(player, record, id) == nil
+			and record.PlacedNestId == ""
+			and data.EquippedDragon ~= id
+			and DragonService.Count(player) > 1
+		if ok then
+			total += DragonStats.sellValue(record, data)
+			DragonService.Remove(player, id)
+			sold += 1
+		else
+			skipped += 1
+		end
+	end
+	if sold > 0 then
+		Data.Increment(player, { "Stats", "Released" }, sold)
+		Services.EconomyService.Earn(player, total, "Sell")
+		if validateEquipped(player, Data.Get(player)) then
+			DragonService.EquippedChanged:Fire(player, Data.Get(player).EquippedDragon)
+		end
+	end
+	return true, { Sold = sold, Cash = total, Skipped = skipped }
 end
 
 local function handleFeed(player: Player, p)
@@ -656,7 +720,9 @@ function DragonService.Init(services)
 	Net.handle("Dragon", "Equip", handleEquip, { Burst = 6, PerSecond = 3 })
 	Net.handle("Dragon", "Unequip", handleUnequip, { Burst = 4, PerSecond = 2 })
 	Net.handle("Dragon", "Lock", handleLock, { Burst = 8, PerSecond = 4 })
-	Net.handle("Dragon", "Release", handleRelease, { Burst = 6, PerSecond = 3 })
+	Net.handle("Dragon", "Sell", handleSell, { Burst = 6, PerSecond = 3 })
+	Net.handle("Dragon", "Release", handleSell, { Burst = 6, PerSecond = 3 }) -- (old name of Sell)
+	Net.handle("Dragon", "SellBulk", handleSellBulk, { Burst = 6, PerSecond = 2 })
 	Net.handle("Dragon", "Feed", handleFeed, { Burst = 8, PerSecond = 5 })
 	Net.handle("Dragon", "Mutate", handleMutate, { Burst = 6, PerSecond = 3 })
 	Net.handle("Dragon", "Place", handlePlace, { Burst = 6, PerSecond = 3 })

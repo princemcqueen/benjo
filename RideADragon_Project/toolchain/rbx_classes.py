@@ -90,8 +90,13 @@ cls("Instance", None, {
 
 cls("Folder", "Instance")
 cls("Configuration", "Instance")
+cls("TextChatCommand", "Instance", {"PrimaryAlias": ("str", ""), "SecondaryAlias": ("str", ""),
+                                     "AutocompleteVisible": ("bool", True), "Enabled": ("bool", True)}, "Triggered")
+cls("TextChatMessageProperties", "Instance", {"PrefixText": ("str", ""), "Text": ("str", ""),
+                                               "Translation": ("str", ""), "MetadataText": ("str", "")})
 cls("DataModel", "Instance", {"PlaceId": ("ro:num", 0), "GameId": ("ro:num", 0), "JobId": ("ro:str", "sim-job"),
-                              "PlaceVersion": ("ro:num", 1), "CreatorId": ("ro:num", 0)},
+                              "PlaceVersion": ("ro:num", 1), "CreatorId": ("ro:num", 0),
+                              "CreatorType": ("ro:Enum:CreatorType", E("CreatorType", "Group"))},
     "Close", creatable=False)
 
 # ---------------------------------------------------------------- values

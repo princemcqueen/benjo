@@ -1,0 +1,45 @@
+RIDE A DRAGON - what is left after TEST 9  (hand-over notes for the next session)
+===================================================================================
+
+HOW WE WORK (the owner writes Bosnian; answer in Bosnian, code and comments in English)
+  - After every feature: lint + tests, build the place, send it.
+      cd RideADragon_Project
+      python3 toolchain/luau_lint.py RideADragon/src
+      python3 toolchain/tests/<name>_test.py                       (simulation tests, 1-8 minutes each)
+      python3 toolchain/ui_qa.py Screen1,Screen2 phone_landscape,phone_portrait,tablet,1920x1080,1280x720
+      python3 toolchain/build_place.py RideADragon/default.project.json RideADragon_Dev.rbxlx
+    (the build also runs the real Luau compiler over every script)
+  - Deliver RideADragon_Dev.rbxlx + a zip of the project (without toolchain/out and __pycache__).
+  - Never use the owner's Roblox Studio until they write "mozes u Studio".
+  - Commit messages end with the Co-Authored-By / Claude-Session trailers; keep tracked __pycache__
+    files out of commits (git checkout -- toolchain/__pycache__ before committing).
+  - The owner sends the finished Robux pass / product ids themselves: do NOT touch MonetizationConfig.
+    (Cash Potion still has Id 0 - the developer product is missing.)
+
+THE OWNER'S WISHES THAT ARE NOT DONE YET (TEST 10, in this order)
+  1. MORE and NEW EGGS: more eggs on the map (EggConfig.Spawning.MaxActive / RoamingShare) and new egg types
+     (EggConfig.Eggs + region weights + egg look + Index / shop text). Random placement is already in.
+  2. IMPROVE THE MAP: more landmarks / hidden egg spots / ambient life (birds, butterflies), weather and
+     events (roadmap "Series B": Frostpeak, Ember Caldera, Skyreach, treasure, Golden Dragon, cinematic
+     discoveries, RegionService). World code: ServerScriptService/World (Haven, Landmarks, Props, Village).
+  3. BETTER ANIMATIONS: dragon idle variety (look around, tail sway, blink, yawn), secondary motion,
+     take-off and landing, wing beat sync, hatch emerge. Code: ReplicatedStorage/Shared/Dragons/Animator.luau,
+     tests: toolchain/tests/anim_test.py, mesh_pose.py, toolchain/pose_sheet.py (renders poses).
+  4. QUESTS (Elder Rowan at WorldConfig.Stations.Quests) + guided TUTORIAL with an objective line in the HUD.
+     QuestConfig exists; QuestService, QuestsWindow, TutorialController do not. The QUESTS button of the
+     HUD does nothing yet.
+  5. Series C: abilities, World Boss, titles, streaks (see the task list in the old notes).
+
+ECONOMY NOTES (TEST 9)
+  - Regular dragons use the new ladder in DragonConfig (see its header); the four Robux exclusives keep
+    their old trillions on purpose - ask the owner whether they should come down too.
+  - Selling: DragonStats.sellValue = 300 s of base income x mutation (level never counts).
+  - If the numbers still feel wrong after a playtest: the knobs are DragonConfig.Species[*].Income,
+    EconomyConfig.FeedExponent / SellSeconds, TreeConfig prices (generate() ranges), EconomyConfig.Upgrades.
+
+KNOWN LIMITS
+  - Everything was tested in the offline simulator, not in real Roblox Studio. The simulator cannot render
+    ViewportFrame previews (dragon cards, Egg Hunter card, Index): check those in Studio.
+  - Audio ids in AudioConfig are empty (paste Creator Store ids to give the sounds).
+  - The monthly race prize ($50) is paid by the owner by hand (the game records the winner).
+  - wildegg_test can flake once in a while (random spawn area).

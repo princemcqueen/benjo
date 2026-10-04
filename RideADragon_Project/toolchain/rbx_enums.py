@@ -86,6 +86,8 @@ ENUMS = {
                       "None": 22},
     "UserInputState": {"Begin": 0, "Change": 1, "End": 2, "Cancel": 3, "None": 4},
     "MouseBehavior": {"Default": 0, "LockCenter": 1, "LockCurrentPosition": 2},
+    "CreatorType": {"User": 0, "Group": 1},
+    "ChatVersion": {"LegacyChatService": 0, "TextChatService": 1},
     "CameraType": {"Fixed": 0, "Attach": 1, "Watch": 2, "Track": 3, "Follow": 4, "Custom": 5,
                    "Scriptable": 6, "Orbital": 7},
     "HumanoidStateType": {"FallingDown": 0, "Running": 8, "RunningNoPhysics": 10, "Climbing": 12,

@@ -8,6 +8,7 @@ local Configs = ReplicatedStorage:WaitForChild("Configs")
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local DragonStats = {}
 
@@ -21,6 +22,22 @@ function DragonStats.compute(speciesId: string, level: number, mutation: string?
 		FlightSpeed = math.floor(species.FlightSpeed * lm * mm + 0.5),
 		IncomePerSecond = math.floor(species.Income * lm * mm * 100 + 0.5) / 100,
 	}
+end
+
+-- What a dragon sells for: EconomyConfig.SellSeconds (+ the Gentle Goodbye tree bonus) of its BASE
+-- income - species income x mutation, NOT the level. Feeding therefore never raises the price and
+-- feed + sell can never make money. `data` = the seller's player data (for the tree bonus), may be nil.
+function DragonStats.sellValue(record, data): number
+	local species = DragonConfig.Species[record.SpeciesId]
+	local base = species and species.Income or record.IncomePerSecond or 0
+	local seconds = TreeConfig.refundSeconds(data or {})
+	return math.max(1, math.floor(base * MutationConfig.multiplier(record.Mutation) * seconds + 0.5))
+end
+
+-- Exclusive (Robux) dragons are not for sale.
+function DragonStats.canSellSpecies(speciesId: string): boolean
+	local species = DragonConfig.Species[speciesId]
+	return species ~= nil and species.Exclusive ~= true and species.Rarity ~= "Exclusive"
 end
 
 function DragonStats.newRecord(uid: string, speciesId: string, mutation: string?, now: number)

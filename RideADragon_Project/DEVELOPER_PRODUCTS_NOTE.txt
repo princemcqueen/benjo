@@ -1,0 +1,26 @@
+Developer Product IDs added from your screenshots:
+
+5 Spins = 3716498464
+25 Spins = 3716498584
+Pouch of Cash = 3716498676
+Chest of Cash = 3716498963
+Vault of Cash = 3716499082
+Egg Radar = 3716499249
+Egg Magnet = 3716499468
+Fast Hatch = 3716499582
+Lucky Egg Call = 3716499681
+Mythic Bundle = 3716499744
+Luck Potion = 3716499841
+Super Luck Potion = 3716499964
+Level Potion = 3716500145
+Mutation Potion = 3716500220
+
+Cash Potion is still MISSING as a Developer Product, so its Id is temporarily set to 0.
+Create Cash Potion under Monetization > Developer Products and replace Id = 0 for CashPotion.
+
+These Developer Product dragon IDs were NOT used because the dragons are permanent Game Passes in the game:
+Prince Dragon = 3716500611
+Legendary Monica Dragon = 3716500541
+N2RC1S Dragon = 3716500329
+
+The existing Game Pass IDs for Prince/Monica/N2RC1S/Owner/Egg Hunter remain unchanged.

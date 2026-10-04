@@ -45,6 +45,8 @@ local ORDER = {
 	"DuelService",
 	"SpinService",
 	"DevService",
+	"RankService",
+	"AdminCommandService",
 }
 
 -- ============================================================== failures

@@ -58,7 +58,7 @@ CREATABLE = {
     "PrismaticConstraint", "CylindricalConstraint", "Plane", "PlaneConstraint", "LineForce",
     "WrapLayer", "WrapTarget", "ImageHandleAdornment", "BoxHandleAdornment",
     "SphereHandleAdornment", "CylinderHandleAdornment", "ConeHandleAdornment",
-    "LineHandleAdornment", "SelectionSphere",
+    "LineHandleAdornment", "SelectionSphere", "TextChatCommand", "TextChatMessageProperties",
 }
 
 SERVICES = {

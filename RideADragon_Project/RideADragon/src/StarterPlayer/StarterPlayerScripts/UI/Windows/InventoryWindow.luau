@@ -8,7 +8,9 @@
 	  * search / rarity filter / sort (InventoryQuery - same rules as server)
 	  * details panel: turntable 3D preview, rarity / mutation / state tags,
 	    level + XP, stats, and every action:
-	      RIDE, EQUIP, FEED, MUTATE, PLACE / TAKE BACK, LOCK, RELEASE
+	      RIDE, EQUIP, FEED, MUTATE, PLACE / TAKE BACK, LOCK, SELL
+  * SELL SHOWN (footer): sells every dragon of the current filter / search that is not locked, equipped
+    or resting on a perch, after one confirmation that shows the count and the total
 	  * place mode (from a sanctuary perch prompt): pick a dragon for perch n
 	  * desktop / tablet: grid + details side by side; phones: the details
 	    slide over the grid and the close button becomes "back"
@@ -41,7 +43,7 @@ local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local Odds = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Odds"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
-local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local DragonStats = require(Shared:WaitForChild("DragonStats"))
 
 local C = Theme.Colors
 
@@ -484,6 +486,20 @@ function InventoryWindow:Build()
 		Tooltip = "Rest your best free dragons on every empty perch",
 		Parent = fpad,
 	})
+	self.SellShown = Kit.button({
+		Name = "SellShown",
+		Text = "SELL SHOWN",
+		Icon = "Coin",
+		Style = "Danger",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0.47, 0.5),
+		Size = UDim2.fromScale(0.265, 1),
+		Tooltip = "Sell every dragon in this list that is not locked, equipped or resting on a perch",
+		Parent = fpad,
+	})
+	self.SellShown.Activated:Connect(function()
+		self:DoSellShown()
+	end)
 	self.AutoPlace.Activated:Connect(function()
 		self:Request("AutoPlace", {}, function(res)
 			self.UIC.Notify("success", string.format("%d dragon%s now resting in your sanctuary", res.data.Placed, res.data.Placed == 1 and " is" or "s are"))
@@ -636,7 +652,7 @@ function InventoryWindow:BuildDetails()
 	self.MutateBtn = btn(r2, "Mutate", "MUTATE", "Sparkle", "Secondary", 0.51, 0.49)
 	self.PlaceBtn = btn(r3, "Place", "PLACE", "Home", "Blue", 0, 0.38)
 	self.LockBtn = btn(r3, "Lock", "", "Lock", "Secondary", 0.4, 0.2)
-	self.ReleaseBtn = btn(r3, "Release", "RELEASE", "Release", "Danger", 0.62, 0.38)
+	self.ReleaseBtn = btn(r3, "Sell", "SELL", "Coin", "Danger", 0.62, 0.38)
 	local lockHolder = self.LockBtn.IconHolder
 	if lockHolder then
 		self.LockIcon = lockHolder:FindFirstChildWhichIsA("Frame")
@@ -663,7 +679,7 @@ function InventoryWindow:BuildDetails()
 		self:DoLock()
 	end)
 	self.ReleaseBtn.Activated:Connect(function()
-		self:DoRelease()
+		self:DoSell()
 	end)
 
 	-- nothing selected
@@ -730,8 +746,13 @@ function InventoryWindow:ApplyLayout()
 	-- footer + grid
 	local footH = portrait and 0.075 or (phone and 0.18 or 0.085)
 	self.CapacityText.Visible = not phone and self.PlaceSlot == nil
-	self.PerchText.Position = phone and UDim2.fromScale(0, 0) or UDim2.fromScale(0.3, 0)
-	self.PerchText.Size = phone and UDim2.fromScale(0.6, 1) or UDim2.fromScale(0.34, 1)
+	-- footer row: [DRAGONS x / y] [PERCHES a / b] [SELL SHOWN] [FILL PERCHES]  (phones: no capacity text)
+	self.CapacityText.Size = UDim2.fromScale(0.24, 1)
+	self.PerchText.Position = phone and UDim2.fromScale(0, 0) or UDim2.fromScale(0.24, 0)
+	self.PerchText.Size = phone and UDim2.fromScale(0.3, 1) or UDim2.fromScale(0.22, 1)
+	self.SellShown.Instance.Position = phone and UDim2.fromScale(0.31, 0.5) or UDim2.fromScale(0.47, 0.5)
+	self.SellShown.Instance.Size = phone and UDim2.fromScale(0.34, 1) or UDim2.fromScale(0.265, 1)
+	self.AutoPlace.Instance.Size = phone and UDim2.fromScale(0.34, 1) or UDim2.fromScale(0.25, 1)
 	local fpad = self.Footer:FindFirstChild("Pad")
 	local padding = fpad and fpad:FindFirstChildOfClass("UIPadding")
 	if padding then
@@ -919,6 +940,8 @@ function InventoryWindow:Rebuild(resetScroll: boolean?)
 	end
 	self.PerchText.Text = string.format("PERCHES  %d / %d", used, unlocked)
 	self.AutoPlace:SetEnabled(used < unlocked and count > 1)
+	local sellIds = self:SellableShown()
+	self.SellShown:SetEnabled(#sellIds > 0)
 	self:SetSubtitle(string.format("%d / %d", count, cap))
 	if #self.List == 0 then
 		self.Empty.Visible = true
@@ -1092,7 +1115,13 @@ function InventoryWindow:RefreshDetails()
 		self.LockIcon.Visible = record.Locked == true
 		self.UnlockIcon.Visible = record.Locked ~= true
 	end
-	self.ReleaseBtn:SetEnabled(not record.Locked and not riding)
+	local sellable = DragonStats.canSellSpecies(record.SpeciesId)
+	if sellable then
+		setCost(self.ReleaseBtn, "SELL", DragonStats.sellValue(record, data), true)
+	else
+		self.ReleaseBtn:SetText("NOT FOR SALE")
+	end
+	self.ReleaseBtn:SetEnabled(sellable and not record.Locked and not riding)
 end
 
 -- ============================================================== actions
@@ -1241,25 +1270,101 @@ function InventoryWindow:DoLock()
 	self:Request("Lock", { Id = record.UniqueId, Locked = not record.Locked })
 end
 
-function InventoryWindow:DoRelease()
-	local record = self:Selected()
+function InventoryWindow:DoSell()
+	local record, data = self:Selected()
 	if not record then
 		return
 	end
-	local refund = math.floor(record.IncomePerSecond * TreeConfig.refundSeconds(self.Data and self.Data.all()) + 0.5)
+	local price = DragonStats.sellValue(record, data)
 	local uid = record.UniqueId
+	local notes = {}
+	if record.PlacedNestId ~= "" then
+		table.insert(notes, "It rests on a perch: you lose its income too.")
+	end
+	if DragonConfig.rarityRank(record.Rarity) >= 4 then
+		table.insert(notes, string.format("This is a %s dragon!", record.Rarity))
+	end
 	task.spawn(function()
 		local yes = self.UIC.Confirm({
-			Title = "Release " .. record.Name .. "?",
-			Body = string.format("It flies back to the wild for good. You receive %s.", Format.cash(refund)),
-			ConfirmText = "Release",
+			Title = "Sell " .. record.Name .. "?",
+			Body = string.format("You receive %s. %s", Format.cash(price), table.concat(notes, " ")),
+			ConfirmText = "Sell",
 			Danger = true,
 		})
 		if yes then
-			self:Request("Release", { Id = uid }, function(res)
-				self.UIC.Notify("info", string.format("%s flew away  (+%s)", record.Name, Format.cash(res.data and res.data.Refund or 0)))
+			self:Request("Sell", { Id = uid }, function(res)
+				self.UIC.Notify("success", string.format("%s sold  (+%s)", record.Name, Format.cash(res.data and res.data.Refund or 0)))
 			end)
 		end
+	end)
+end
+
+-- The dragons of the current list that SELL SHOWN would sell: not locked, not equipped, not on a
+-- perch, not exclusive. Returns ids, total price, how many are Epic or better.
+function InventoryWindow:SellableShown()
+	local data = self.Data.all()
+	local ids, total, rare = {}, 0, 0
+	if not data or not self.List then
+		return ids, total, rare
+	end
+	for _, uid in self.List do
+		local r = data.Dragons[uid]
+		if r and not r.Locked and r.PlacedNestId == "" and data.EquippedDragon ~= uid and DragonStats.canSellSpecies(r.SpeciesId) then
+			table.insert(ids, uid)
+			total += DragonStats.sellValue(r, data)
+			if DragonConfig.rarityRank(r.Rarity) >= 4 then
+				rare += 1
+			end
+		end
+	end
+	return ids, total, rare
+end
+
+function InventoryWindow:DoSellShown()
+	if self.Busy then
+		return
+	end
+	local ids, total, rare = self:SellableShown()
+	if #ids == 0 then
+		self.UIC.Notify("info", "Nothing to sell in this list. Locked, equipped and resting dragons are always kept.")
+		return
+	end
+	local body = string.format("%d dragon%s for %s. Locked, equipped and resting dragons are kept.", #ids, #ids == 1 and "" or "s", Format.cash(total))
+	if rare > 0 then
+		body ..= string.format("  WARNING: %d of them %s Epic or better!", rare, rare == 1 and "is" or "are")
+	end
+	task.spawn(function()
+		local yes = self.UIC.Confirm({
+			Title = string.format("Sell %d dragon%s?", #ids, #ids == 1 and "" or "s"),
+			Body = body,
+			ConfirmText = "Sell all",
+			Danger = true,
+		})
+		if not yes then
+			return
+		end
+		self.Busy = true
+		local soldCount, soldTotal = 0, 0
+		local i = 1
+		while i <= #ids do
+			local chunk = {}
+			for j = i, math.min(i + 49, #ids) do
+				table.insert(chunk, ids[j])
+			end
+			local res = Net.request("Dragon", "SellBulk", { Ids = chunk })
+			if not res.ok then
+				self.UIC.HandleResult(res)
+				break
+			end
+			soldCount += res.data.Sold
+			soldTotal += res.data.Cash
+			i += 50
+		end
+		self.Busy = false
+		if soldCount > 0 then
+			self.UIC.Notify("success", string.format("%d dragon%s sold  (+%s)", soldCount, soldCount == 1 and "" or "s", Format.cash(soldTotal)))
+		end
+		self:Rebuild(false)
 	end)
 end
 
@@ -1269,6 +1374,7 @@ function InventoryWindow:SetPlaceSlot(slot: number?)
 	self.CapacityText.Visible = slot == nil and not self.Compact
 	self.PerchText.Visible = slot == nil
 	self.AutoPlace:SetVisible(slot == nil)
+	self.SellShown:SetVisible(slot == nil)
 	if slot then
 		self.PlaceText.Text = string.format("CHOOSE A DRAGON FOR PERCH %d", slot)
 	end
