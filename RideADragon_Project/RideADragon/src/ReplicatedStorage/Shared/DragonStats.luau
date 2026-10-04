@@ -83,8 +83,9 @@ function DragonStats.cruiseSpeed(record, flyBonus: number?): number
 	return GameConfig.flightCruiseSpeed(record.FlightSpeed) * (1 + math.max(0, flyBonus or 0))
 end
 
-function DragonStats.runSpeed(record): number
-	return GameConfig.groundRunSpeed(record.Speed)
+-- runBonus: Great Tree "Swift Paws" (fraction, 0.1 = +10% run speed)
+function DragonStats.runSpeed(record, runBonus: number?): number
+	return GameConfig.groundRunSpeed(record.Speed) * (1 + math.max(0, runBonus or 0))
 end
 
 -- Applies XP and returns number of levels gained.

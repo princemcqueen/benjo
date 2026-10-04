@@ -56,6 +56,68 @@ local function signGui(part: BasePart, text: string)
 	return label
 end
 
+-- Big floating name plate above the gate (BillboardGui, constant pixel size) so
+-- every player can see from the hub whose sanctuary this is.
+local TAG_FREE = Color3.fromRGB(150, 160, 178)
+local TAG_HEIGHT = 44 -- above the plot floor; the gate arch tops out at ~22
+
+local function nameGui(part: BasePart, plotId: number)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "NameGui"
+	gui.Size = UDim2.fromOffset(300, 74)
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = 1600
+	gui.LightInfluence = 0
+	gui.Adornee = part
+	local pill = Instance.new("Frame")
+	pill.Name = "Pill"
+	pill.Size = UDim2.fromScale(1, 1)
+	pill.BackgroundColor3 = Color3.fromRGB(18, 22, 32)
+	pill.BackgroundTransparency = 0.1
+	pill.BorderSizePixel = 0
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.28, 0)
+	corner.Parent = pill
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "Stroke"
+	stroke.Thickness = 3
+	stroke.Color = TAG_FREE
+	stroke.Parent = pill
+	local name = Instance.new("TextLabel")
+	name.Name = "OwnerLabel"
+	name.BackgroundTransparency = 1
+	name.AnchorPoint = Vector2.new(0.5, 0)
+	name.Position = UDim2.fromScale(0.5, 0.08)
+	name.Size = UDim2.fromScale(0.9, 0.54)
+	name.Font = Enum.Font.GothamBlack
+	name.TextScaled = true
+	name.TextColor3 = Color3.fromRGB(190, 198, 212)
+	name.Text = "FREE"
+	local limit = Instance.new("UITextSizeConstraint")
+	limit.MaxTextSize = 34
+	limit.MinTextSize = 10
+	limit.Parent = name
+	name.Parent = pill
+	local sub = Instance.new("TextLabel")
+	sub.Name = "PlotLabel"
+	sub.BackgroundTransparency = 1
+	sub.AnchorPoint = Vector2.new(0.5, 0)
+	sub.Position = UDim2.fromScale(0.5, 0.64)
+	sub.Size = UDim2.fromScale(0.9, 0.24)
+	sub.Font = Enum.Font.GothamBold
+	sub.TextScaled = true
+	sub.TextColor3 = TAG_FREE
+	sub.Text = "SANCTUARY " .. plotId
+	local subLimit = Instance.new("UITextSizeConstraint")
+	subLimit.MaxTextSize = 15
+	subLimit.MinTextSize = 8
+	subLimit.Parent = sub
+	sub.Parent = pill
+	pill.Parent = gui
+	gui.Parent = part
+	return gui
+end
+
 local function nest(b, at: Vector3)
 	-- stone dais + woven twig ring + soft bedding
 	b:cyl(1.6, 22, at + V(0, 0.8, 0), C.StoneDark, M.Slate)
@@ -155,6 +217,10 @@ function Sanctuaries.build(parent: Instance, plot: { [string]: any })
 	b:box(V(0.4, 3.2, 0.4), V(-4, 18.6, -hd - 2.1), C.Iron, M.Metal)
 	b:box(V(0.4, 3.2, 0.4), V(4, 18.6, -hd - 2.1), C.Iron, M.Metal)
 	signGui(sign, "Free Sanctuary")
+	local tag = b:box(V(1, 1, 1), V(0, TAG_HEIGHT, -hd), C.Stone, M.SmoothPlastic,
+		{ Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+	tag.Name = "NameTag"
+	nameGui(tag, plot.Id)
 	-- path from the gate to the nest
 	for i = 0, 6 do
 		b:box(V(9 - (i % 2) * 1.5, 0.4, 5), V(((i % 2) - 0.5) * 1.2, 0.05, -hd + 6 + i * 6.4), C.Stone, M.Slate)
@@ -192,12 +258,24 @@ function Sanctuaries.build(parent: Instance, plot: { [string]: any })
 	return b.Model
 end
 
--- Owner visuals: sign text + banner colour (called by SanctuaryService).
+-- Owner visuals: gate sign, floating name plate and banner colour (called by SanctuaryService).
 function Sanctuaries.setOwner(model: Model, ownerName: string?, color: Color3?)
 	local sign = model:FindFirstChild("Sign", true)
 	local label = sign and sign:FindFirstChild("SignGui") and (sign :: any).SignGui:FindFirstChild("Text")
 	if label then
 		label.Text = ownerName and (ownerName .. "'s Sanctuary") or "Free Sanctuary"
+	end
+	local tag = model:FindFirstChild("NameTag", true)
+	local pill = tag and tag:FindFirstChild("NameGui") and (tag :: any).NameGui:FindFirstChild("Pill")
+	if pill then
+		local accent = color and color:Lerp(Color3.new(1, 1, 1), 0.35) or TAG_FREE
+		local ownerLabel = pill:FindFirstChild("OwnerLabel") :: TextLabel
+		local plotLabel = pill:FindFirstChild("PlotLabel") :: TextLabel
+		local stroke = pill:FindFirstChild("Stroke") :: UIStroke
+		ownerLabel.Text = ownerName or "FREE"
+		ownerLabel.TextColor3 = ownerName and Color3.new(1, 1, 1) or Color3.fromRGB(190, 198, 212)
+		plotLabel.TextColor3 = accent
+		stroke.Color = accent
 	end
 	for _, d in model:GetDescendants() do
 		if d:IsA("BasePart") and d.Name == "BannerCloth" then

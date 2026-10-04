@@ -1,10 +1,12 @@
 --[[
 	EggStorageWindow ("Egg Bag")
 	Carried eggs as 3D cards (ViewportFrames), nest status, and actions:
-	place a chosen egg in the sanctuary nest, or the best egg in one click.
+	take a chosen egg in your hand (HOLD - then place it in the nest yourself), or
+	put the egg in hand / the best egg into the nest in one click.
 	Data: data.Eggs (list), data.Incubator, data.Upgrades.EggStorage.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UI = script.Parent.Parent
@@ -19,7 +21,7 @@ local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
-local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local C = Theme.Colors
 
@@ -122,7 +124,7 @@ function EggStorageWindow:Build()
 	})
 end
 
-local function eggCard(egg, order: number, onPlace: () -> ())
+local function eggCard(egg, order: number, held: boolean, onHold: () -> ())
 	local def = EggConfig.Eggs[egg.Type] or EggConfig.Eggs.HavenEgg
 	local card = Kit.surface({ Name = "Egg_" .. egg.Id, LayoutOrder = order })
 	-- 3D egg preview
@@ -191,15 +193,16 @@ local function eggCard(egg, order: number, onPlace: () -> ())
 		Parent = card,
 	})
 	local btn = Kit.button({
-		Name = "Place",
-		Text = "PLACE",
-		Style = "Secondary",
+		Name = "Hold",
+		Text = held and "IN HAND" or "HOLD",
+		Style = held and "Primary" or "Secondary",
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 0.96, 0),
 		Size = UDim2.fromScale(0.8, 0.14),
 		Parent = card,
 	})
-	btn.Activated:Connect(onPlace)
+	btn:SetEnabled(not held)
+	btn.Activated:Connect(onHold)
 	return card
 end
 
@@ -221,7 +224,7 @@ function EggStorageWindow:Refresh()
 		return
 	end
 	local eggs = data.Eggs or {}
-	local cap = EconomyConfig.upgradeValue("EggStorage", data.Upgrades and data.Upgrades.EggStorage or 0)
+	local cap = TreeConfig.eggCapacity(data)
 	self.BagText.Text = string.format("BAG  %d / %d", #eggs, cap)
 	self.BagText.TextColor3 = #eggs >= cap and C.Warning or C.Text
 	local inc = data.Incubator or { Unlocked = 0, Slots = {} }
@@ -240,9 +243,13 @@ function EggStorageWindow:Refresh()
 		c:Destroy()
 	end
 	table.clear(self.Cards)
+	local heldId = Players.LocalPlayer:GetAttribute("HeldEggId")
 	for i, egg in eggs do
-		local card = eggCard(egg, i, function()
-			self:Place(egg.Id)
+		local card = eggCard(egg, i, egg.Id == heldId, function()
+			local hc = self.Registry and self.Registry.HeldEggController
+			if hc then
+				hc.hold(egg.Id)
+			end
 		end)
 		card.Parent = self.Grid
 		table.insert(self.Cards, card)
@@ -256,6 +263,11 @@ function EggStorageWindow:OnOpen()
 	if not self._observing then
 		self._observing = true
 		local D = self.Registry and self.Registry.DataController
+		Players.LocalPlayer:GetAttributeChangedSignal("HeldEggId"):Connect(function()
+			if self.Root.Visible then
+				self:Refresh()
+			end
+		end)
 		if D then
 			D.changed("Eggs"):Connect(function()
 				if self.Root.Visible then

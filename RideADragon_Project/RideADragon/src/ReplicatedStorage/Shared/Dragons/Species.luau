@@ -274,6 +274,12 @@ local MUTATION_PALETTES = {
 	Galaxy = { Main = C(30, 30, 80), Dark = C(14, 12, 40), Belly = C(90, 60, 170), Membrane = C(60, 40, 140), Horn = C(220, 220, 255), Accent = C(66, 192, 251), Eye = C(255, 255, 255), Glow = C(120, 200, 255) },
 	Void = { Main = C(16, 14, 22), Dark = C(4, 4, 8), Belly = C(50, 10, 70), Membrane = C(26, 8, 40), Horn = C(242, 243, 242), Accent = C(255, 255, 255), Eye = C(255, 255, 255), Glow = C(230, 200, 255) },
 	Rainbow = { Main = C(255, 120, 170), Dark = C(120, 90, 255), Belly = C(255, 250, 220), Membrane = C(120, 220, 255), Horn = C(255, 255, 255), Accent = C(255, 220, 60), Eye = C(255, 255, 255) },
+	Neon = { Main = C(40, 255, 225), Dark = C(255, 60, 200), Belly = C(255, 255, 140), Membrane = C(150, 90, 255), Horn = C(255, 255, 255), Accent = C(255, 70, 210), Eye = C(255, 255, 255), Glow = C(80, 255, 230), Saddle = C(40, 20, 80) },
+	Infernal = { Main = C(150, 18, 18), Dark = C(54, 8, 8), Belly = C(255, 96, 20), Membrane = C(104, 10, 10), Horn = C(28, 18, 18), Accent = C(255, 170, 40), Eye = C(255, 240, 120), Glow = C(255, 110, 30), Saddle = C(30, 18, 18) },
+	Corrupted = { Main = C(40, 10, 52), Dark = C(10, 2, 18), Belly = C(190, 20, 100), Membrane = C(70, 0, 84), Horn = C(220, 220, 230), Accent = C(255, 20, 120), Eye = C(255, 40, 40), Glow = C(255, 40, 160), Saddle = C(20, 6, 30) },
+	Crystal = { Main = C(150, 100, 235), Dark = C(94, 56, 180), Belly = C(215, 195, 255), Membrane = C(190, 150, 255), Horn = C(255, 255, 255), Accent = C(110, 255, 225), Eye = C(255, 255, 255), Glow = C(200, 160, 255), Crystal = C(120, 255, 230), Saddle = C(60, 36, 120) },
+	Lightning = { Main = C(32, 44, 110), Dark = C(14, 18, 52), Belly = C(255, 240, 130), Membrane = C(70, 96, 190), Horn = C(255, 250, 210), Accent = C(255, 240, 60), Eye = C(255, 255, 210), Glow = C(255, 240, 90), Saddle = C(20, 24, 70) },
+	Angelic = { Main = C(250, 250, 255), Dark = C(206, 216, 238), Belly = C(255, 246, 205), Membrane = C(255, 253, 240), Horn = C(255, 222, 120), Accent = C(255, 218, 100), Eye = C(110, 195, 255), Glow = C(255, 240, 190), Saddle = C(255, 224, 140) },
 }
 
 function Species.mutatePalette(p, mutation: string)

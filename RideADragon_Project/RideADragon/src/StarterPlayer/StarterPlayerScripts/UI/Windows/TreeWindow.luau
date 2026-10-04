@@ -1,11 +1,12 @@
 --[[
 	TreeWindow (the Great Tree skill tree)
-	Five branches (rows), five levels each (nodes joined by a vine). Levels are
-	bought strictly in order: owned nodes are filled with the branch colour and a
-	check, the next node pulses when you can afford it, later nodes are locked.
-	Tap a node to inspect it; the strip at the bottom shows what it gives and
-	buys it. All prices and bonuses come from TreeConfig; the server validates
-	every purchase (TreeService).
+	Five categories (tabs: Luck, Wealth, Flight, Nest, Bond) with 3-5 branches each.
+	Every branch is a row: its icon, name and current bonus, then a scrolling strip
+	of 8-12 level nodes joined by a vine. Levels are bought strictly in order:
+	owned nodes are filled with the branch colour and a check, the next node pulses
+	when you can afford it, later nodes are locked. Tap a node to inspect it; the
+	strip at the bottom shows what it gives and buys it. All prices and bonuses
+	come from TreeConfig; the server validates every purchase (TreeService).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,14 +41,12 @@ local SPEC = {
 }
 
 local WHITE = Color3.new(1, 1, 1)
+local CELL = 84 -- design px of one level cell
+local ROW = 104 -- design px of one branch row
+local HEAD = 214 -- design px of the branch head (icon + name)
 
 local function px(n: number)
 	return Responsive.px(n)
-end
-
--- Re-applies fn(R) -> value to inst[prop] whenever the screen metrics change.
-local function bind(inst: Instance, prop: string, fn)
-	Responsive.bind(inst, prop, fn)
 end
 
 local function iconDisc(parent: Instance, icon: string, color: Color3, props)
@@ -80,7 +79,8 @@ function TreeWindow.new(ui, registry)
 	self.UIC = ui
 	self.Registry = registry
 	self.Data = registry.DataController
-	self.Rows = {} -- [branchId] = { Nodes = {...}, Segments = {...}, Now = TextLabel }
+	self.Rows = {} -- [branchId] = { Row, Strip, Nodes, Now, Next, Branch }
+	self.Category = TreeConfig.Categories[1].Id
 	self.Selected = nil -- { Id, Level }
 	self.Busy = false
 	self:Build()
@@ -90,12 +90,40 @@ end
 -- ============================================================== build
 function TreeWindow:Build()
 	local content = self.Content
-	-- top strip: hint + cash
-	local top = Kit.frame({ Name = "Top", Size = UDim2.new(1, 0, 0, px(30)), Parent = content })
-	bind(top, "Size", function(R)
-		return UDim2.new(1, 0, 0, R.px(30))
+
+	-- top strip: category tabs + progress + cash
+	local top = Kit.frame({ Name = "Top", Parent = content })
+	Responsive.bind(top, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(34))
 	end)
-	Kit.text({ Name = "Hint", Text = "Grow each branch from the left. Upgrades are permanent.", Role = "Label", Color = C.TextMuted, Size = UDim2.fromScale(0.62, 1), Truncate = true, Parent = top })
+	local ids, labels = {}, {}
+	for _, cat in TreeConfig.Categories do
+		table.insert(ids, cat.Id)
+		table.insert(labels, string.upper(cat.Name))
+	end
+	self.Tabs = Kit.segmented({
+		Name = "Tabs",
+		Options = ids,
+		Labels = labels,
+		Position = UDim2.fromScale(0, 0),
+		Size = UDim2.fromScale(0.56, 1),
+		Parent = top,
+	})
+	self.Tabs.Changed:Connect(function(v)
+		self:ShowCategory(v)
+	end)
+	self.TotalText = Kit.text({
+		Name = "Total",
+		Text = "",
+		Role = "Caption",
+		Color = C.TextMuted,
+		XAlign = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(0.77, 0),
+		Size = UDim2.fromScale(0.2, 1),
+		Truncate = true,
+		Parent = top,
+	})
 	self.CashText = Kit.text({
 		Name = "Cash",
 		Text = "$0",
@@ -104,28 +132,31 @@ function TreeWindow:Build()
 		XAlign = Enum.TextXAlignment.Right,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.fromScale(0.36, 1),
+		Size = UDim2.fromScale(0.22, 1),
+		Truncate = true,
 		Parent = top,
 	})
 
-	-- branch rows (scrolls when the window is short, e.g. phones)
+	-- branch rows (vertical scroll when the window is short, e.g. phones)
 	local scroll = Kit.scroll({ Name = "Branches", Parent = content })
 	self.Scroll = scroll
 	Kit.list(scroll, "V", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
-	bind(scroll, "Position", function(R)
-		return UDim2.new(0, 0, 0, R.px(36))
+	Responsive.bind(scroll, "Position", function(R)
+		return UDim2.new(0, 0, 0, R.px(42))
 	end)
-	bind(scroll, "Size", function(R)
-		return UDim2.new(1, 0, 1, -(R.px(36) + R.px(86)))
+	Responsive.bind(scroll, "Size", function(R)
+		return UDim2.new(1, 0, 1, -(R.px(42) + R.px(86)))
 	end)
-	for i, branch in TreeConfig.Branches do
-		self:BuildRow(scroll, branch, i)
+	for _, cat in TreeConfig.Categories do
+		for i, branch in cat.Branches do
+			self:BuildRow(scroll, branch, i)
+		end
 	end
 
 	-- detail strip
 	local detail = Kit.surface({ Name = "Detail", AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Parent = content })
 	self.Detail = detail
-	bind(detail, "Size", function(R)
+	Responsive.bind(detail, "Size", function(R)
 		return UDim2.new(1, 0, 0, R.px(78))
 	end)
 	self.DetailDisc = iconDisc(detail, "Clover", C.Gold, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromScale(0.62, 0.62) })
@@ -144,7 +175,7 @@ function TreeWindow:Build()
 		self:Buy()
 	end)
 
-	-- the nodes of the next purchasable level pulse while you can afford them
+	-- the node of the next purchasable level pulses while you can afford it
 	RunService.RenderStepped:Connect(function()
 		if not self.Root.Visible then
 			return
@@ -152,7 +183,7 @@ function TreeWindow:Build()
 		local k = 0.5 + 0.5 * math.sin(os.clock() * 4)
 		for _, row in self.Rows do
 			local node = row.Next
-			if node and node.Pulse then
+			if node and node.Pulse and row.Row.Visible then
 				node.Stroke.Thickness = px(3) + px(2.2) * k
 			end
 		end
@@ -161,46 +192,71 @@ end
 
 function TreeWindow:BuildRow(parent: Instance, branch, order: number)
 	local row = Kit.surface({ Name = branch.Id, LayoutOrder = order, StrokeColor = branch.Color, StrokeTransparency = 0.55, Parent = parent })
-	bind(row, "Size", function(R)
-		return UDim2.new(1, 0, 0, R.px(R.Device == "Phone" and 104 or 118))
+	row.Visible = false
+	Responsive.bind(row, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(ROW))
 	end)
-	local info = { Nodes = {}, Segments = {}, Branch = branch }
+	local info = { Row = row, Nodes = {}, Branch = branch }
 	self.Rows[branch.Id] = info
 
 	-- head: icon + name + current bonus
-	local head = Kit.frame({ Name = "Head", Position = UDim2.fromScale(0.012, 0), Size = UDim2.fromScale(0.23, 1), Parent = row })
-	iconDisc(head, branch.Icon, branch.Color, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromScale(0.55, 0.55) })
-	Kit.text({ Name = "Name", Text = string.upper(branch.Name), Role = "Label", Font = Theme.Fonts.Heading, Wrapped = true, YAlign = Enum.TextYAlignment.Bottom, Position = UDim2.fromScale(0.36, 0.04), Size = UDim2.fromScale(0.64, 0.5), Parent = head })
-	info.Now = Kit.text({ Name = "Now", Text = "", Role = "Caption", Color = branch.Color, YAlign = Enum.TextYAlignment.Top, Position = UDim2.fromScale(0.36, 0.55), Size = UDim2.fromScale(0.64, 0.3), Truncate = true, Parent = head })
-
-	-- nodes block
-	local outer = Kit.frame({ Name = "Levels", Position = UDim2.fromScale(0.25, 0), Size = UDim2.fromScale(0.74, 1), Parent = row })
-	-- fixed-height strip centred in the row, so taller rows keep the nodes tight
-	local block = Kit.frame({ Name = "Inner", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), Parent = outer })
-	bind(block, "Size", function(R)
-		return UDim2.new(1, 0, 0, R.px(98))
+	local head = Kit.frame({ Name = "Head", Position = UDim2.fromOffset(8, 0), Parent = row })
+	Responsive.bind(head, "Size", function(R)
+		return UDim2.new(0, R.px(HEAD), 1, 0)
 	end)
-	-- vine segments behind the nodes (between node centres)
-	for k = 1, #branch.Levels - 1 do
-		local seg = Kit.frame({
-			Name = "Vine" .. k,
-			BackgroundTransparency = 0,
-			BackgroundColor3 = C.Disabled,
-			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.new(0.1 + (k - 1) * 0.2, 0, 0, px(33)),
-			Parent = block,
-		})
-		bind(seg, "Size", function(R)
-			return UDim2.new(0.2, 0, 0, R.px(5))
-		end)
-		bind(seg, "Position", function(R)
-			return UDim2.new(0.1 + (k - 1) * 0.2, 0, 0, R.px(33))
-		end)
-		Kit.corner(seg, 999)
-		info.Segments[k] = seg
-	end
+	iconDisc(head, branch.Icon, branch.Color, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromScale(0.56, 0.56) })
+	local text = Kit.frame({ Name = "Text", Position = UDim2.fromScale(0.3, 0), Size = UDim2.fromScale(0.7, 1), Parent = head })
+	Kit.text({ Name = "Name", Text = string.upper(branch.Name), Role = "Label", Font = Theme.Fonts.Heading, Wrapped = true, YAlign = Enum.TextYAlignment.Bottom, Position = UDim2.fromScale(0, 0.04), Size = UDim2.fromScale(1, 0.5), Parent = text })
+	info.Now = Kit.text({ Name = "Now", Text = "", Role = "Caption", Color = branch.Color, YAlign = Enum.TextYAlignment.Top, Position = UDim2.fromScale(0, 0.55), Size = UDim2.fromScale(1, 0.3), Truncate = true, Parent = text })
+
+	-- level strip (scrolls sideways when the levels do not fit)
+	local strip = Create("ScrollingFrame", {
+		Name = "Strip",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollingDirection = Enum.ScrollingDirection.X,
+		AutomaticCanvasSize = Enum.AutomaticSize.None,
+		ScrollBarImageColor3 = branch.Color,
+		ScrollBarImageTransparency = 0.3,
+		ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+		Selectable = false,
+		Parent = row,
+	})
+	info.Strip = strip
+	local n = #branch.Levels
+	Responsive.bind(strip, "Position", function(R)
+		return UDim2.new(0, R.px(HEAD) + 12, 0, 0)
+	end)
+	Responsive.bind(strip, "Size", function(R)
+		return UDim2.new(1, -(R.px(HEAD) + 18), 1, 0)
+	end)
+	Responsive.bind(strip, "CanvasSize", function(R)
+		return UDim2.fromOffset(R.px(CELL) * n, 0)
+	end)
+	Responsive.bind(strip, "ScrollBarThickness", function(R)
+		return math.max(3, R.px(4))
+	end)
+	Kit.list(strip, "H", 0, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top)
+
 	for k, entry in branch.Levels do
-		local cell = Kit.frame({ Name = "Level" .. k, Position = UDim2.fromScale((k - 1) * 0.2, 0), Size = UDim2.fromScale(0.2, 1), Parent = block })
+		local cell = Kit.frame({ Name = "Level" .. k, LayoutOrder = k, Parent = strip })
+		Responsive.bind(cell, "Size", function(R)
+			return UDim2.new(0, R.px(CELL), 1, 0)
+		end)
+		-- vine halves (left joins the previous node, right joins the next)
+		local halves = {}
+		for _, side in { "L", "R" } do
+			if (side == "L" and k > 1) or (side == "R" and k < n) then
+				local h = Kit.frame({ Name = "Vine" .. side, BackgroundTransparency = 0, BackgroundColor3 = C.Disabled, AnchorPoint = Vector2.new(0, 0.5), Parent = cell })
+				Responsive.bind(h, "Size", function(R)
+					return UDim2.new(0.5, 0, 0, R.px(5))
+				end)
+				Responsive.bind(h, "Position", function(R)
+					return UDim2.new(side == "L" and 0 or 0.5, 0, 0, R.px(33))
+				end)
+				halves[side] = h
+			end
+		end
 		local btn = Create("TextButton", {
 			Name = "Node",
 			AutoButtonColor = false,
@@ -211,10 +267,10 @@ function TreeWindow:BuildRow(parent: Instance, branch, order: number)
 			ZIndex = 3,
 			Parent = cell,
 		})
-		bind(btn, "Size", function(R)
+		Responsive.bind(btn, "Size", function(R)
 			return UDim2.fromOffset(R.px(46), R.px(46))
 		end)
-		bind(btn, "Position", function(R)
+		Responsive.bind(btn, "Position", function(R)
 			return UDim2.new(0.5, 0, 0, R.px(10))
 		end)
 		Kit.corner(btn, 999)
@@ -226,20 +282,20 @@ function TreeWindow:BuildRow(parent: Instance, branch, order: number)
 		local lockBox = Kit.frame({ Name = "Lock", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.5, 0.5), ZIndex = 4, Visible = false, Parent = btn })
 		Icons.make("Lock", { Color = C.TextDim, Accent = C.TextDim, Ink = C.Surface }).Parent = lockBox
 		local bonus = Kit.text({ Name = "Bonus", Text = TreeConfig.formatBonus(branch, entry.Bonus), Role = "Label", XAlign = Enum.TextXAlignment.Center, Truncate = true, Parent = cell })
-		bind(bonus, "Position", function(R)
+		Responsive.bind(bonus, "Position", function(R)
 			return UDim2.new(0, 0, 0, R.px(62))
 		end)
-		bind(bonus, "Size", function(R)
+		Responsive.bind(bonus, "Size", function(R)
 			return UDim2.new(1, 0, 0, R.px(18))
 		end)
 		local price = Kit.text({ Name = "Price", Text = Format.cash(entry.Price), Role = "Caption", XAlign = Enum.TextXAlignment.Center, Truncate = true, Parent = cell })
-		bind(price, "Position", function(R)
+		Responsive.bind(price, "Position", function(R)
 			return UDim2.new(0, 0, 0, R.px(80))
 		end)
-		bind(price, "Size", function(R)
+		Responsive.bind(price, "Size", function(R)
 			return UDim2.new(1, 0, 0, R.px(16))
 		end)
-		local node = { Button = btn, Stroke = stroke, Scale = scale, Numeral = numeral, Check = checkBox, Lock = lockBox, Bonus = bonus, Price = price, Level = k, Id = branch.Id }
+		local node = { Button = btn, Stroke = stroke, Scale = scale, Numeral = numeral, Check = checkBox, Lock = lockBox, Bonus = bonus, Price = price, Halves = halves, Level = k, Id = branch.Id }
 		info.Nodes[k] = node
 		btn.Activated:Connect(function()
 			self.UIC.sound("Click")
@@ -264,11 +320,12 @@ function TreeWindow:Select(id: string, level: number)
 	self:Refresh()
 end
 
--- default selection: an affordable next level, else the first next level, else the first branch
-function TreeWindow:PickDefault()
+-- default selection in a category: an affordable next level, else the first open next level
+function TreeWindow:PickDefault(categoryId: string)
 	local data, cash = self:Snapshot()
+	local cat = TreeConfig.CategoryById[categoryId]
 	local firstOpen
-	for _, branch in TreeConfig.Branches do
+	for _, branch in cat.Branches do
 		local lvl = TreeConfig.level(data, branch.Id)
 		local nxt = branch.Levels[lvl + 1]
 		if nxt then
@@ -278,7 +335,40 @@ function TreeWindow:PickDefault()
 			end
 		end
 	end
-	return firstOpen or { Id = TreeConfig.Branches[1].Id, Level = #TreeConfig.Branches[1].Levels }
+	local b = cat.Branches[1]
+	return firstOpen or { Id = b.Id, Level = #b.Levels }
+end
+
+-- Scrolls every visible strip so its next purchasable node is in the middle.
+function TreeWindow:ScrollToNext()
+	local data = self:Snapshot()
+	for id, info in self.Rows do
+		if info.Row.Visible then
+			local nextIndex = math.min(TreeConfig.level(data, id) + 1, #info.Branch.Levels)
+			local cell = px(CELL)
+			local view = info.Strip.AbsoluteSize.X
+			info.Strip.CanvasPosition = Vector2.new(math.max(0, (nextIndex - 0.5) * cell - view / 2), 0)
+		end
+	end
+end
+
+function TreeWindow:ShowCategory(categoryId: string)
+	if not TreeConfig.CategoryById[categoryId] then
+		return
+	end
+	self.Category = categoryId
+	self.Tabs:Set(categoryId)
+	for _, info in self.Rows do
+		info.Row.Visible = info.Branch.Category == categoryId
+	end
+	self.Scroll.CanvasPosition = Vector2.zero
+	if not self.Selected or TreeConfig.ById[self.Selected.Id].Category ~= categoryId then
+		self.Selected = self:PickDefault(categoryId)
+	end
+	self:Refresh()
+	task.defer(function()
+		self:ScrollToNext()
+	end)
 end
 
 function TreeWindow:Refresh()
@@ -287,11 +377,17 @@ function TreeWindow:Refresh()
 		return
 	end
 	self.CashText.Text = Format.cash(cash)
+	local have, total = TreeConfig.totals(data)
+	self.TotalText.Text = string.format("%d / %d LEVELS", have, total)
 	for _, branch in TreeConfig.Branches do
 		local info = self.Rows[branch.Id]
 		local cur = TreeConfig.level(data, branch.Id)
 		info.Next = nil
-		info.Now.Text = cur > 0 and ("NOW " .. TreeConfig.formatBonus(branch, TreeConfig.bonus(data, branch.Id))) or "NOT GROWN YET"
+		if cur > 0 then
+			info.Now.Text = TreeConfig.formatBonus(branch, TreeConfig.bonus(data, branch.Id)) .. string.format("   LV %d/%d", cur, #branch.Levels)
+		else
+			info.Now.Text = string.format("NOT GROWN   LV 0/%d", #branch.Levels)
+		end
 		for k, node in info.Nodes do
 			local entry = branch.Levels[k]
 			local owned = k <= cur
@@ -336,9 +432,12 @@ function TreeWindow:Refresh()
 				node.Stroke.Thickness = px(4)
 				node.Pulse = false
 			end
-		end
-		for k, seg in info.Segments do
-			seg.BackgroundColor3 = (cur >= k + 1) and branch.Color or C.Disabled
+			if node.Halves.L then
+				node.Halves.L.BackgroundColor3 = (cur >= k) and branch.Color or C.Disabled
+			end
+			if node.Halves.R then
+				node.Halves.R.BackgroundColor3 = (cur >= k + 1) and branch.Color or C.Disabled
+			end
 		end
 	end
 	self:UpdateDetail()
@@ -354,7 +453,7 @@ function TreeWindow:UpdateDetail()
 	local cur = TreeConfig.level(data, sel.Id)
 	local entry = branch.Levels[sel.Level]
 	self.DetailDisc.BackgroundColor3 = branch.Color
-	self.DetailTitle.Text = string.format("%s  -  LEVEL %d", string.upper(branch.Name), sel.Level)
+	self.DetailTitle.Text = string.format("%s  -  LEVEL %d / %d", string.upper(branch.Name), sel.Level, #branch.Levels)
 	local after = TreeConfig.formatBonus(branch, entry.Bonus)
 	local body = branch.Description .. "  "
 	if cur > 0 and sel.Level > cur then
@@ -413,13 +512,14 @@ end
 function TreeWindow:OnOpen(args)
 	local branchId = args and args.Branch
 	if branchId and TreeConfig.ById[branchId] then
-		local lvl = self:LevelOf(branchId)
-		self.Selected = { Id = branchId, Level = math.min(lvl + 1, #TreeConfig.ById[branchId].Levels) }
-	else
-		self.Selected = self:PickDefault()
+		local branch = TreeConfig.ById[branchId]
+		self.Category = branch.Category
+		self.Selected = { Id = branchId, Level = math.min(self:LevelOf(branchId) + 1, #branch.Levels) }
+	elseif args and args.Category and TreeConfig.CategoryById[args.Category] then
+		self.Category = args.Category
+		self.Selected = nil
 	end
-	self.Scroll.CanvasPosition = Vector2.zero
-	self:Refresh()
+	self:ShowCategory(self.Category)
 	if not self._observing and self.Data then
 		self._observing = true
 		for _, key in { "Tree", "Cash" } do

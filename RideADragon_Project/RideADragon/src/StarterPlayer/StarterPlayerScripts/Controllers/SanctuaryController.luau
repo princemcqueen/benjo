@@ -4,6 +4,11 @@
 	timers), "Place Egg" / "Hatch" / "Unlock" prompts, and the owner's
 	guidance marker. All visuals are local (built from WorldConfig, so they do
 	not depend on the plot having streamed in).
+
+	Eggs are carried in your hand (HeldEggController): with an egg in hand every
+	free nest spot offers "Place Egg" - stand at the spot you like and the egg flies
+	from your hand into it. The nest itself places into the first free spot, or - with
+	an empty hand - takes the best egg out of the bag.
 ]]
 
 local Players = game:GetService("Players")
@@ -29,6 +34,8 @@ local nestPrompt: ProximityPrompt? = nil
 local nestAnchor: BasePart? = nil
 local plotId: number? = nil
 local clock = 0
+local pendingSlot: { [number]: boolean } = {} -- nest spots whose egg is still flying in
+local placing = false
 
 local SLOT_COUNT = #EggConfig.IncubatorPrices
 
@@ -221,6 +228,23 @@ local function buildSlot(i: number, state: string, info)
 		ring.CastShadow = false
 		ring.Parent = getFolder()
 		table.insert(s.Instances, ring)
+		-- "Place Egg" for the egg in hand: stand at the spot you want
+		local holder = anchorPart("PlaceSpot" .. i, cf * CFrame.new(0, -0.9, 0), Vector3.new(2.6, 1.4, 2.6))
+		table.insert(s.Instances, holder)
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "PlaceHerePrompt"
+		prompt.ActionText = "Place Egg"
+		prompt.ObjectText = "Nest spot " .. i
+		prompt.HoldDuration = 0.15
+		prompt.MaxActivationDistance = 6.5
+		prompt.RequiresLineOfSight = false
+		prompt.KeyboardKeyCode = Enum.KeyCode.E
+		prompt.Enabled = SanctuaryController.holding()
+		prompt.Parent = holder
+		prompt.Triggered:Connect(function()
+			SanctuaryController.placeHeld(i)
+		end)
+		s.PlacePrompt = prompt
 	elseif state == "Buy" then
 		local holder = anchorPart("BuySlot" .. i, cf, Vector3.new(2, 2, 2))
 		table.insert(s.Instances, holder)
@@ -280,7 +304,8 @@ local function refresh()
 		end
 		local cur = slots[i]
 		local same = cur and cur.State == state and (state ~= "Egg" or (cur.Info and cur.Info.Ready == info.Ready and cur.Info.Type == info.Type and cur.Info.Luck == info.Luck))
-		if not same then
+		local inFlight = state == "Egg" and pendingSlot[i] == true -- appears when the egg lands
+		if not same and not inFlight then
 			if state == "None" then
 				clearSlot(i)
 			else
@@ -291,10 +316,13 @@ local function refresh()
 	SanctuaryController.updatePrompt()
 end
 
+-- Is an egg in the player's hand?
+function SanctuaryController.holding(): boolean
+	local hc = registry and registry.HeldEggController
+	return hc ~= nil and hc.id() ~= nil
+end
+
 function SanctuaryController.updatePrompt()
-	if not nestPrompt then
-		return
-	end
 	local D = registry.DataController
 	local eggs = D and D.get("Eggs") or {}
 	local inc = D and D.get("Incubator")
@@ -306,8 +334,67 @@ function SanctuaryController.updatePrompt()
 			end
 		end
 	end
-	nestPrompt.Enabled = #eggs > 0 and free > 0
-	nestPrompt.ObjectText = string.format("Nest  -  %d egg%s in bag", #eggs, #eggs == 1 and "" or "s")
+	local holding = SanctuaryController.holding()
+	if nestPrompt then
+		nestPrompt.Enabled = (holding or #eggs > 0) and free > 0
+		if holding then
+			nestPrompt.ActionText = "Place Egg"
+			nestPrompt.ObjectText = "Nest  -  first free spot"
+		else
+			nestPrompt.ActionText = "Take Egg"
+			nestPrompt.ObjectText = string.format("Nest  -  %d egg%s in bag", #eggs, #eggs == 1 and "" or "s")
+		end
+	end
+	for _, s in slots do
+		if s.PlacePrompt then
+			s.PlacePrompt.Enabled = holding
+		end
+	end
+end
+
+-- Puts the egg in hand into a nest spot (nil = first free one). The server checks the
+-- range and the spot; on success the egg flies from the hand into the spot.
+function SanctuaryController.placeHeld(slot: number?)
+	if placing then
+		return
+	end
+	local hc = registry.HeldEggController
+	local eggId = hc and hc.id()
+	if not eggId then
+		return
+	end
+	placing = true
+	local eggType = hc.type()
+	local fromPos = hc.handPosition(LocalPlayer)
+	task.spawn(function()
+		local res = Net.request("Egg", "Place", { Id = eggId, Slot = slot })
+		placing = false
+		local uic = registry.UIController
+		if not res.ok then
+			if uic then
+				uic.HandleResult(res)
+			end
+			return
+		end
+		local landed = res.data.Slot
+		local target = slotCFrame(landed)
+		local audio = registry.AudioController
+		if hc and eggType and fromPos and target then
+			pendingSlot[landed] = true
+			local def = EggConfig.Eggs[eggType] or EggConfig.Eggs.HavenEgg
+			hc.fly(eggType, fromPos, target.Position, 0.5, function()
+				pendingSlot[landed] = nil
+				refresh()
+				hc.burst(target.Position, def.Glow)
+				if audio and nestAnchor then
+					audio.play3D("EggPlace", nestAnchor, 0.05)
+				end
+			end, nil, 0.95)
+		elseif audio then
+			audio.playUI("Click")
+		end
+		refresh()
+	end)
 end
 
 local function buildNest()
@@ -329,18 +416,14 @@ local function buildNest()
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.Parent = nestAnchor
 	prompt.Triggered:Connect(function()
-		local uic = registry.UIController
-		task.spawn(function()
-			local res = Net.request("Egg", "Place", {})
-			if res.ok then
-				local audio = registry.AudioController
-				if audio then
-					audio.playUI("Click")
-				end
-			elseif uic then
-				uic.HandleResult(res)
+		if SanctuaryController.holding() then
+			SanctuaryController.placeHeld(nil)
+		else
+			local hc = registry.HeldEggController
+			if hc then
+				hc.holdBest()
 			end
-		end)
+		end
 	end)
 	nestPrompt = prompt
 end
@@ -411,6 +494,9 @@ function SanctuaryController.Start()
 			SanctuaryController.updatePrompt()
 		end)
 	end
+	LocalPlayer:GetAttributeChangedSignal("HeldEggId"):Connect(function()
+		SanctuaryController.updatePrompt()
+	end)
 	RunService.Heartbeat:Connect(step)
 end
 

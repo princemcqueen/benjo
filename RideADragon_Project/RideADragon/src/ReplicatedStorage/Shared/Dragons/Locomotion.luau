@@ -105,6 +105,14 @@ function Locomotion.setStats(s, stats)
 	s.Stats = stats
 end
 
+-- Wind Dash (Dragon Bond level 5): for `duration` seconds the dragon surges forward at
+-- `multiplier` x its cruise (flight) or run (ground) speed, with or without steering input.
+function Locomotion.dash(s, duration: number, multiplier: number)
+	s.DashLeft = duration
+	s.DashMult = multiplier
+	table.insert(s.Events, { Kind = "Dash" })
+end
+
 local function setMode(s, mode: string)
 	if s.Mode ~= mode then
 		s.Mode = mode
@@ -223,6 +231,10 @@ local function stepGround(s, input, dt: number, world)
 		s.Yaw = wrap(s.Yaw + s.YawRate * dt)
 	end
 	local accel = (targetSpeed > s.Speed and R.GroundAccel * (st.Accel or 1) or R.GroundDecel)
+	if (s.DashLeft or 0) > 0 then
+		targetSpeed = math.max(targetSpeed, runSpeed * (s.DashMult or 2.2) * 0.9)
+		accel = math.max(accel, runSpeed * 10)
+	end
 	s.Speed = moveToward(s.Speed, targetSpeed, accel * dt)
 
 	local horiz = flatForward(s.Yaw) * s.Speed
@@ -254,9 +266,9 @@ local function stepGround(s, input, dt: number, world)
 		event(s, "Jump")
 	end
 
-	-- boost regenerates on the ground
+	-- boost regenerates on the ground (Great Tree "Second Wind" speeds it up)
 	s.Boosting = false
-	s.Boost = min(1, s.Boost + R.BoostRegenPerSecond * dt)
+	s.Boost = min(1, s.Boost + R.BoostRegenPerSecond * (st.BoostRegen or 1) * dt)
 end
 
 -- ============================================================== air (ballistic)
@@ -385,7 +397,7 @@ local function stepFly(s, input, dt: number, world)
 		event(s, "BoostStart")
 	end
 	if s.Boosting then
-		s.Boost = max(0, s.Boost - dt / R.BoostDuration)
+		s.Boost = max(0, s.Boost - dt / (R.BoostDuration * (st.BoostLong or 1))) -- Great Tree "Deep Breath"
 		if not wantBoost or s.Boost <= 0 then
 			s.Boosting = false
 			s.BoostLock = s.Boost <= 0 -- must release before boosting again
@@ -395,7 +407,7 @@ local function stepFly(s, input, dt: number, world)
 		if not input.Sprint then
 			s.BoostLock = false
 		end
-		s.Boost = min(1, s.Boost + R.BoostRegenPerSecond * dt)
+		s.Boost = min(1, s.Boost + R.BoostRegenPerSecond * (st.BoostRegen or 1) * dt)
 	end
 
 	-- desired direction and speed
@@ -412,6 +424,14 @@ local function stepFly(s, input, dt: number, world)
 	if input.Brake then
 		-- pulling back: air brake (turning still allowed with strafe input)
 		desiredSpeed = 0
+	end
+	local dashing = (s.DashLeft or 0) > 0
+	if dashing then
+		-- Wind Dash: surge forward (replaces boost, never stacks with it)
+		desiredSpeed = cruise * (s.DashMult or 2.5)
+		if mag <= 0.05 then
+			desiredDir = dirFrom(s.Yaw, s.FlightPitch)
+		end
 	end
 	local desiredPitch = clamp(math.asin(clamp(desiredDir.Y, -1, 1)), -R.MaxPitch, R.MaxPitch)
 
@@ -436,6 +456,9 @@ local function stepFly(s, input, dt: number, world)
 		end
 	else
 		accel = (mag < 0.05 or input.Brake) and R.AirBrake or R.AirBrake * 0.6
+	end
+	if dashing then
+		accel = math.max(accel, cruise * 9)
 	end
 	s.Speed = moveToward(s.Speed, speedCap, accel * dt)
 
@@ -559,6 +582,9 @@ local STEP = {
 	Returns the state; s.Events lists what happened this step.
 ]]
 function Locomotion.step(s, input, dt: number, world)
+	if (s.DashLeft or 0) > 0 then
+		s.DashLeft = math.max(0, s.DashLeft - dt)
+	end
 	table.clear(s.Events)
 	if dt <= 0 then
 		return s

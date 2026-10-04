@@ -84,6 +84,7 @@ local function buildVisual(model: Model)
 		Mutation = model:GetAttribute("Mutation") or "None",
 		Detail = detailFor(model),
 		ScaleOverride = type(displayScale) == "number" and displayScale or nil,
+		BondAura = (model:GetAttribute("BondLevel") or 0) >= 50, -- BondConfig Aura perk
 	})
 	visual.Name = "Visual"
 	for _, d in visual:GetDescendants() do
@@ -207,6 +208,14 @@ function AnimationController.play(model: Model, shot: string)
 	local entry = tracked[model]
 	if entry and entry.Anim then
 		entry.Anim:Play(shot)
+	end
+end
+
+-- Ends a held clip (fire breath) with its fade-out.
+function AnimationController.stop(model: Model, shot: string)
+	local entry = tracked[model]
+	if entry and entry.Anim then
+		entry.Anim:Stop(shot)
 	end
 end
 

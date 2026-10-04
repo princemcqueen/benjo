@@ -27,6 +27,7 @@ local Signal = require(Shared:WaitForChild("Util"):WaitForChild("Signal"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local Net = require(Shared:WaitForChild("Net"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local EconomyService = {}
 EconomyService.Spent = Signal.new()
@@ -124,11 +125,13 @@ local function onLoaded(player: Player, data)
 	if last <= 0 or Data.IsTemporary() then
 		return
 	end
-	local away = math.clamp(os.time() - last, 0, EconomyConfig.OfflineCapSeconds)
+	-- Great Tree "Dream Dens": longer cap and a better rate while you are away
+	local dens = TreeConfig.bonus(data, "Offline")
+	local away = math.clamp(os.time() - last, 0, EconomyConfig.OfflineCapSeconds * (1 + dens))
 	if away < 60 then
 		return
 	end
-	local amount = math.floor(baseRate(data) * away * EconomyConfig.OfflineRate)
+	local amount = math.floor(baseRate(data) * away * math.min(1, EconomyConfig.OfflineRate * (1 + dens)))
 	if amount > 0 then
 		EconomyService.Earn(player, amount, "Offline")
 		task.delay(4, function()

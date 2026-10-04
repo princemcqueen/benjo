@@ -40,6 +40,7 @@ local function newCtx(def, opts)
 	self.SpeciesId = opts.SpeciesId or "GreenDrake"
 	self.Detail = opts.Detail or "High"
 	self.Statue = opts.Statue == true
+	self.BondAura = opts.BondAura == true
 	self.Palette = def.Palette
 	self.Brick = def.Brick or {}
 	self.Model = Instance.new("Model")
@@ -1037,6 +1038,13 @@ local AURA_SPECS = {
 	{ Kind = "Sparkle", Color = Color3.fromRGB(255, 70, 50) },
 }
 
+-- Dragon Bond level 50: golden-white sparkles and a warm glow around the dragon
+local BOND_AURA_SPECS = {
+	{ Kind = "Sparkle", Color = Color3.fromRGB(255, 226, 120) },
+	{ Kind = "Sparkle", Color = Color3.fromRGB(255, 255, 255) },
+	{ Kind = "Sparkle", Color = Color3.fromRGB(255, 160, 210) },
+}
+
 -- ============================================================== mutation fx
 -- Part roles from names (palette slot each piece was built from).
 local NAME_ROLE = {
@@ -1089,6 +1097,50 @@ local MUTATION_FX = {
 		Neon = { Accent = true, Glow = true },
 		Stars = C3(225, 180, 255),
 		Particles = { { Kind = "Smoke", Color = C3(45, 0, 70) }, { Kind = "Sparkle", Color = C3(200, 120, 255) } },
+	},
+	-- Neon: every plate glows in electric cyan / magenta and the wings leave light ribbons
+	Neon = {
+		Neon = { Main = true, Dark = true, Belly = true, Membrane = true, Accent = true, Glow = true, Horn = true },
+		Light = { Color = C3(80, 255, 230), Range = 15, Brightness = 1.2 },
+		Trail = { Color = C3(80, 255, 230), Color2 = C3(255, 70, 210) },
+		Particles = { { Kind = "Sparkle", Color = C3(90, 255, 235) }, { Kind = "Sparkle", Color = C3(255, 80, 220) } },
+	},
+	-- Infernal: burning red body, hellfire, embers and a smoky trail
+	Infernal = {
+		Neon = { Accent = true, Belly = true, Glow = true },
+		Light = { Color = C3(255, 110, 30), Range = 17, Brightness = 1.5 },
+		Trail = { Color = C3(255, 120, 30), Color2 = C3(110, 10, 10) },
+		Particles = { { Kind = "Fire", Color = C3(255, 130, 30) }, { Kind = "Embers" }, { Kind = "Smoke", Color = C3(60, 20, 20) } },
+	},
+	-- Corrupted: glitching magenta/cyan static around a purple-black body, red eyes
+	Corrupted = {
+		Neon = { Accent = true, Glow = true },
+		Light = { Color = C3(255, 30, 150), Range = 13, Brightness = 1 },
+		Particles = { { Kind = "Glitch" }, { Kind = "Smoke", Color = C3(70, 0, 90) } },
+	},
+	-- Crystal: a translucent amethyst body with crystal clusters instead of spines
+	Crystal = {
+		Glass = { Main = true, Dark = true, Horn = true, Accent = true, Claw = true, Crystal = true, Membrane = true },
+		Reflect = { Belly = 0.25 },
+		Features = { "Crystals" },
+		Light = { Color = C3(190, 140, 255), Range = 15, Brightness = 1 },
+		Particles = { { Kind = "Sparkle", Color = C3(210, 170, 255) }, { Kind = "Sparkle", Color = C3(150, 255, 235) } },
+	},
+	-- Lightning: electric blue body, yellow neon veins, crackling sparks, spark ribbons
+	Lightning = {
+		Neon = { Accent = true, Glow = true, Horn = true, Belly = true },
+		Light = { Color = C3(255, 240, 90), Range = 19, Brightness = 1.7 },
+		Trail = { Color = C3(255, 245, 120), Color2 = C3(255, 255, 255) },
+		Particles = { { Kind = "Zap", Color = C3(255, 245, 140) }, { Kind = "Zap", Color = C3(150, 200, 255) } },
+	},
+	-- Angelic: halo, glowing wings, drifting white feathers and a golden light trail
+	Angelic = {
+		Neon = { Membrane = true, Glow = true },
+		Reflect = { Main = 0.12, Horn = 0.3 },
+		Features = { "Halo" },
+		Light = { Color = C3(255, 240, 200), Range = 19, Brightness = 1.3 },
+		Trail = { Color = C3(255, 246, 215), Color2 = C3(255, 215, 110) },
+		Particles = { { Kind = "Feathers" }, { Kind = "Sparkle", Color = C3(255, 224, 130) } },
 	},
 	-- every mutation at once (exclusive dragons): glowing accents, stars,
 	-- golden shine, rainbow + gold sparkles, fire and a void haze
@@ -1183,6 +1235,53 @@ local function emitter(c, spec)
 		e.LightEmission = 0.2
 		e.Size = seq({ { 0, 1.0 * S }, { 1, 2.6 * S } })
 		e.Transparency = seq({ { 0, 0.55 }, { 1, 1 } })
+	elseif spec.Kind == "Embers" then
+		-- glowing sparks drifting up (Infernal)
+		e.Texture = TEX.Sparkle
+		e.Rate = 14 * k
+		e.Lifetime = NumberRange.new(1.2, 2.2)
+		e.Speed = NumberRange.new(2, 5)
+		e.SpreadAngle = Vector2.new(40, 40)
+		e.Acceleration = Vector3.new(0, 6, 0)
+		e.Color = ColorSequence.new(C3(255, 200, 80), C3(255, 70, 20))
+		e.Size = seq({ { 0, 0.4 * S }, { 1, 0 } })
+		e.Transparency = seq({ { 0, 0 }, { 0.7, 0.3 }, { 1, 1 } })
+	elseif spec.Kind == "Glitch" then
+		-- flickering static blocks (Corrupted): magenta, cyan and black in fast succession
+		e.Texture = TEX.Sparkle
+		e.Rate = 26 * k
+		e.Lifetime = NumberRange.new(0.2, 0.45)
+		e.Speed = NumberRange.new(0, 3)
+		e.RotSpeed = NumberRange.new(-400, 400)
+		e.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, C3(255, 30, 160)),
+			ColorSequenceKeypoint.new(0.5, C3(40, 240, 255)),
+			ColorSequenceKeypoint.new(1, C3(20, 0, 30)),
+		})
+		e.Size = seq({ { 0, 0.55 * S }, { 0.5, 0.3 * S }, { 1, 0.7 * S } })
+		e.Shape = Enum.ParticleEmitterShape.Box
+	elseif spec.Kind == "Zap" then
+		-- fast, short-lived electric sparks (Lightning)
+		e.Texture = TEX.Sparkle
+		e.Rate = 34 * k
+		e.Lifetime = NumberRange.new(0.12, 0.28)
+		e.Speed = NumberRange.new(12, 26)
+		e.Drag = 0
+		e.Size = seq({ { 0, 0.45 * S }, { 1, 0 } })
+		e.Transparency = seq({ { 0, 0 }, { 1, 0.6 } })
+	elseif spec.Kind == "Feathers" then
+		-- white feathers floating down (Angelic)
+		e.Texture = TEX.Sparkle
+		e.Rate = 5 * k
+		e.Lifetime = NumberRange.new(2.4, 3.4)
+		e.Speed = NumberRange.new(0.3, 1)
+		e.Acceleration = Vector3.new(0, -1.6, 0)
+		e.LightEmission = 0.5
+		e.RotSpeed = NumberRange.new(-120, 120)
+		e.Color = ColorSequence.new(Color3.new(1, 1, 1))
+		e.Size = seq({ { 0, 0.55 * S }, { 1, 0.4 * S } })
+		e.Transparency = seq({ { 0, 0.1 }, { 0.7, 0.3 }, { 1, 1 } })
+		e.Shape = Enum.ParticleEmitterShape.Box
 	end
 	e.Parent = host
 	return e
@@ -1226,6 +1325,20 @@ local function applyFx(c, mutation: string?)
 			emitter(c, spec)
 		end
 	end
+	if c.BondAura and c:detail("Medium") then
+		for _, spec in BOND_AURA_SPECS do
+			local e = emitter(c, spec)
+			e.Name = "BondAura"
+			e.Rate *= 1.6
+		end
+		local glow = Instance.new("PointLight")
+		glow.Name = "BondGlow"
+		glow.Color = Color3.fromRGB(255, 214, 140)
+		glow.Range = 16 * c.S
+		glow.Brightness = 1.1
+		glow.Shadows = false
+		glow.Parent = c.Bones.Body
+	end
 	local shine = c.Brick.Shine
 	local fx = mutation and MUTATION_FX[mutation]
 	if not fx and not shine then
@@ -1261,6 +1374,39 @@ local function applyFx(c, mutation: string?)
 			emitter(c, spec)
 		end
 	end
+	if fx and fx.Light and c:detail("Medium") then
+		-- the dragon lights up its surroundings in its mutation colour
+		local light = Instance.new("PointLight")
+		light.Name = "MutationLight"
+		light.Color = fx.Light.Color
+		light.Range = fx.Light.Range * c.S
+		light.Brightness = fx.Light.Brightness
+		light.Shadows = false
+		light.Parent = c.Bones.Body
+	end
+	if fx and fx.Trail and c:detail("Medium") then
+		-- ribbons of light behind both wing tips (only visible while the wings move)
+		for _, side in { "L", "R" } do
+			local tip = c.Bones["Wing" .. side .. "3"]
+			local a0 = tip and tip:FindFirstChild("WingTip" .. side)
+			local a1 = tip and tip:FindFirstChild("WingTipInner" .. side)
+			if a0 and a1 then
+				local trail = Instance.new("Trail")
+				trail.Name = "MutationTrail"
+				trail.Attachment0 = a0
+				trail.Attachment1 = a1
+				trail.Color = ColorSequence.new(fx.Trail.Color, fx.Trail.Color2)
+				trail.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.15), NumberSequenceKeypoint.new(1, 1) })
+				trail.WidthScale = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0.1) })
+				trail.Lifetime = 0.6
+				trail.MinLength = 0.05
+				trail.LightEmission = 1
+				trail.LightInfluence = 0
+				trail.FaceCamera = true
+				trail.Parent = tip
+			end
+		end
+	end
 end
 
 -- ============================================================== public
@@ -1289,6 +1435,15 @@ function BrickBuilder.build(speciesId: string, opts: { [string]: any }?)
 	if o.Statue then
 		c.Palette = Species.statuePalette(o.StatueColor)
 	end
+	local mfx = o.Mutation and MUTATION_FX[o.Mutation]
+	if mfx and mfx.Features then
+		for _, f in mfx.Features do
+			-- (a mutation's crystals replace the spines like the species' own do)
+			c.MutationFeatures = c.MutationFeatures or {}
+			c.MutationFeatures[f] = not c.Features[f]
+			c.Features[f] = true
+		end
+	end
 	buildRoot(c, o.Root)
 	buildTorso(c)
 	local neckEnd = buildNeck(c)
@@ -1306,6 +1461,13 @@ function BrickBuilder.build(speciesId: string, opts: { [string]: any }?)
 	for _, feature in def.Features or {} do
 		local fn = FEATURES[feature]
 		if fn then
+			fn(c, head)
+		end
+	end
+	-- features the mutation brings along (halo, crystals) unless the species has them already
+	for feature, extra in c.MutationFeatures or {} do
+		local fn = FEATURES[feature]
+		if fn and extra then
 			fn(c, head)
 		end
 	end

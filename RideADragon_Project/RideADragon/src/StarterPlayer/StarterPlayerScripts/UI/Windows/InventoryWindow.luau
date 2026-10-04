@@ -41,6 +41,7 @@ local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local Odds = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Odds"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local C = Theme.Colors
 
@@ -1206,7 +1207,7 @@ function InventoryWindow:DoRelease()
 	if not record then
 		return
 	end
-	local refund = math.floor(record.IncomePerSecond * EconomyConfig.ReleaseRefundSeconds + 0.5)
+	local refund = math.floor(record.IncomePerSecond * TreeConfig.refundSeconds(self.Data and self.Data.all()) + 0.5)
 	local uid = record.UniqueId
 	task.spawn(function()
 		local yes = self.UIC.Confirm({

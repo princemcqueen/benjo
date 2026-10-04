@@ -17,6 +17,7 @@ local Net = require(Shared:WaitForChild("Net"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local SpinConfig = require(Configs:WaitForChild("SpinConfig"))
 local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local UI = script.Parent.Parent
 local Theme = require(UI.Theme)
@@ -195,7 +196,8 @@ function SpinWindow:Refresh()
 	self.Ready = total > 0
 	self.SpinButton:SetEnabled(total > 0 and not self.Busy)
 	self.AutoButton:SetEnabled(total > 1 and not self.Busy)
-	local luck = tonumber(LocalPlayer:GetAttribute("Luck")) or 1
+	local luck = (tonumber(LocalPlayer:GetAttribute("Luck")) or 1) * (1 + TreeConfig.bonus(data, "SpinLuck"))
+	luck = math.floor(luck * 100 + 0.5) / 100
 	for i, p in SpinConfig.odds(luck) do
 		self.Rows[i].Text = Format.percent(p)
 	end

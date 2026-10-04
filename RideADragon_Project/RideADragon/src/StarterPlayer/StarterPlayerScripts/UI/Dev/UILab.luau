@@ -38,7 +38,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -70,12 +70,46 @@ function UILab.reset()
 		hud._labRiding = false
 		hud:SetRiding(false)
 	end
+	if hud and hud._labHeld then
+		hud._labHeld = false
+		hud:SetHeldEgg(nil)
+	end
+	local announce = registry.AnnounceController
+	if announce then
+		announce.clear()
+	end
+	local wild = registry.WildEggController
+	if wild then
+		wild.clear()
+	end
 end
 
 function UILab.show(screen: string)
 	UILab.reset()
 	task.wait(0.2)
 	if screen == "HUD" then
+		return nil
+	elseif screen == "HeldEgg" then
+		-- HUD with an egg in your hand (chip above the dragon card)
+		local hud = registry.Hud
+		if hud then
+			hud._labHeld = true
+			hud:SetHeldEgg({ Id = "E_lab", Type = "GroveEgg", Name = "Grove Egg", Luck = 12, Glow = Color3.fromRGB(120, 220, 120) })
+		end
+		return nil
+	elseif screen == "WildEgg" then
+		-- Lucky Wild Egg tracker (headline + countdown + arrow + distance)
+		local wild = registry.WildEggController
+		if wild then
+			wild.preview()
+		end
+		return nil
+	elseif screen == "RareBanner" then
+		-- server-wide ultra-rare hatch banner (mega variant: the biggest one)
+		local announce = registry.AnnounceController
+		if announce then
+			announce.preview(true)
+		end
 		return nil
 	elseif screen == "Riding" then
 		-- HUD while mounted: ride panel (desktop) / touch cluster (mobile)
@@ -271,12 +305,12 @@ local function buildPanel()
 		end
 	end)
 	label("TEST (Studio only)", 16)
-	grid({ "+$1M", "ALL 30 DRAGONS", "FILL EGGS", "HATCH NOW" }, function(i)
-		local actions = { "Cash", "Dragons", "Eggs", "HatchNow" }
+	grid({ "+$1M", "ALL 30 DRAGONS", "FILL EGGS", "HATCH NOW", "WILD EGG", "BOND MAX", "MEGA BANNER" }, function(i)
+		local actions = { "Cash", "Dragons", "Eggs", "HatchNow", "WildEgg", "BondMax", "Banner" }
 		task.spawn(function()
 			local Net = require(game:GetService("ReplicatedStorage").Shared.Net)
 			local res = Net.request("Dev", actions[i], {})
-			ui.HandleResult(res, res.ok and ({ "+$1,000,000", "+5 dragons", "Egg bag filled", "Eggs are ready to hatch" })[i] or nil)
+			ui.HandleResult(res, res.ok and ({ "+$1,000,000", "+5 dragons", "Egg bag filled", "Eggs are ready to hatch", "A wild egg appeared!", "Bond level 50 - try Q / E / Z", "Banner sent" })[i] or nil)
 		end)
 	end)
 	output = label("", 120)

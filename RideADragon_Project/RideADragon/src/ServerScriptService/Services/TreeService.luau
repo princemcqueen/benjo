@@ -12,7 +12,8 @@
 	  TreeService.Bonus(player, id) -> total bonus of that branch (0 if not bought)
 	Net (domain "Tree"):
 	  Buy { Id } -> { Id, Level, Bonus }
-	Player attribute "TreeFlySpeed" mirrors the FlySpeed bonus for the client.
+	Clients read data.Tree (replicated) through TreeConfig.bonus; the server applies
+	the bonuses where they matter (see the TreeConfig header).
 	Signal: Bought(player, id, level)
 ]]
 
@@ -39,9 +40,8 @@ function TreeService.Level(player: Player, id: string): number
 	return TreeConfig.level(Data.Get(player), id)
 end
 
--- Mirrors bonuses other systems read (attribute for the client's flight stats, HUD luck).
+-- Re-reads everything derived from the tree (luck attribute, companion stats).
 function TreeService.Refresh(player: Player)
-	player:SetAttribute("TreeFlySpeed", TreeService.Bonus(player, "FlySpeed"))
 	local boosts = Services.BoostService
 	if boosts then
 		boosts.Refresh(player)

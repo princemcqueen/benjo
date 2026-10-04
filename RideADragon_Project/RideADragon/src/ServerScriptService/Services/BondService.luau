@@ -38,6 +38,17 @@ BondService.Burned = Signal.new() -- (player, instance)
 local Data
 local Services
 
+-- Great Tree bonuses (0 when the tree service is absent)
+local function tree(player: Player, id: string): number
+	local t = Services.TreeService
+	return t and t.Bonus(player, id) or 0
+end
+
+-- cooldown with Quick Feathers applied
+local function cooldownFor(player: Player, base: number): number
+	return base * (1 - math.clamp(tree(player, "QuickFeathers"), 0, 0.9))
+end
+
 local lastPos: { [Player]: Vector3 } = {}
 local cooldowns: { [Player]: { [string]: number } } = {}
 local breathing: { [Player]: { Token: number, Start: number } } = {}
@@ -132,7 +143,7 @@ local function tick()
 				elseif model:GetAttribute("Mode") == "Fly" then
 					rate = cfg.Rate.Fly
 				end
-				BondService.AddPoints(player, comp.Uid, rate * cfg.TickSeconds)
+				BondService.AddPoints(player, comp.Uid, rate * cfg.TickSeconds * (1 + tree(player, "BondGrowth")))
 			end
 		else
 			lastPos[player] = nil
@@ -209,13 +220,14 @@ local function breathTick(player: Player, comp)
 	local cfg = BondConfig.Abilities.Fire
 	local origin = root.Position + root.CFrame.LookVector * (comp.Info and comp.Info.BodyRadius or 4)
 	local look = root.CFrame.LookVector
+	local range = cfg.Range * (1 + tree(player, "Dragonfire"))
 	for _, inst in CollectionService:GetTagged("Burnable") do
 		if not inst:GetAttribute("Burning") then
 			local pos = instancePosition(inst)
 			if pos then
 				local to = pos - origin
 				local d = to.Magnitude
-				if d <= cfg.Range + 6 and (d < 6 or to.Unit:Dot(look) > 0.55) then
+				if d <= range + 6 and (d < 6 or to.Unit:Dot(look) > 0.55) then
 					ignite(player, inst)
 				end
 			end
@@ -236,7 +248,7 @@ local function stopBreath(player: Player, token: number?)
 	end
 	local cd = cooldowns[player]
 	if cd then
-		cd.Fire = os.clock() + BondConfig.Abilities.Fire.Cooldown
+		cd.Fire = os.clock() + cooldownFor(player, BondConfig.Abilities.Fire.Cooldown)
 	end
 end
 
@@ -282,13 +294,13 @@ local function onAction(player: Player, p)
 	local action = p.Action
 	if action == "Dash" then
 		if BondConfig.has(points, "Dash") and t >= (cd.Dash or 0) then
-			cd.Dash = t + ab.Dash.Cooldown
+			cd.Dash = t + cooldownFor(player, ab.Dash.Cooldown)
 			comp.DashUntil = t + ab.Dash.Duration + ab.Dash.Allowance
 			mount.PlayShot(player, "Dash")
 		end
 	elseif action == "Flourish" then
 		if BondConfig.has(points, "Flourish") and t >= (cd.Flourish or 0) then
-			cd.Flourish = t + ab.Flourish.Cooldown
+			cd.Flourish = t + cooldownFor(player, ab.Flourish.Cooldown)
 			mount.PlayShot(player, "Flourish")
 		end
 	elseif action == "FireStart" then

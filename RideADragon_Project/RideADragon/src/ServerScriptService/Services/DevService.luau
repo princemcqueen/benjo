@@ -4,7 +4,7 @@
 	Nothing is registered on live servers: every handler is behind
 	RunService:IsStudio(), so clients can never reach these in a real game.
 
-	Net (domain "Dev"): Cash, Dragons, Eggs, HatchNow
+	Net (domain "Dev"): Cash, Dragons, Eggs, HatchNow, WildEgg, BondMax, Banner
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,6 +16,7 @@ local Net = require(Shared:WaitForChild("Net"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 
@@ -69,7 +70,7 @@ function DevService.Init(services)
 		if not data then
 			return false, "NOT_LOADED"
 		end
-		local cap = EconomyConfig.upgradeValue("EggStorage", data.Upgrades.EggStorage or 0)
+		local cap = TreeConfig.eggCapacity(data)
 		local types = {}
 		for id in EggConfig.Eggs do
 			table.insert(types, id)
@@ -97,6 +98,44 @@ function DevService.Init(services)
 			copy.Start = math.min(copy.Start, t - 1)
 			Data.Set(player, { "Incubator", "Slots", key }, copy)
 		end
+		return true
+	end, RATE)
+
+	-- a Lucky Wild Egg right now (payload Tier = Lucky | Epic | Mythic | Rainbow, default random)
+	Net.handle("Dev", "WildEgg", function(_player, p)
+		local wild = services.WildEggService
+		if not wild then
+			return false, "NO_SERVICE"
+		end
+		local tier = type(p) == "table" and type(p.Tier) == "string" and p.Tier or nil
+		if not wild.Spawn(tier) then
+			return false, "BUSY", "A wild egg is already out (or there is no free egg area yet)."
+		end
+		return true
+	end, RATE)
+
+	-- max Dragon Bond on the equipped dragon (try Dash / Fire Breath / Dance / Aura at once)
+	Net.handle("Dev", "BondMax", function(player)
+		local data = Data.Get(player)
+		local uid = data and data.EquippedDragon
+		if not uid or uid == "" or not data.Dragons[uid] then
+			return false, "NO_DRAGON", "Equip a dragon first."
+		end
+		services.BondService.AddPoints(player, uid, 1e9)
+		return true
+	end, RATE)
+
+	-- the server-wide ultra-rare banner, immediately
+	Net.handle("Dev", "Banner", function(player)
+		Net.broadcast("RareHatch", {
+			Player = player.DisplayName,
+			UserId = player.UserId,
+			Species = "VoidDragon",
+			Mutation = "Rainbow",
+			Rarity = "Secret",
+			Odds = 12500000,
+			Mega = true,
+		})
 		return true
 	end, RATE)
 

@@ -40,6 +40,7 @@ AudioConfig.Sounds = {
 
 	-- Eggs & hatching
 	EggPickup = { Id = "", Group = "SFX", Volume = 0.7 }, -- "pickup chime"
+	EggPlace = { Id = "", Group = "SFX", Volume = 0.6 }, -- "soft thud" / "wood tap" (egg set into the nest)
 	EggShake = { Id = "", Group = "SFX", Volume = 0.5 }, -- "wood creak" / "egg wobble"
 	EggCrack = { Id = "", Group = "SFX", Volume = 0.8 }, -- "egg crack"
 	Hatch = { Id = "", Group = "SFX", Volume = 0.9 }, -- "magic burst"

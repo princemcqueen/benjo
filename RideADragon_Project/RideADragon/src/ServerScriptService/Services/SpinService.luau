@@ -19,8 +19,8 @@ local Net = require(Shared:WaitForChild("Net"))
 local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
 local SpinConfig = require(Configs:WaitForChild("SpinConfig"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
-local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local SpinService = {}
 
@@ -187,7 +187,7 @@ local function giveEggs(player: Player, eggType: string, count: number): number
 	if not data then
 		return 0
 	end
-	local cap = EconomyConfig.upgradeValue("EggStorage", data.Upgrades.EggStorage or 0)
+	local cap = TreeConfig.eggCapacity(data)
 	local list = table.clone(data.Eggs)
 	local given = 0
 	for _ = 1, count do
@@ -244,13 +244,16 @@ local function roll(player: Player)
 	end
 	local free = now() >= (tonumber(s.NextFree) or 0)
 	if free then
-		Data.Set(player, { "Spin", "NextFree" }, now() + SpinConfig.FreeSpinSeconds)
+		-- Great Tree "Quick Spin": the free spin comes back sooner
+		local wait = SpinConfig.FreeSpinSeconds * (1 - math.clamp(TreeConfig.bonus(data, "SpinSpeed"), 0, 0.9))
+		Data.Set(player, { "Spin", "NextFree" }, now() + math.floor(wait))
 	elseif (tonumber(s.Tickets) or 0) > 0 then
 		Data.Increment(player, { "Spin", "Tickets" }, -1)
 	else
 		return false, "NO_SPINS", "No spins left. Your free spin is coming soon!"
 	end
 	local luck = Services.BoostService and Services.BoostService.LuckMultiplier(player) or 1
+	luck *= 1 + TreeConfig.bonus(data, "SpinLuck") -- Great Tree "Lucky Wheel"
 	local index = pick(luck)
 	local prize = grantPrize(player, SpinConfig.Segments[index])
 	Data.Increment(player, { "Stats", "Spins" }, 1)

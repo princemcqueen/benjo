@@ -17,6 +17,7 @@ local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local EggController = {}
 
@@ -183,9 +184,15 @@ local function tryPickup(e)
 			removeEgg(e.Key, true)
 			local uic = registry.UIController
 			local def = EggConfig.Eggs[res.data.Type]
+			-- the egg jumps into your hand (or into the bag when your hand is full)
+			local held = registry.HeldEggController
+			if held and res.data.Held then
+				held.flyIn(res.data.Type, e.Position)
+			end
 			if uic then
 				local luck = tonumber(res.data.Luck) or 1
-				uic.Notify(luck >= 25 and "rare" or "success", "+1 " .. (def and def.Name or "Egg") .. (luck > 1 and ("  (x" .. tostring(luck) .. " LUCK)") or ""))
+				local where = res.data.Held and "  -  in your hand" or "  -  in your bag"
+				uic.Notify(luck >= 25 and "rare" or "success", "+1 " .. (def and def.Name or "Egg") .. (luck > 1 and ("  (x" .. tostring(luck) .. " LUCK)") or "") .. where)
 			end
 		else
 			e.Pending = false
@@ -211,7 +218,8 @@ end
 local function step(dt: number)
 	clock += dt
 	local positions, slack = myPositions()
-	local range = GameConfig.Interaction.EggPickupRange + slack
+	-- Great Tree "Egg Magnet" widens the pickup range
+	local range = GameConfig.Interaction.EggPickupRange * (1 + TreeConfig.bonus(registry.DataController.all(), "EggMagnet")) + slack
 	for _, e in eggs do
 		local model = e.Model
 		if model and model.Parent then

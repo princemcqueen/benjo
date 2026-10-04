@@ -25,6 +25,7 @@ local Locomotion = require(Shared:WaitForChild("Dragons"):WaitForChild("Locomoti
 local DragonStats = require(Shared:WaitForChild("DragonStats"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local DragonController = {}
 DragonController.RidingChanged = Signal.new() -- (riding)
@@ -90,11 +91,16 @@ local function buildStats()
 	local record = equippedRecord()
 	local species = DragonConfig.Species[m:GetAttribute("SpeciesId") or ""] or DragonConfig.Species.GreenDrake
 	local handling = species.Handling or {}
+	-- Great Tree bonuses (data.Tree replicates; the server applies the same ones)
+	local data = registry.DataController.all()
+	local tree = function(id: string)
+		return TreeConfig.bonus(data, id)
+	end
 	return {
-		RunSpeed = record and DragonStats.runSpeed(record) or (m:GetAttribute("RunSpeed") or 40),
-		-- Great Tree "Wind Wings": the server mirrors the bonus as a player attribute
-		CruiseSpeed = record and DragonStats.cruiseSpeed(record, LocalPlayer:GetAttribute("TreeFlySpeed") or 0)
-			or (m:GetAttribute("CruiseSpeed") or 77),
+		RunSpeed = record and DragonStats.runSpeed(record, tree("RunSpeed")) or (m:GetAttribute("RunSpeed") or 40),
+		CruiseSpeed = record and DragonStats.cruiseSpeed(record, tree("FlySpeed")) or (m:GetAttribute("CruiseSpeed") or 77),
+		BoostLong = 1 + tree("BoostLong"),
+		BoostRegen = 1 + tree("BoostRegen"),
 		Scale = m:GetAttribute("Scale") or 1,
 		HipHeight = m:GetAttribute("HipHeight") or 4.8,
 		BodyRadius = m:GetAttribute("BodyRadius") or 4.2,
@@ -502,6 +508,18 @@ function DragonController.toggleRide()
 	end)
 end
 
+-- Wind Dash (Dragon Bond): a short surge forward. BondController owns cooldown / unlock.
+function DragonController.dash(duration: number, multiplier: number): boolean
+	local s, m, r = state, model, root
+	if not riding or not s or not m or not r then
+		return false
+	end
+	Locomotion.dash(s, duration, multiplier)
+	registry.AnimationController.play(m, "Dash")
+	registry.CameraController.shake(0.14)
+	return true
+end
+
 function DragonController.isRiding(): boolean
 	return riding
 end
@@ -537,8 +555,8 @@ function DragonController.Start()
 			Locomotion.setStats(state, buildStats())
 		end
 	end)
-	-- Great Tree "Wind Wings" bought while flying: new cruise speed right away
-	LocalPlayer:GetAttributeChangedSignal("TreeFlySpeed"):Connect(function()
+	-- Great Tree upgrades bought while riding take effect right away
+	registry.DataController.observe("Tree", function()
 		if state and model then
 			Locomotion.setStats(state, buildStats())
 		end

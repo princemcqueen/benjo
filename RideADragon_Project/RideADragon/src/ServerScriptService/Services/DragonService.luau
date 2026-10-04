@@ -35,6 +35,7 @@ local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local WorldConfig = require(Configs:WaitForChild("WorldConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
 
 local DragonService = {}
 DragonService.Added = Signal.new()
@@ -330,7 +331,7 @@ local function handleRelease(player: Player, p)
 	if ridingThis(player, p.Id) then
 		return false, "RIDING", "Dismount before releasing the dragon you are riding."
 	end
-	local refund = math.floor(record.IncomePerSecond * EconomyConfig.ReleaseRefundSeconds + 0.5)
+	local refund = math.floor(record.IncomePerSecond * TreeConfig.refundSeconds(data) + 0.5)
 	DragonService.Remove(player, p.Id)
 	Data.Increment(player, { "Stats", "Released" }, 1)
 	if refund > 0 then

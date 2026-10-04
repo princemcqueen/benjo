@@ -13,10 +13,11 @@
 	  InputController.setVirtual(action, down)     (mobile buttons)
 	  InputController.Pressed: Signal(action)
 
-	Actions: Jump, Descend, Sprint, Roar, Ride, FreeCursor, MouseLock
+	Actions: Jump, Descend, Sprint, Roar, Ride, FreeCursor, MouseLock, Dash, Fire, Flourish
 	Desktop: Space jump/takeoff/ascend, Ctrl or C descend/land, Shift sprint/
 	         boost, R ride, F roar, V mouse steering on/off, hold Alt to free
 	         the cursor while riding.
+	Dragon Bond: Q dash (B), hold E fire breath (LB), Z sky dance (RB).
 	Gamepad: A jump/ascend, LT descend, RT boost, Y ride, X roar.
 ]]
 
@@ -40,6 +41,10 @@ local BINDINGS = {
 	Descend = { Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl, Enum.KeyCode.C, Enum.KeyCode.ButtonL2 },
 	Sprint = { Enum.KeyCode.LeftShift, Enum.KeyCode.RightShift, Enum.KeyCode.ButtonR2, Enum.KeyCode.ButtonL3 },
 	Roar = { Enum.KeyCode.F, Enum.KeyCode.ButtonX },
+	-- Dragon Bond abilities (unlocked by bond level, see BondConfig)
+	Dash = { Enum.KeyCode.Q, Enum.KeyCode.ButtonB },
+	Fire = { Enum.KeyCode.E, Enum.KeyCode.ButtonL1 },
+	Flourish = { Enum.KeyCode.Z, Enum.KeyCode.ButtonR1 },
 	FreeCursor = { Enum.KeyCode.LeftAlt, Enum.KeyCode.RightAlt },
 	MouseLock = { Enum.KeyCode.V },
 }

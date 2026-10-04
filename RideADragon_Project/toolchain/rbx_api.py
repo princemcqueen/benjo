@@ -572,7 +572,14 @@ def install(sim):
             cf = part_cframe(sim, p)
             sz = p.get_prop("Size")
             rr = 0.5 * math.sqrt(sz.x ** 2 + sz.y ** 2 + sz.z ** 2)
-            if (cf.pos() - pos).mag() <= radius + rr and _passes_filter(sim, p, params):
+            if (cf.pos() - pos).mag() > radius + rr or not _passes_filter(sim, p, params):
+                continue  # cheap bounding-sphere reject first
+            # exact test: distance from the point to the oriented box (shapes count as boxes)
+            rel = cf.point_to_object(pos)
+            dx = max(abs(rel.x) - sz.x / 2, 0.0)
+            dy = max(abs(rel.y) - sz.y / 2, 0.0)
+            dz = max(abs(rel.z) - sz.z / 2, 0.0)
+            if (dx * dx + dy * dy + dz * dz) ** 0.5 <= radius:
                 out.append(p)
         return T(*out)
 

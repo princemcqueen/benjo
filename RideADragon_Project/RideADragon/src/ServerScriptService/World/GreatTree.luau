@@ -2,10 +2,11 @@
 	GreatTree - the giant LEGO-style tree in the plaza (skill tree station).
 
 	A stepped stone base, a trunk of stacked round bricks, a tiered studded crown
-	and five limbs, one per TreeConfig branch. Every limb ends in a pod with five
-	fruit orbs (one per level). The orbs are tagged "TreeOrb" with attributes
-	Branch / Level: the client lights the ones the player has bought
-	(TreeController), so the tree itself shows your progress.
+	and five limbs, one per TreeConfig category (Luck, Wealth, Flight, Nest,
+	Bond). Every limb ends in a pod with five fruit orbs; an orb lights up for
+	every fifth of the category's levels the player has bought. The orbs are
+	tagged "TreeOrb" with attributes Category / Level (1-5): the client lights
+	them (TreeController), so the tree itself shows your progress.
 
 	Local frame: origin on the ground in the middle of the base, local -Z faces
 	the plaza (where the prompt and the sign are).
@@ -149,27 +150,27 @@ function GreatTree.build(parent: Instance, at: Vector3, yaw: number)
 	pe.Parent = fx
 	CollectionService:AddTag(pe, "FX")
 
-	-- ---- five limbs: one per branch, each ending in a pod with five fruit orbs
+	-- ---- five limbs: one per category, each ending in a pod with five fruit orbs
 	local limbY = { 13, 11, 15, 12, 14 }
-	for idx, branch in TreeConfig.Branches do
+	for idx, cat in TreeConfig.Categories do
 		local a = math.rad((idx - 1) * 72 + 18)
 		local radial = V(math.cos(a), 0, math.sin(a))
 		local tangent = V(-math.sin(a), 0, math.cos(a))
 		local pod = radial * 13.5 + V(0, limbY[idx] + 3, 0)
 		b:beam(radial * 3.8 + V(0, limbY[idx], 0), pod, 2.2, BARK[2], M.SmoothPlastic)
 		b:roundBrick(3.6, 11, pod, LEAF[2], { Studs = "None" })
-		local top = b:roundBrick(2.4, 7.5, pod + V(0, 3, 0), branch.Color, { Studs = "Top" })
-		top.Name = "Pod_" .. branch.Id
-		label(top, string.upper(branch.Name), branch.Color, V(0, 10, 0))
-		for level = 1, #branch.Levels do
+		local top = b:roundBrick(2.4, 7.5, pod + V(0, 3, 0), cat.Color, { Studs = "Top" })
+		top.Name = "Pod_" .. cat.Id
+		label(top, string.upper(cat.Name), cat.Color, V(0, 10, 0))
+		for level = 1, 5 do
 			local p = pod + V(0, 7.4, 0) + tangent * ((level - 3) * 3.4)
 			local orb = b:ball(2.4, p, ORB_OFF, M.SmoothPlastic, { Transparency = 0.35, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
-			orb.Name = string.format("Orb_%s_%d", branch.Id, level)
-			orb:SetAttribute("Branch", branch.Id)
+			orb.Name = string.format("Orb_%s_%d", cat.Id, level)
+			orb:SetAttribute("Category", cat.Id)
 			orb:SetAttribute("Level", level)
 			CollectionService:AddTag(orb, "TreeOrb")
 			local light = Instance.new("PointLight")
-			light.Color = branch.Color
+			light.Color = cat.Color
 			light.Range = 9
 			light.Brightness = 1.4
 			light.Shadows = false

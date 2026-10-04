@@ -30,6 +30,12 @@ local MUTATION_TINT = {
 	Golden = Color3.fromRGB(255, 214, 120),
 	Shadow = Color3.fromRGB(120, 92, 170),
 	Rainbow = Color3.fromRGB(255, 190, 235),
+	Neon = Color3.fromRGB(160, 255, 240),
+	Infernal = Color3.fromRGB(255, 130, 100),
+	Corrupted = Color3.fromRGB(190, 90, 170),
+	Crystal = Color3.fromRGB(205, 175, 255),
+	Lightning = Color3.fromRGB(255, 244, 150),
+	Angelic = Color3.fromRGB(255, 250, 235),
 }
 
 local function modelsFolder(): Instance?

@@ -6,6 +6,7 @@
 	  LEFT          Dragons / Index / Quests       (desktop)
 	  RIGHT         Shop / Daily / Settings        (desktop)
 	  BOTTOM CENTER current dragon (name, level, speed) + ride button
+	                (above it: the egg in your hand, with a "put away" button)
 	  BOTTOM RIGHT  boost meter + speed while riding
 	  TOP RIGHT     objective tracker (tutorial / quest)
 
@@ -36,6 +37,7 @@ local DragonConfig = require(Configs.DragonConfig)
 local EconomyConfig = require(Configs.EconomyConfig)
 local MonetizationConfig = require(Configs.MonetizationConfig)
 local TreeConfig = require(Configs.TreeConfig)
+local BondConfig = require(Configs.BondConfig)
 
 local C = Theme.Colors
 local H = Theme.Hud
@@ -53,6 +55,12 @@ local RIGHT_BUTTONS = {
 	{ Id = "Shop", Text = "SHOP", Icon = "Bag", Key = "B" },
 	{ Id = "Daily", Text = "DAILY", Icon = "Gift", Key = "J" },
 	{ Id = "Settings", Text = "SETTINGS", Icon = "Gear", Key = "P" },
+}
+-- Dragon Bond ability chips (desktop bond bar)
+local ABILITY_CHIPS = {
+	{ Id = "Dash", Key = "Q", Name = "DASH" },
+	{ Id = "Fire", Key = "E", Name = "FIRE" },
+	{ Id = "Flourish", Key = "Z", Name = "DANCE" },
 }
 local PHONE_BUTTONS = { "Inventory", "Shop", "More" }
 local MORE_ITEMS = { "Teleport", "Index", "Quests", "Daily", "Settings" }
@@ -81,7 +89,9 @@ function Hud.new(ui, registry)
 	self:BuildCash()
 	self:BuildSideButtons()
 	self:BuildCurrentDragon()
+	self:BuildHeldEgg()
 	self:BuildRidePanel()
+	self:BuildBondBar()
 	self:BuildObjective()
 	self.Mobile = MobileControls.new(self.Root, registry)
 	self:Layout()
@@ -520,6 +530,80 @@ function Hud:BuildCurrentDragon()
 	end)
 end
 
+-- ============================================================== egg in hand
+-- Chip above the dragon card while an egg is carried: which egg, and a button that puts
+-- it back into the bag (HeldEggController owns the state).
+function Hud:BuildHeldEgg()
+	local root = Create("Frame", {
+		Name = "HeldEgg",
+		AnchorPoint = Vector2.new(0.5, 1),
+		BackgroundColor3 = H.Panel,
+		BackgroundTransparency = H.Transparency,
+		BorderSizePixel = 0,
+		Visible = false,
+		Parent = self.Root,
+	})
+	root:SetAttribute("QARegion", "HudHeldEgg")
+	Kit.corner(root, 16)
+	self.HeldStroke = Kit.stroke(root, H.Stroke, Theme.Stroke.Normal, H.StrokeTransparency)
+	self.HeldCard = root
+	local disc = Create("Frame", {
+		Name = "Disc",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0.035, 0.5),
+		Size = UDim2.fromScale(0.74, 0.74),
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
+		BackgroundColor3 = H.Track,
+		BorderSizePixel = 0,
+		Parent = root,
+	})
+	Kit.corner(disc, "pill")
+	self.HeldDisc = disc
+	local iconBox = Kit.frame({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.64, 0.64), Parent = disc })
+	Icons.make("Egg", { Color = H.Icon, Accent = C.Accent }).Parent = iconBox
+	local info = Kit.frame({ Name = "Info", Position = UDim2.fromScale(0.24, 0.1), Size = UDim2.fromScale(0.46, 0.8), Parent = root })
+	Kit.text({ Name = "Title", Text = "IN YOUR HAND", Role = "Micro", Font = Theme.Fonts.Micro, Color = H.TextMuted, Size = UDim2.fromScale(1, 0.28), Truncate = true, Parent = info })
+	self.HeldName = Kit.text({ Name = "Name", Text = "", Role = "Heading", Color = H.Text, Position = UDim2.fromScale(0, 0.28), Size = UDim2.fromScale(1, 0.42), Truncate = true, Parent = info })
+	self.HeldHint = Kit.text({
+		Name = "Hint",
+		Text = "Carry it to your nest",
+		Role = "Micro",
+		Font = Theme.Fonts.Micro,
+		Color = H.TextMuted,
+		Position = UDim2.fromScale(0, 0.72),
+		Size = UDim2.fromScale(1, 0.28),
+		Truncate = true,
+		Parent = info,
+	})
+	self.HeldButton = Kit.button({
+		Name = "PutAway",
+		Text = "PUT AWAY",
+		TextRole = "Micro",
+		Style = "Secondary",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.fromScale(0.97, 0.5),
+		Size = UDim2.fromScale(0.26, 0.62),
+		Parent = root,
+	})
+	self.HeldButton.Activated:Connect(function()
+		local hc = self.Registry.HeldEggController
+		if hc then
+			hc.putAway()
+		end
+	end)
+end
+
+-- info = { Id, Type, Name, Luck, Glow } or nil (empty hand).
+function Hud:SetHeldEgg(info)
+	self.HeldInfo = info
+	if info then
+		self.HeldName.Text = info.Luck > 1 and string.format("%s  x%d", info.Name, info.Luck) or info.Name
+		self.HeldDisc.BackgroundColor3 = info.Glow:Lerp(Color3.new(1, 1, 1), 0.6)
+		self.HeldStroke.Color = info.Glow:Lerp(H.Stroke, 0.45)
+	end
+	self.HeldCard.Visible = info ~= nil and not self.Riding
+end
+
 -- ============================================================== ride panel (speed + boost)
 function Hud:BuildRidePanel()
 	local root = Create("Frame", {
@@ -571,6 +655,91 @@ function Hud:BuildRidePanel()
 		Parent = boostRow,
 	})
 	self.BoostBar:SetValue(1)
+end
+
+-- Dragon Bond bar (desktop, above the ride panel): bond level, progress to the next
+-- level / perk, and the three ability chips with their cooldowns.
+function Hud:BuildBondBar()
+	local root = Create("Frame", {
+		Name = "BondBar",
+		AnchorPoint = Vector2.new(1, 1),
+		BackgroundColor3 = H.Panel,
+		BackgroundTransparency = H.Transparency,
+		BorderSizePixel = 0,
+		Visible = false,
+		Parent = self.Root,
+	})
+	root:SetAttribute("QARegion", "HudBond")
+	Kit.corner(root, 16)
+	Kit.stroke(root, H.Stroke, Theme.Stroke.Normal, H.StrokeTransparency)
+	Kit.padding(root, 8, 14, 8, 14)
+	self.BondBar = root
+	self.BondTitle = Kit.text({ Name = "Title", Text = "BOND LV 0", Role = "Label", Font = Theme.Fonts.Number, Color = H.Text, Size = UDim2.fromScale(0.42, 0.3), Truncate = true, Parent = root })
+	self.BondNext = Kit.text({
+		Name = "Next",
+		Text = "",
+		Role = "Micro",
+		Font = Theme.Fonts.Micro,
+		Color = H.TextMuted,
+		XAlign = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.fromScale(0.58, 0.3),
+		Truncate = true,
+		Parent = root,
+	})
+	self.BondProgress = Kit.progress({ Name = "Progress", Position = UDim2.fromScale(0, 0.36), Size = UDim2.fromScale(1, 0.13), Color = C.Accent, Color2 = C.GoldBright, Track = H.Track, Parent = root })
+	self.BondChips = {}
+	for i, def in ABILITY_CHIPS do
+		local chip = Create("Frame", {
+			Name = "Chip" .. def.Id,
+			BackgroundColor3 = H.Track,
+			BackgroundTransparency = 0.2,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale((i - 1) * 0.345, 0.58),
+			Size = UDim2.fromScale(0.31, 0.42),
+			ClipsDescendants = true,
+			Parent = root,
+		})
+		Kit.corner(chip, 10)
+		local cool = Create("Frame", {
+			Name = "Cooldown",
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.fromScale(1, 0),
+			BackgroundColor3 = C.Blue,
+			BackgroundTransparency = 0.55,
+			BorderSizePixel = 0,
+			Parent = chip,
+		})
+		local label = Kit.text({ Name = "Label", Text = def.Key .. "  " .. def.Name, Role = "Micro", Font = Theme.Fonts.Micro, Color = H.Text, XAlign = Enum.TextXAlignment.Center, Scaled = true, ZIndex = 2, Parent = chip })
+		self.BondChips[def.Id] = { Frame = chip, Cooldown = cool, Label = label, Def = def }
+	end
+end
+
+-- info = BondController.info(); called ~10x/s while riding.
+function Hud:SetBond(info)
+	self.BondInfo = info
+	if not self.BondBar then
+		return
+	end
+	self.BondTitle.Text = string.format("BOND LV %d", info.Level)
+	self.BondProgress:SetValue(info.Need > 0 and info.Into / info.Need or 1)
+	if info.NextPerk then
+		self.BondNext.Text = string.format("%s  LV %d", info.NextPerk.Name, info.NextPerk.Level)
+	else
+		self.BondNext.Text = "ALL PERKS"
+	end
+	for id, chip in self.BondChips do
+		local unlocked = info.Unlocked[id]
+		chip.Label.Text = unlocked and (chip.Def.Key .. "  " .. chip.Def.Name) or ("LV " .. tostring(BondConfig.PerkById[id].Level))
+		chip.Label.TextColor3 = unlocked and H.Text or H.TextMuted
+		chip.Frame.BackgroundTransparency = unlocked and 0.1 or 0.55
+		chip.Cooldown.Size = UDim2.fromScale(1, unlocked and (info.Cooldown[id] or 0) or 0)
+	end
+	if self.Mobile then
+		self.Mobile:SetPerks(info)
+	end
 end
 
 function Hud:SetRiding(riding: boolean)
@@ -796,6 +965,18 @@ function Hud:Layout()
 		self.DragonCard.Visible = not (self.Riding and R.isMobile())
 	end
 
+	-- egg in hand: above the dragon card (phones: right below it)
+	if phone then
+		self.HeldCard.AnchorPoint = Vector2.new(0.5, 0)
+		self.HeldCard.Position = UDim2.new(0.5, 0, 0, self.DragonCard.Position.Y.Offset + math.floor(S * 0.115) + math.floor(S * 0.012))
+		shortSize(self.HeldCard, 0.62, 0.1)
+	else
+		self.HeldCard.AnchorPoint = Vector2.new(0.5, 1)
+		self.HeldCard.Position = UDim2.new(0.5, 0, 1, -(margin + math.floor(S * 0.082) + math.floor(S * 0.012)))
+		shortSize(self.HeldCard, 0.4, 0.07)
+	end
+	self.HeldCard.Visible = self.HeldInfo ~= nil and not self.Riding
+
 	self.RideKey.Visible = not R.isMobile()
 	self.XPText.Visible = not phone
 	local iconHolder = self.RideButton.IconHolder
@@ -807,6 +988,11 @@ function Hud:Layout()
 	self.RidePanel.Position = UDim2.new(1, -margin, 1, -margin)
 	shortSize(self.RidePanel, 0.22, 0.105)
 	self.RidePanel.Visible = (self.Riding == true) and not R.isMobile()
+	-- bond bar: right above the ride panel (desktop)
+	self.BondBar.AnchorPoint = Vector2.new(1, 1)
+	self.BondBar.Position = UDim2.new(1, -margin, 1, -(margin + math.floor(S * 0.105) + math.floor(S * 0.012)))
+	shortSize(self.BondBar, 0.26, 0.092)
+	self.BondBar.Visible = (self.Riding == true) and not R.isMobile()
 	self.Mobile:Layout()
 	self.Mobile:SetVisible(self.Riding == true)
 
@@ -868,7 +1054,7 @@ function Hud:RefreshEggs()
 	if not data then
 		return
 	end
-	local cap = EconomyConfig.upgradeValue("EggStorage", data.Upgrades.EggStorage or 0)
+	local cap = TreeConfig.eggCapacity(data)
 	local n = #data.Eggs
 	self.EggText.Text = string.format("EGGS %d/%d", n, cap)
 	self.EggText.TextColor3 = n >= cap and C.Danger or H.Text
@@ -956,6 +1142,11 @@ function Hud:BindData()
 			task.wait(1)
 		end
 	end)
+	-- the egg in hand may already exist when the HUD appears
+	local held = self.Registry.HeldEggController
+	if held and held.updateHud then
+		held.updateHud()
+	end
 end
 
 return Hud

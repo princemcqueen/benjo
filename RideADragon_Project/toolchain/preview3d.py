@@ -25,6 +25,9 @@ def part_records(sim, root=None, skip_invisible=True):
         if d.cls.name == "MeshPart" and any(c.cls.name == "Bone" for c in d.children):
             continue  # skinned meshes are rendered separately (meshgen/skin_render.py)
         t = d.get_prop("Transparency")
+        lt = d.get_prop("LocalTransparencyModifier") or 0.0  # client-only hiding (cinematics)
+        if lt:
+            t = 1 - (1 - t) * (1 - lt)
         if skip_invisible and t >= 0.98:
             continue
         cf = part_cframe(sim, d)

@@ -6,6 +6,7 @@
 	  Rest (lying down awake - sanctuary perches)
 	One-shot actions (with fade in/out envelopes):
 	  Jump, Takeoff, Landing, Roar, Eat, IdleVariant
+	  Dragon Bond: Dash, FireBreath (held until Stop), Flourish (Sky Dance)
 	Additive layers:
 	  wing banking, breathing, head look, spring-driven tail/neck motion.
 
@@ -41,6 +42,11 @@ local ONESHOTS = {
 	Roar = { Duration = 1.7, FadeIn = 0.18, FadeOut = 0.35 },
 	Eat = { Duration = 2.4, FadeIn = 0.25, FadeOut = 0.35 },
 	IdleVariant = { Duration = 2.6, FadeIn = 0.4, FadeOut = 0.5 },
+	-- Dragon Bond abilities
+	Dash = { Duration = 0.55, FadeIn = 0.05, FadeOut = 0.22 },
+	-- Hold: the clip sustains at that time until Stop() (or MaxHold seconds)
+	FireBreath = { Duration = 4.6, FadeIn = 0.18, FadeOut = 0.35, Hold = 0.45, MaxHold = 3.9 },
+	Flourish = { Duration = 1.8, FadeIn = 0.12, FadeOut = 0.3 },
 }
 Animator.OneShots = ONESHOTS
 
@@ -331,8 +337,11 @@ end
 
 function Animator:Stop(name: string)
 	for _, s in self.Shots do
-		if s.Name == name and s.T < s.Def.Duration - s.Def.FadeOut then
-			s.T = s.Def.Duration - s.Def.FadeOut
+		if s.Name == name then
+			s.Released = true
+			if s.T < s.Def.Duration - s.Def.FadeOut then
+				s.T = s.Def.Duration - s.Def.FadeOut
+			end
 		end
 	end
 end
@@ -781,6 +790,85 @@ Shots.Roar = function(self, acc, w, t)
 	tail(self, acc, w, -0.2 * rise, 0, 0.05 * hold, t * 3)
 end
 
+-- Wind Dash: a streamlined lunge - body pitched forward, neck stretched, legs tucked,
+-- wings swept back.
+Shots.Dash = function(self, acc, w, t)
+	local s = self.Scale
+	local k = sin(clamp(t / 0.55, 0, 1) * math.pi)
+	add(acc, "Body", w, -0.2 * k, 0, 0, 0, -0.25 * s * k, 0)
+	neck(self, acc, w, -0.4 * k)
+	add(acc, "Head", w, 0.25 * k, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, -0.7 * k, 0, 0)
+		sym(acc, "Arm%2", w, -0.5 * k, 0, 0)
+	end
+	tuckLegs(self, acc, w, 0.85 * k)
+	wingsSpread(self, acc, w, 0.25 * k, 0.3, 0.3 * k, 0.3 * k)
+	tail(self, acc, w, 0.3 * k, 0, 0.02, t * 8)
+end
+
+-- Fire Breath (held): rear the head back, thrust it forward with the jaw wide open,
+-- wings spread, a trembling hold while the flames last.
+Shots.FireBreath = function(self, acc, w, t, shot)
+	local rise = clamp(t / 0.3, 0, 1)
+	local thrust = smooth(0.15, 0.42, t)
+	local hold = shot and shot.HoldTime or 0
+	local shake = hold > 0 and sin((t + hold) * 55) * 0.02 or 0
+	add(acc, "Chest", w, 0.1 * rise - 0.06 * thrust, 0, 0, 0, 0.1 * self.Scale * rise, 0)
+	neck(self, acc, w, 0.55 * rise - 0.95 * thrust, shake * 3)
+	add(acc, "Head", w, -0.2 * rise + 0.45 * thrust, 0, shake)
+	add(acc, "Jaw", w, 0.58 * thrust, 0, 0)
+	if self.HasFront then
+		sym(acc, "Arm%1", w, -0.15 * rise, 0, 0)
+	end
+	if self.Params.Mode == "Fly" or self.Params.Mode == "Air" then
+		tuckLegs(self, acc, w, 0.5)
+	end
+	local open = rise * 0.9
+	wingsSpread(self, acc, w * open, 0.55 + shake * 5, 0.4, 0, 0)
+	wingsFolded(self, acc, w * (1 - open))
+	tail(self, acc, w, -0.15 * rise, 0, 0.04, t * 3)
+end
+
+-- Sky Dance (bond level 20): a full barrel roll with strong wing beats in the air, a
+-- proud rear-up with a roar on the ground.
+Shots.Flourish = function(self, acc, w, t)
+	local mode = self.Params.Mode
+	local air = mode == "Fly" or mode == "Air" or mode == "Takeoff"
+	local s = self.Scale
+	if air then
+		local roll = TAU * smooth(0.08, 1.35, t)
+		local arch = sin(clamp(t / 1.6, 0, 1) * math.pi)
+		add(acc, "Body", w, 0.1 * arch, 0, roll)
+		neck(self, acc, w, 0.35 * arch)
+		add(acc, "Head", w, 0.2 * arch, 0, 0)
+		add(acc, "Jaw", w, 0.25 * arch, 0, 0)
+		tuckLegs(self, acc, w, 0.7)
+		wingsSpread(self, acc, w, sin(t * 11) * 0.9, sin(t * 11 - 0.6) * 0.8, 0, 0)
+		tail(self, acc, w, 0.1, 0, 0.12, t * 6)
+	else
+		local up = smooth(0, 0.4, t) * (1 - smooth(1.35, 1.8, t))
+		local bellow = (t > 0.45 and t < 1.3) and 1 or 0
+		local shake = bellow * sin(t * 60) * 0.02
+		add(acc, "Body", w, 0.55 * up, 0, 0, 0, 0.6 * s * up, 0)
+		add(acc, "Chest", w, 0.15 * up, 0, 0)
+		neck(self, acc, w, 0.35 * up, shake * 3)
+		add(acc, "Head", w, 0.15 * up, 0, shake)
+		add(acc, "Jaw", w, 0.45 * bellow, 0, 0)
+		if self.HasFront then
+			sym(acc, "Arm%1", w, 0.95 * up, 0, 0)
+			sym(acc, "Arm%2", w, 0.6 * up, 0, 0)
+		end
+		if self.HasBack then
+			sym(acc, "Leg%1", w, -0.25 * up, 0, 0)
+			sym(acc, "Leg%2", w, 0.2 * up, 0, 0)
+		end
+		wingsSpread(self, acc, w * up, 0.6 + sin(t * 7) * 0.35 * up, 0.5, 0.1, 0)
+		wingsFolded(self, acc, w * (1 - up))
+		tail(self, acc, w, -0.1 * up, 0, 0.12 * up, t * 4)
+	end
+end
+
 Shots.Eat = function(self, acc, w, t)
 	local down = clamp(t / 0.5, 0, 1) * clamp((2.4 - t) / 0.5, 0, 1)
 	local chew = (t > 0.55 and t < 1.9) and max(0, sin(t * 14)) or 0
@@ -904,8 +992,18 @@ function Animator:Update(dt: number)
 	-- one-shots override proportionally to their envelope
 	for i = #self.Shots, 1, -1 do
 		local shot = self.Shots[i]
-		shot.T += dt * shot.Speed
 		local def = shot.Def
+		local advance = dt * shot.Speed
+		if def.Hold and not shot.Released and shot.T + advance >= def.Hold then
+			-- held clip (fire breath): sustain until Stop() or MaxHold
+			shot.T = def.Hold
+			shot.HoldTime = (shot.HoldTime or 0) + dt
+			if shot.HoldTime >= (def.MaxHold or 4) then
+				shot.Released = true
+			end
+		else
+			shot.T += advance
+		end
 		if shot.T >= def.Duration then
 			table.remove(self.Shots, i)
 		else

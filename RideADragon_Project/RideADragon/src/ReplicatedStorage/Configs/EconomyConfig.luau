@@ -99,15 +99,28 @@ function EconomyConfig.feedXP(xpToNext: number): number
 end
 
 -- Player level
+EconomyConfig.MaxPlayerLevel = 100
 function EconomyConfig.playerXPToNext(level: number): number
 	return math.floor(120 * level ^ 1.5 + 0.5)
 end
+-- XP sources (LevelService). Hatching pays DragonConfig.Rarities[rarity].HatchXP.
 EconomyConfig.XP = {
-	EggFound = 8,
-	FirstPlace = 25,
+	EggFound = 8, -- picking up an egg in the world
+	FirstPlace = 25, -- discovering a species for the first time
 	QuestBase = 40,
-	FlyPer1000 = 6,
+	FlyPer1000 = 6, -- per 1000 studs flown
+	MutationRank = 0.25, -- hatch XP bonus per mutation rank (Shiny +25%, Golden +50%...)
+	BondLevel = 20, -- + 4 per bond level reached
+	TreeLevel = 20, -- + 5 per tree level bought (per branch level)
 }
+
+-- Reward for reaching a player level: cash (scales with the level) and, every 5th
+-- level, spin tickets.
+function EconomyConfig.levelReward(level: number): (number, number)
+	local cash = math.floor(250 * level ^ 1.5 / 10 + 0.5) * 10
+	local spins = (level % 5 == 0) and 2 or 0
+	return cash, spins
+end
 
 -- Daily rewards (7-day streak). Cash scales with player level.
 EconomyConfig.Daily = {

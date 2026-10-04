@@ -7,6 +7,8 @@
 	  BOOST             sprint on ground, boost in flight; its fill shows
 	                    the boost meter (blue, orange while boosting)
 	  ROAR              roar
+	  DASH / FIRE / DANCE  Dragon Bond abilities (shown once the bond level unlocks
+	                    them; the fill shows the cooldown)
 	  DISMOUNT          leave the saddle
 	  speed readout     km/h above the cluster
 
@@ -39,6 +41,9 @@ local BUTTONS = {
 	{ Id = "Boost", Action = "Sprint", Icon = "Wind", Text = "BOOST" },
 	{ Id = "Descend", Action = "Descend", Icon = "Descend", Text = "DOWN" },
 	{ Id = "Roar", Action = "Roar", Icon = "Roar", Text = "ROAR" },
+	{ Id = "Dash", Action = "Dash", Icon = "Wind", Text = "DASH", Perk = "Dash" },
+	{ Id = "Fire", Action = "Fire", Icon = "Flame", Text = "FIRE", Perk = "Fire" },
+	{ Id = "Dance", Action = "Flourish", Icon = "Star", Text = "DANCE", Perk = "Flourish" },
 	{ Id = "Dismount", Action = nil, Icon = "Dismount", Text = "LEAVE" },
 }
 
@@ -64,7 +69,7 @@ local function roundButton(def, parent: Instance)
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 		Size = UDim2.fromScale(1, 1),
-		Visible = def.Id == "Boost",
+		Visible = def.Id == "Boost" or def.Perk ~= nil,
 		Parent = root,
 	})
 	Kit.corner(fillHolder, "pill")
@@ -124,6 +129,11 @@ function MobileControls.new(parent: Instance, registry)
 		local b = roundButton(def, root)
 		self.Buttons[def.Id] = b
 		self:_wire(b)
+		if def.Perk then
+			b.Instance.Visible = false -- until the dragon's bond unlocks it (SetPerks)
+			b.Fill.Size = UDim2.fromScale(1, 0)
+			b.Fill.BackgroundColor3 = C.Disabled
+		end
 	end
 	-- speed readout: big number with the unit underneath
 	local speedBox = Kit.frame({ Name = "SpeedBox", AnchorPoint = Vector2.new(1, 1), Parent = root })
@@ -229,6 +239,11 @@ function MobileControls:Layout()
 	local centerUp = margin + (big - small) * 0.5 -- small button centered on UP's column
 	local midRow = bottom + (big - small) * 0.5 -- small button centered on UP's row
 	place(B.Jump.Instance, big, big, margin, bottom)
+	-- Dragon Bond abilities: one more column to the left
+	local perkRight = R.Portrait and (margin + big + small + gap * 2) or (margin + big + small * 2 + gap * 3)
+	place(B.Dash.Instance, small, small, perkRight, midRow)
+	place(B.Fire.Instance, small, small, perkRight, midRow + small + gap)
+	place(B.Dance.Instance, small, small, perkRight, midRow + (small + gap) * 2)
 	if R.Portrait then
 		place(B.Boost.Instance, small, small, margin + big + gap, midRow)
 		place(B.Descend.Instance, small, small, centerUp, bottom + big + gap)
@@ -287,6 +302,21 @@ function MobileControls:SetMode(mode: string)
 	end
 	self.Buttons.Descend.Instance.Visible = flying
 	self.Buttons.Boost.Caption.Text = flying and "BOOST" or "SPRINT"
+end
+
+-- Dragon Bond: show the ability buttons the bond level has unlocked, with their cooldown.
+-- info = BondController.info()
+function MobileControls:SetPerks(info)
+	for _, def in BUTTONS do
+		if def.Perk then
+			local b = self.Buttons[def.Id]
+			local unlocked = info and info.Unlocked and info.Unlocked[def.Perk] == true
+			b.Instance.Visible = unlocked
+			if unlocked then
+				b.Fill.Size = UDim2.fromScale(1, math.clamp((info.Cooldown and info.Cooldown[def.Perk]) or 0, 0, 1))
+			end
+		end
+	end
 end
 
 function MobileControls:SetStats(speed: number, boost01: number, boosting: boolean)

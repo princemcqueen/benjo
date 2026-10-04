@@ -9,9 +9,16 @@
 	Server authority: spawn positions, pickup range, capacity, incubation
 	timers, hatch results and prices are all decided here.
 
+	The egg you pick up is carried IN YOUR HAND (one at a time, the rest stay in the
+	bag): player attributes HeldEggId / HeldEggType / HeldEggLuck replicate it so every
+	client can draw it in the character's hand. You walk to your nest and put it in the
+	nest spot you like - the server only checks range, slot and ownership.
+
 	Net (domain "Egg"):
-	  Pickup { Key }            -> { Id, Type }
-	  Place  { Id?, Slot? }     -> { Slot, Ready }
+	  Pickup { Key }            -> { Id, Type, Luck, Held }
+	  Hold   { Id? | Best? }    -> { Id }   (Id: take that egg in hand, Best: the best egg,
+	                                         neither: put the egg back in the bag)
+	  Place  { Id?, Slot? }     -> { Slot, Ready, Next }  (Id defaults to the egg in hand)
 	  Hatch  { Slot }           -> { Dragon = record, New = bool, Egg = type }
 	  BuyIncubator { Slot }     -> { Unlocked }
 	Signals to the owner: "Eggs" { List }, "EggAdded" egg, "EggRemoved" { Key }
@@ -30,6 +37,8 @@ local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local EconomyConfig = require(Configs:WaitForChild("EconomyConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+local HatchConfig = require(Configs:WaitForChild("HatchConfig"))
 
 local EggService = {}
 EggService.PickedUp = Signal.new() -- (player, eggType)
@@ -139,6 +148,8 @@ local function spawnOne(player: Player): boolean
 	st.Serial += 1
 	local eggType = eggTypeFor(area)
 	local luck = EggConfig.rollLuck(eggType, rng, EggConfig.RareAreas[area.Name] == true)
+	-- Great Tree "Lucky Finds": eggs you find carry more luck
+	luck = math.max(1, math.floor(luck * (1 + TreeConfig.bonus(Data.Get(player), "FindLuck")) + 0.5))
 	local egg = { Key = "k" .. st.Serial, Type = eggType, Position = pos, Area = area.Name, Luck = luck }
 	st.Active[egg.Key] = egg
 	Net.signal(player, "EggAdded", serialize(egg))
@@ -167,6 +178,8 @@ end
 
 local function scheduleRespawn(player: Player)
 	local delayS = rng:NextNumber(EggConfig.Spawning.RespawnMin, EggConfig.Spawning.RespawnMax)
+	-- Great Tree "Fertile Soil": new eggs appear sooner
+	delayS *= 1 - math.clamp(TreeConfig.bonus(Data.Get(player), "EggRespawn"), 0, 0.9)
 	task.delay(delayS, function()
 		if states[player] then
 			fillEggs(player)
@@ -174,9 +187,32 @@ local function scheduleRespawn(player: Player)
 	end)
 end
 
+-- ============================================================== announcements
+-- An ultra-rare hatch ("1 in 25,000" or rarer) is announced to the whole server once the
+-- hatcher's reveal is over (client banner, AnnounceController).
+function EggService.announceHatch(player: Player, record, odds: number)
+	local cfg = HatchConfig.Announce
+	if odds < cfg.MinOdds then
+		return false
+	end
+	local payload = {
+		Player = player.DisplayName,
+		UserId = player.UserId,
+		Species = record.SpeciesId,
+		Mutation = record.Mutation or "None",
+		Rarity = record.Rarity,
+		Odds = odds,
+		Mega = odds >= cfg.Mega,
+	}
+	task.delay(cfg.Delay, function()
+		Net.broadcast("RareHatch", payload)
+	end)
+	return true
+end
+
 -- ============================================================== helpers
 local function capacity(data): number
-	return EconomyConfig.upgradeValue("EggStorage", data.Upgrades.EggStorage or 0)
+	return TreeConfig.eggCapacity(data)
 end
 
 -- Player position for range checks: the ridden dragon root, else the HRP.
@@ -274,6 +310,108 @@ local function resultOdds(eggType: string, luck: number, luckMult: number, speci
 end
 EggService.resultOdds = resultOdds
 
+-- ============================================================== held egg
+-- Best carried egg = highest tier, then highest luck.
+local function bestIndex(data): number?
+	local index, bestScore = nil, -1
+	for i, e in data.Eggs do
+		local tier = EggConfig.Eggs[e.Type] and EggConfig.Eggs[e.Type].Tier or 0
+		local score = tier * 100000 + math.min(99999, tonumber(e.Luck) or 1)
+		if score > bestScore then
+			index, bestScore = i, score
+		end
+	end
+	return index
+end
+
+-- Id of the egg in the player's hand (nil = empty hand).
+function EggService.Held(player: Player): string?
+	local id = player:GetAttribute("HeldEggId")
+	return type(id) == "string" and id ~= "" and id or nil
+end
+
+local function clearHeld(player: Player)
+	player:SetAttribute("HeldEggId", nil)
+	player:SetAttribute("HeldEggType", nil)
+	player:SetAttribute("HeldEggLuck", nil)
+end
+
+-- id = nil puts the egg back in the bag. false when that egg is not in the bag.
+function EggService.SetHeld(player: Player, id: string?): boolean
+	if not id then
+		clearHeld(player)
+		return true
+	end
+	local data = Data.Get(player)
+	for _, e in data and data.Eggs or {} do
+		if e.Id == id then
+			player:SetAttribute("HeldEggId", e.Id)
+			player:SetAttribute("HeldEggType", e.Type)
+			player:SetAttribute("HeldEggLuck", math.max(1, tonumber(e.Luck) or 1))
+			return true
+		end
+	end
+	return false
+end
+
+-- Drops a held egg that left the bag some other way (spent, traded, reset...).
+local function reconcileHeld(player: Player)
+	local id = EggService.Held(player)
+	if not id then
+		return
+	end
+	local data = Data.Get(player)
+	for _, e in data and data.Eggs or {} do
+		if e.Id == id then
+			return
+		end
+	end
+	clearHeld(player)
+end
+
+-- ============================================================== giving eggs
+-- Puts a new egg in the player's bag (capacity checked) and - when the hand is free - in
+-- the hand. Used by pickups and by world events (Lucky Wild Eggs).
+-- Returns ok, id | errorCode, inHand
+function EggService.GiveEgg(player: Player, eggType: string, luck: number?): (boolean, string, boolean?)
+	local data = Data.Get(player)
+	if not data then
+		return false, "NOT_LOADED"
+	end
+	if not EggConfig.Eggs[eggType] then
+		return false, "BAD_EGG"
+	end
+	if #data.Eggs >= capacity(data) then
+		return false, "EGG_STORAGE_FULL"
+	end
+	local id = Data.NextId(player, "EggSerial", "E")
+	local list = table.clone(data.Eggs)
+	table.insert(list, { Id = id, Type = eggType, Found = now(), Luck = math.max(1, math.floor(tonumber(luck) or 1)) })
+	Data.Set(player, { "Eggs" }, list)
+	Data.Increment(player, { "Stats", "EggsFound" }, 1)
+	EggService.PickedUp:Fire(player, eggType)
+	-- hands free: the egg goes straight into your hand (otherwise into the bag)
+	local inHand = EggService.Held(player) == nil
+	if inHand then
+		EggService.SetHeld(player, id)
+	end
+	return true, id, inHand
+end
+
+-- Distance from the player (character or ridden dragon, whichever is closer) to a point.
+function EggService.DistanceTo(player: Player, position: Vector3): number
+	return nearestDistance(player, position)
+end
+
+-- World egg areas (positions + regions) and a resting spot inside one - for events.
+function EggService.Areas()
+	return areas
+end
+
+function EggService.FindSpot(area): Vector3?
+	return findSpot(area)
+end
+
 -- ============================================================== handlers
 local function handlePickup(player: Player, p)
 	if not Net.check.str(p.Key, 16) then
@@ -294,7 +432,8 @@ local function handlePickup(player: Player, p)
 	if model then
 		slack = (model:GetAttribute("BodyRadius") or 0) * 0.5
 	end
-	if nearestDistance(player, egg.Position) > GameConfig.Interaction.EggPickupServerRange + slack then
+	local reach = GameConfig.Interaction.EggPickupServerRange * (1 + TreeConfig.bonus(data, "EggMagnet"))
+	if nearestDistance(player, egg.Position) > reach + slack then
 		return false, "TOO_FAR"
 	end
 	if #data.Eggs >= capacity(data) then
@@ -302,14 +441,12 @@ local function handlePickup(player: Player, p)
 	end
 	st.Active[p.Key] = nil
 	Net.signal(player, "EggRemoved", { Key = p.Key })
-	local id = Data.NextId(player, "EggSerial", "E")
-	local list = table.clone(data.Eggs)
-	table.insert(list, { Id = id, Type = egg.Type, Found = now(), Luck = egg.Luck or 1 })
-	Data.Set(player, { "Eggs" }, list)
-	Data.Increment(player, { "Stats", "EggsFound" }, 1)
-	EggService.PickedUp:Fire(player, egg.Type)
+	local ok, id, inHand = EggService.GiveEgg(player, egg.Type, egg.Luck or 1)
+	if not ok then
+		return false, id
+	end
 	scheduleRespawn(player)
-	return true, { Id = id, Type = egg.Type, Luck = egg.Luck or 1 }
+	return true, { Id = id, Type = egg.Type, Luck = egg.Luck or 1, Held = inHand }
 end
 
 local function freeSlot(data): number?
@@ -336,28 +473,25 @@ local function handlePlace(player: Player, p)
 	if #data.Eggs == 0 then
 		return false, "NO_EGGS", "You have no eggs. Find them around Dragon Haven!"
 	end
-	-- egg: requested id or the best (highest tier) carried egg
+	-- egg: the requested id, else the one in hand, else the best carried egg
 	local index = nil
-	if p.Id ~= nil then
-		if not Net.check.str(p.Id, 20) then
-			return false, "BAD_REQUEST"
-		end
+	local wantId = p.Id
+	if wantId ~= nil and not Net.check.str(wantId, 20) then
+		return false, "BAD_REQUEST"
+	end
+	if wantId == nil then
+		wantId = EggService.Held(player)
+	end
+	if wantId ~= nil then
 		for i, e in data.Eggs do
-			if e.Id == p.Id then
+			if e.Id == wantId then
 				index = i
 				break
 			end
 		end
-	else
-		-- best = highest tier, then highest luck
-		local bestScore = -1
-		for i, e in data.Eggs do
-			local tier = EggConfig.Eggs[e.Type] and EggConfig.Eggs[e.Type].Tier or 0
-			local score = tier * 100000 + math.min(99999, tonumber(e.Luck) or 1)
-			if score > bestScore then
-				index, bestScore = i, score
-			end
-		end
+	end
+	if not index and p.Id == nil then
+		index = bestIndex(data)
 	end
 	if not index then
 		return false, "NOT_FOUND"
@@ -392,7 +526,44 @@ local function handlePlace(player: Player, p)
 		hatchTime = math.max(3, math.floor(hatchTime * (1 - tree.Bonus(player, "HatchSpeed")) + 0.5))
 	end
 	Data.Set(player, { "Incubator", "Slots", tostring(slot) }, { Type = egg.Type, Start = t, Ready = t + hatchTime, Id = egg.Id, Luck = egg.Luck or 1 })
-	return true, { Slot = slot, Ready = t + hatchTime }
+	-- the hand is empty now; while nest spots remain, the next egg of the bag is taken
+	-- in hand so several eggs can be placed one after another
+	local nextId = nil
+	if EggService.Held(player) == egg.Id then
+		clearHeld(player)
+		local nextIndex = freeSlot(data) and bestIndex(data)
+		if nextIndex then
+			nextId = data.Eggs[nextIndex].Id
+			EggService.SetHeld(player, nextId)
+		end
+	end
+	return true, { Slot = slot, Ready = t + hatchTime, Next = nextId }
+end
+
+local function handleHold(player: Player, p)
+	local data = Data.Get(player)
+	if not data then
+		return false, "NOT_LOADED"
+	end
+	if p.Id ~= nil then
+		if not Net.check.str(p.Id, 20) then
+			return false, "BAD_REQUEST"
+		end
+		if not EggService.SetHeld(player, p.Id) then
+			return false, "NOT_FOUND"
+		end
+		return true, { Id = p.Id }
+	end
+	if p.Best == true then
+		local index = bestIndex(data)
+		if not index then
+			return false, "NO_EGGS", "You have no eggs. Find them around Dragon Haven!"
+		end
+		EggService.SetHeld(player, data.Eggs[index].Id)
+		return true, { Id = data.Eggs[index].Id }
+	end
+	clearHeld(player)
+	return true, {}
 end
 
 local function handleHatch(player: Player, p)
@@ -462,6 +633,7 @@ local function handleHatch(player: Player, p)
 	end
 	Data.Set(player, { "Incubator", "Slots", key }, nil)
 	EggService.Hatched:Fire(player, record, slot.Type)
+	EggService.announceHatch(player, record, odds)
 	return true, { Dragon = record, New = isNew, Egg = slot.Type, Luck = eggLuck }
 end
 
@@ -527,6 +699,7 @@ function EggService.Init(services)
 	Data = services.PlayerDataService
 	Net.handle("Egg", "Pickup", handlePickup, { Burst = 10, PerSecond = 6 })
 	Net.handle("Egg", "Place", handlePlace, { Burst = 6, PerSecond = 3 })
+	Net.handle("Egg", "Hold", handleHold, { Burst = 8, PerSecond = 4 })
 	Net.handle("Egg", "Hatch", handleHatch, { Burst = 4, PerSecond = 2 })
 	Net.handle("Egg", "BuyIncubator", handleBuyIncubator, { Burst = 3, PerSecond = 1 })
 	Net.handle("Egg", "Sync", handleSync, { Burst = 3, PerSecond = 1 })
@@ -549,6 +722,14 @@ function EggService.Start()
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		states[player] = nil
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for _, player in Players:GetPlayers() do
+				pcall(reconcileHeld, player)
+			end
+		end
 	end)
 end
 

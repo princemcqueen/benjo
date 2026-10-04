@@ -22,21 +22,31 @@ local function isVisible(g: GuiObject): boolean
 	return false
 end
 
-local function clipAncestor(g: GuiObject): GuiObject?
-	local node = g.Parent
-	while node and node:IsA("GuiObject") do
-		if node:IsA("ScrollingFrame") or (node :: GuiObject).ClipsDescendants then
-			return node :: GuiObject
-		end
-		node = node.Parent
-	end
-	return nil
-end
-
 local function rectOf(g: GuiObject, origin: Vector2, k: number)
 	local p = (g.AbsolutePosition - origin) / k
 	local s = g.AbsoluteSize / k
 	return p.X, p.Y, s.X, s.Y
+end
+
+-- Visible window of `g`: the intersection of EVERY clipping ancestor (nested scroll frames
+-- clip each other). nil when nothing clips it; width/height <= 0 when nothing is visible.
+local function clipRect(g: GuiObject, origin: Vector2, k: number): (number, number, number, number)?
+	local x0, y0, x1, y1 = -math.huge, -math.huge, math.huge, math.huge
+	local found = false
+	local node = g.Parent
+	while node and node:IsA("GuiObject") do
+		if node:IsA("ScrollingFrame") or (node :: GuiObject).ClipsDescendants then
+			local cx, cy, cw, ch = rectOf(node :: GuiObject, origin, k)
+			x0, y0 = math.max(x0, cx), math.max(y0, cy)
+			x1, y1 = math.min(x1, cx + cw), math.min(y1, cy + ch)
+			found = true
+		end
+		node = node.Parent
+	end
+	if not found then
+		return nil
+	end
+	return x0, y0, x1 - x0, y1 - y0
 end
 
 local function overlap(a, b): number
@@ -71,15 +81,14 @@ function UIChecks.run(roots: { Frame }, opts: { [string]: any })
 			end
 			local x, y, w, h = rectOf(d, origin, k)
 			local name = d:GetFullName()
-			local clip = clipAncestor(d)
+			local cx, cy, cw, ch = clipRect(d, origin, k)
 			local clipped = false
 			local vx, vy, vw, vh = x, y, w, h
-			if clip then
-				local cx, cy, cw, ch = rectOf(clip, origin, k)
-				if x + w < cx - 1 or y + h < cy - 1 or x > cx + cw + 1 or y > cy + ch + 1 then
+			if cx then
+				if cw < 1 or ch < 1 or x + w < cx - 1 or y + h < cy - 1 or x > cx + cw + 1 or y > cy + ch + 1 then
 					clipped = true -- intentionally scrolled/clipped out of view
 				else
-					-- only the part inside the clipping ancestor is visible
+					-- only the part inside the clipping ancestors is visible
 					local x0, y0 = math.max(x, cx), math.max(y, cy)
 					local x1, y1 = math.min(x + w, cx + cw), math.min(y + h, cy + ch)
 					vx, vy, vw, vh = x0, y0, x1 - x0, y1 - y0
