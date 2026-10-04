@@ -46,8 +46,11 @@ ROBUX ITEMS (before publishing)
     Game passes: Owner Dragon 3000, PRINCE 8999, N2RC1S 8999, LEGENDARY M0NICA DRAGON 11999,
                  EGG HUNTER 1299
     Products: Luck Potion 49, Super Luck Potion 149, Cash Potion 49, Level Potion 39,
-              Mutation Potion 99, 5 Spins 49, 25 Spins 199, Cash packs 25 / 99 / 249,
-              Egg Radar 49, Egg Magnet 39, Fast Hatch 59, Lucky Egg Call 99, Mythic Bundle 249
+              Mutation Potion 389, 5 Spins 49, 25 Spins 199, Cash packs 25 / 299 / 249,
+              Egg Radar 49, Egg Magnet 49, Fast Hatch 59, Lucky Egg Call 99, Mythic Bundle 249
+  MonetizationConfig in this snapshot is YOUR version from the TEST8_ADMIN_GIVE zip (ids and the
+  prices above), untouched; Cash Potion still has Id 0 until its developer product exists
+  (see DEVELOPER_PRODUCTS_NOTE.txt).
 
 SOUNDS
   Every sound is a key in ReplicatedStorage > Configs > AudioConfig; an empty Id is skipped
