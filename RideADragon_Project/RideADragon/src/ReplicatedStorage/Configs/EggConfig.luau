@@ -353,7 +353,13 @@ EggConfig.LuckRolls = {
 EggConfig.Spawning = {
 	MaxActive = 18,
 	MaxActivePerRegion = 18, -- (legacy name)
-	ScatterRadius = 26, -- eggs appear around a spawn area, not on one exact spot
+	ScatterRadius = 70, -- eggs appear around a spawn area, not on one exact spot
+	-- Roaming eggs: this share of every egg appears at a completely random place of the land (the
+	-- rest scatter around the named areas, where the rare finds are). Wild eggs always roam.
+	RoamingShare = 0.5,
+	WorldBox = { MinX = -980, MaxX = 860, MinZ = -960, MaxZ = 900 },
+	RoamAvoid = { "Pillar", "Island" }, -- areas that never name a roaming egg (sky / island spots)
+	RoamMinSeparation = 260, -- a roaming wild egg appears at least this far from the previous one
 	RespawnMin = 12,
 	RespawnMax = 30,
 }

@@ -118,6 +118,62 @@ local function findSpot(area): Vector3?
 	return nil
 end
 
+-- A completely random resting spot on the land (not near any fixed area). Returns the spot and an
+-- "area" record named after the nearest real area (it gives the label and the region of the egg).
+-- `avoid` = a point the spot must keep RoamMinSeparation away from.
+local function randomSpot(avoid: Vector3?): (Vector3?, any?)
+	if #areas == 0 then
+		return nil, nil
+	end
+	local box = EggConfig.Spawning.WorldBox
+	local skip = {}
+	for _, n in EggConfig.Spawning.RoamAvoid do
+		skip[n] = true
+	end
+	local exclude = {}
+	local world = Workspace:FindFirstChild("World")
+	for _, name in { "Nature", "EggSpots" } do
+		local folder = world and world:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, name in { "Dragons", "MyEggs", "HeldEggs" } do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(exclude, folder)
+		end
+	end
+	for _, p in Players:GetPlayers() do
+		if p.Character then
+			table.insert(exclude, p.Character)
+		end
+	end
+	rayParams.FilterDescendantsInstances = exclude
+	for _ = 1, 24 do
+		local x = rng:NextNumber(box.MinX, box.MaxX)
+		local z = rng:NextNumber(box.MinZ, box.MaxZ)
+		if not avoid or (Vector2.new(x, z) - Vector2.new(avoid.X, avoid.Z)).Magnitude >= EggConfig.Spawning.RoamMinSeparation then
+			local hit = Workspace:Raycast(Vector3.new(x, 520, z), Vector3.new(0, -900, 0), rayParams)
+			if hit and hit.Instance == Workspace.Terrain and hit.Material ~= Enum.Material.Water and hit.Normal.Y > 0.6 then
+				local nearest, best = nil, math.huge
+				for _, a in areas do
+					if not skip[a.Name] then
+						local d = (Vector2.new(a.Position.X, a.Position.Z) - Vector2.new(x, z)).Magnitude
+						if d < best then
+							nearest, best = a, d
+						end
+					end
+				end
+				if nearest then
+					return hit.Position + Vector3.new(0, 2.6, 0), { Name = nearest.Name, Position = hit.Position, Region = nearest.Region, Roaming = true }
+				end
+			end
+		end
+	end
+	return nil, nil
+end
+
 local function eggTypeFor(area): string
 	return EggConfig.rollEgg(area.Region or "Haven", rng)
 end
@@ -131,28 +187,35 @@ local function spawnOne(player: Player): boolean
 	if not st or #areas == 0 then
 		return false
 	end
-	-- prefer areas without an active egg of this player
-	local used = {}
-	for _, e in st.Active do
-		used[e.Area] = (used[e.Area] or 0) + 1
+	local area, pos
+	if rng:NextNumber() < EggConfig.Spawning.RoamingShare then
+		-- a random place anywhere on the land
+		pos, area = randomSpot()
 	end
-	local candidates = {}
-	for _, a in areas do
-		if (used[a.Name] or 0) == 0 then
-			table.insert(candidates, a)
-		end
-	end
-	if #candidates == 0 then
-		candidates = areas
-	end
-	local area = candidates[rng:NextInteger(1, #candidates)]
-	local pos = findSpot(area)
 	if not pos then
+		-- around a named area; prefer areas without an active egg of this player
+		local used = {}
+		for _, e in st.Active do
+			used[e.Area] = (used[e.Area] or 0) + 1
+		end
+		local candidates = {}
+		for _, a in areas do
+			if (used[a.Name] or 0) == 0 then
+				table.insert(candidates, a)
+			end
+		end
+		if #candidates == 0 then
+			candidates = areas
+		end
+		area = candidates[rng:NextInteger(1, #candidates)]
+		pos = findSpot(area)
+	end
+	if not pos or not area then
 		return false
 	end
 	st.Serial += 1
 	local eggType = eggTypeFor(area)
-	local luck = EggConfig.rollLuck(eggType, rng, EggConfig.RareAreas[area.Name] == true)
+	local luck = EggConfig.rollLuck(eggType, rng, EggConfig.RareAreas[area.Name] == true and not area.Roaming)
 	-- Great Tree "Lucky Finds": eggs you find carry more luck
 	luck = math.max(1, math.floor(luck * (1 + TreeConfig.bonus(Data.Get(player), "FindLuck")) + 0.5))
 	local egg = { Key = "k" .. st.Serial, Type = eggType, Position = pos, Area = area.Name, Luck = luck }
@@ -419,6 +482,11 @@ end
 
 function EggService.FindSpot(area): Vector3?
 	return findSpot(area)
+end
+
+-- A completely random spot on the land + an area record for it (see randomSpot).
+function EggService.RandomSpot(avoid: Vector3?): (Vector3?, any?)
+	return randomSpot(avoid)
 end
 
 -- Resting spot on the terrain around a point (for eggs that appear next to the player).

@@ -39,6 +39,7 @@ local Data
 local rng = Random.new()
 local serial = 0
 local current: any = nil -- { Id, Tier, Egg, Luck, Position, Area, Region, EndsAt, Model, Claimed }
+local lastPosition: Vector3? = nil -- where the previous wild egg was (the next one keeps away from it)
 
 local function payloadOf(egg)
 	return {
@@ -117,9 +118,16 @@ function WildEggService.Spawn(tierId: string?)
 	if not areas or #areas == 0 then
 		return nil
 	end
-	-- a random area with a good resting spot
-	local area, position
+	-- a completely random place of the land (not one of the fixed areas), away from the last wild egg
+	local position, area = eggService.RandomSpot(lastPosition)
+	if not position then
+		-- (no free land found: a random area with a good resting spot)
+		area = nil
+	end
 	for _ = 1, 8 do
+		if area and position then
+			break
+		end
 		local candidate = areas[rng:NextInteger(1, #areas)]
 		local spot = eggService.FindSpot(candidate)
 		if spot then
@@ -145,6 +153,7 @@ function WildEggService.Spawn(tierId: string?)
 	}
 	egg.Model = buildModel(egg)
 	current = egg
+	lastPosition = position
 	Net.broadcast("WildEggSpawn", payloadOf(egg))
 	WildEggService.Spawned:Fire(egg)
 	task.delay(WildEggConfig.Lifetime, function()
