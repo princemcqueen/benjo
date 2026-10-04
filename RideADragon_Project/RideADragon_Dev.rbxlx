@@ -10161,13 +10161,60 @@ return table.freeze(MutationConfig)
 					<string name="Name">QuestConfig</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	QuestConfig
-	First-time tutorial steps and repeatable quest templates.
+	Elder Rowan's quests (QuestService / QuestsWindow, the QUESTS button, key Q).
+
+	  * GETTING STARTED: a short list of first goals for a new player (each pays once). Done = a fact
+	    about the player's data (Stats / perches / upgrades), nothing has to be "armed" first.
+	  * ACTIVE QUESTS: always QuestConfig.ActiveCount repeatable quests picked from Templates. A quest counts
+	    from the moment it is given (Stat now - Stat when given). Take the reward and a new one appears.
+	    Goals and rewards grow with the player level and income. Every 3rd quest also pays a free spin.
 ]]
 
 local QuestConfig = {}
 
--- Tutorial: Step index -> definition. The server advances steps when the
--- matching event happens (see QuestService). Target kinds drive waypoints.
+QuestConfig.ActiveCount = 3
+QuestConfig.SpinEvery = 3 -- every this many completed quests: +1 spin ticket
+
+-- Cash reward = the template's Reward grown by the level, but at least this many seconds of income.
+QuestConfig.RewardPerLevel = 0.35
+QuestConfig.RewardIncomeSeconds = 150
+QuestConfig.XPBase = 40 -- player XP of a quest, +5% per level
+QuestConfig.XPPerLevel = 0.05
+
+-- Repeatable quests. Goal = Goal + GoalPerLevel * (level - 1). Stat = a counter of data.Stats.
+-- Fmt: how the goal reads in the text ("count" a whole number, "big" 12,000, "cash" $1.5K).
+QuestConfig.Templates = {
+	FindEggs = { Text = "Find %s eggs", Goal = 3, GoalPerLevel = 0.25, Reward = 300, Stat = "EggsFound", Fmt = "count" },
+	HatchDragons = { Text = "Hatch %s dragons", Goal = 2, GoalPerLevel = 0.2, Reward = 450, Stat = "Hatched", Fmt = "count" },
+	FlyDistance = { Text = "Fly %s studs", Goal = 6000, GoalPerLevel = 900, Reward = 350, Stat = "DistanceFlown", Fmt = "big" },
+	CollectIncome = { Text = "Earn %s from your perch dragons", Goal = 1500, GoalPerLevel = 0, Reward = 400, Stat = "Collected", Fmt = "cash", IncomeSeconds = 240 },
+	FeedDragons = { Text = "Feed dragons %s times", Goal = 3, GoalPerLevel = 0.15, Reward = 300, Stat = "Fed", Fmt = "count" },
+	BoostTime = { Text = "Boost for %s seconds", Goal = 30, GoalPerLevel = 2, Reward = 250, Stat = "BoostSeconds", Fmt = "count" },
+	CollectCoins = { Text = "Collect %s coins on the map", Goal = 25, GoalPerLevel = 2, Reward = 250, Stat = "Coins", Fmt = "count" },
+	SellDragons = { Text = "Sell %s dragons", Goal = 2, GoalPerLevel = 0.1, Reward = 250, Stat = "Released", Fmt = "count" },
+	SpinWheel = { Text = "Spin the wheel %s times", Goal = 2, GoalPerLevel = 0.1, Reward = 300, Stat = "Spins", Fmt = "count" },
+	TryMutation = { Text = "Try the mutation machine %s times", Goal = 2, GoalPerLevel = 0.1, Reward = 350, Stat = "MutateTries", Fmt = "count" },
+	WinDuel = { Text = "Win %s duel in the Battle Hall", Goal = 1, GoalPerLevel = 0.04, Reward = 600, Stat = "DuelsWon", Fmt = "count" },
+}
+
+QuestConfig.TemplateOrder = { "FindEggs", "HatchDragons", "FlyDistance", "CollectIncome", "FeedDragons", "BoostTime", "CollectCoins", "SellDragons", "SpinWheel", "TryMutation", "WinDuel" }
+
+-- First goals. Check = which fact of the player's data makes it done (QuestService.starterDone).
+QuestConfig.Starter = {
+	{ Id = "Ride", Text = "Ride your dragon", Hint = "Press R or tap RIDE", Check = "Rides", Need = 1, Reward = 150 },
+	{ Id = "Fly", Text = "Fly 500 studs", Hint = "SPACE to take off, SHIFT to boost", Check = "DistanceFlown", Need = 500, Reward = 200 },
+	{ Id = "FindEgg", Text = "Pick up an egg", Hint = "Follow the egg arrow", Check = "EggsFound", Need = 1, Reward = 200 },
+	{ Id = "Hatch", Text = "Hatch a dragon", Hint = "Put an egg in a nest at your sanctuary", Check = "Hatched", Need = 1, Reward = 300 },
+	{ Id = "Perch", Text = "Rest a dragon on a perch", Hint = "Open DRAGONS (G) and press PLACE", Check = "Perch", Need = 1, Reward = 400 },
+	{ Id = "Feed", Text = "Feed a dragon", Hint = "Open DRAGONS (G) and press FEED", Check = "Fed", Need = 1, Reward = 250 },
+	{ Id = "Upgrade", Text = "Buy your first upgrade", Hint = "Open the SHOP (B)", Check = "Upgrade", Need = 1, Reward = 500, Spins = 2 },
+}
+QuestConfig.StarterById = {}
+for _, s in QuestConfig.Starter do
+	QuestConfig.StarterById[s.Id] = s
+end
+
+-- (the old guided tutorial steps, kept for the day the objective HUD comes)
 QuestConfig.Tutorial = {
 	{ Id = "Ride", Text = "RIDE YOUR DRAGON", Hint = "Press R or tap RIDE", Target = "None" },
 	{ Id = "ReachEgg", Text = "FLY TO THE GLOWING EGG", Hint = "SPACE to take off, SHIFT to boost", Target = "TutorialEgg" },
@@ -10180,19 +10227,40 @@ QuestConfig.Tutorial = {
 	{ Id = "BuyUpgrade", Text = "BUY YOUR FIRST UPGRADE", Hint = "Open the SHOP (B)", Target = "None", Reward = 250 },
 }
 
-QuestConfig.ActiveCount = 3
+-- ============================================================== helpers
+-- The goal of a template for a player of this level / income (a whole number, at least 1).
+function QuestConfig.goal(templateId: string, level: number, income: number): number
+	local t = QuestConfig.Templates[templateId]
+	if not t then
+		return 1
+	end
+	local goal = t.Goal + t.GoalPerLevel * (math.max(1, level) - 1)
+	if t.IncomeSeconds then
+		goal = math.max(goal, income * t.IncomeSeconds)
+	end
+	if t.Fmt == "big" then
+		return math.max(1, math.floor(goal / 100 + 0.5) * 100)
+	end
+	if t.Fmt == "cash" then
+		return math.max(1, math.floor(goal / 10 + 0.5) * 10)
+	end
+	return math.max(1, math.floor(goal + 0.5))
+end
 
--- Repeatable quests. Goal/Reward scale with player level.
-QuestConfig.Templates = {
-	FindEggs = { Text = "Find %d eggs", Goal = 3, GoalPerLevel = 0.25, Reward = 300, Stat = "EggsFound" },
-	HatchDragons = { Text = "Hatch %d dragons", Goal = 2, GoalPerLevel = 0.2, Reward = 450, Stat = "Hatched" },
-	FlyDistance = { Text = "Fly %s studs", Goal = 6000, GoalPerLevel = 900, Reward = 350, Stat = "DistanceFlown", Big = true },
-	CollectIncome = { Text = "Collect %s from your sanctuary", Goal = 1500, GoalPerLevel = 1.0, Reward = 400, Stat = "Collected", Cash = true, Scales = true },
-	FeedDragons = { Text = "Feed dragons %d times", Goal = 3, GoalPerLevel = 0.15, Reward = 300, Stat = "Fed" },
-	BoostTime = { Text = "Boost for %d seconds", Goal = 30, GoalPerLevel = 2, Reward = 250, Stat = "BoostSeconds" },
-}
+-- The cash a quest pays: the template reward grown by the level, never less than a few minutes of income.
+function QuestConfig.cash(templateId: string, level: number, income: number): number
+	local t = QuestConfig.Templates[templateId]
+	if not t then
+		return 0
+	end
+	local cash = t.Reward * (1 + QuestConfig.RewardPerLevel * (math.max(1, level) - 1))
+	cash = math.max(cash, income * QuestConfig.RewardIncomeSeconds)
+	return math.max(1, math.floor(cash / 10 + 0.5) * 10)
+end
 
-QuestConfig.TemplateOrder = { "FindEggs", "HatchDragons", "FlyDistance", "CollectIncome", "FeedDragons", "BoostTime" }
+function QuestConfig.xp(level: number): number
+	return math.floor(QuestConfig.XPBase * (1 + QuestConfig.XPPerLevel * math.max(0, level - 1)) + 0.5)
+end
 
 return table.freeze(QuestConfig)
 ]]></ProtectedString>
@@ -11182,7 +11250,7 @@ WorldConfig.SkyIslands = {
 }
 -- The statue in the middle of the plaza is the owner (StatueService): built from this player's avatar,
 -- or a marble king when the avatar cannot be loaded. Scale = times the size of a normal avatar.
-WorldConfig.PlazaStatue = { Username = "Bendzaminoo", UserId = 0, Scale = 3.6 }
+WorldConfig.PlazaStatue = { Username = "Bendzaminoo", UserId = 0, Scale = 3.6, Outfit = "DragonKing" } -- Outfit: "DragonKing" (preset) or "Own" (the avatar's own clothes)
 
 WorldConfig.SkyIslandById = {}
 for _, isle in WorldConfig.SkyIslands do
@@ -18515,7 +18583,7 @@ local TEMPLATE = {
 	Index = {},
 	IndexClaims = {}, -- Dragon Index milestones already paid, see IndexConfig
 	Regions = { Haven = true },
-	Quests = { Active = {}, Completed = 0, Serial = 0 },
+	Quests = { Active = {}, Completed = 0, Serial = 0, Starter = {} }, -- see QuestService
 	Tutorial = { Step = 1, Done = false },
 	Daily = { LastClaim = 0, Streak = 0 },
 	Settings = {
@@ -18546,6 +18614,7 @@ local TEMPLATE = {
 		Coins = 0,
 		DuelsWon = 0,
 		DuelsLost = 0,
+		Rides = 0,
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},
@@ -18928,6 +18997,392 @@ return PlayerDataService
 				</Properties>
 			</Item>
 			<Item class="ModuleScript" referent="RBX000089">
+				<Properties>
+					<string name="Name">QuestService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	QuestService
+	Elder Rowan's quests (QuestConfig, QuestsWindow). Data: data.Quests = { Active = { quest... }, Completed = n,
+	Serial = n, Starter = { [id] = true } }, a quest = { Id = "q12", Template, Goal, Base }.
+
+	  * GETTING STARTED: the first goals of a new player (QuestConfig.Starter); each pays once when done.
+	  * ACTIVE QUESTS: QuestConfig.ActiveCount quests from the templates. Progress = the counter now minus the
+	    counter when the quest was given, so it counts from that moment on. Taking the reward gives the
+	    cash (grows with level and income), player XP, every 3rd quest a spin, and a NEW quest takes its place.
+	  * Two counters are kept here: Stats.Rides (every time you mount) and Stats.BoostSeconds (riding with the boost on).
+
+	Net (domain "Quests"):
+	  State {} -> { Level, Completed, SpinIn, Claimable, StarterLeft, Starter = { { Id, Text, Hint, Reward, Spins, Done, Claimed } },
+	                Active = { { Id, Text, Progress, Goal, Cash, XP, Ready } } }
+	  Claim { Id }  Id = "q12" (an active quest) or "s:Ride" (a starter goal)  -> { Cash, XP, Spins }
+	Signal "QuestReady" { Count } to the player whenever the number of rewards waiting changes.
+	Test hooks: QuestService.State(player), QuestService.Ensure(player), QuestService.Claimable(player).
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local QuestConfig = require(Configs:WaitForChild("QuestConfig"))
+
+local QuestService = {}
+
+local Data
+local Services
+local rng = Random.new()
+local lastCount: { [Player]: number } = {}
+
+-- ============================================================== helpers
+local function stat(data, name: string): number
+	return tonumber(data.Stats and data.Stats[name]) or 0
+end
+
+local function levelOf(data): number
+	return math.max(1, tonumber(data.Level) or 1)
+end
+
+local function commas(n: number): string
+	local s = tostring(math.floor(n + 0.5))
+	local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+	return (out:gsub("^,", ""))
+end
+
+local function goalText(template, goal: number): string
+	local shown
+	if template.Fmt == "cash" then
+		shown = Format.cash(goal)
+	elseif template.Fmt == "big" then
+		shown = commas(goal)
+	else
+		shown = tostring(goal)
+	end
+	return string.format(template.Text, shown)
+end
+
+local function counted(t): number
+	local n = 0
+	for _ in t do
+		n += 1
+	end
+	return n
+end
+
+-- ============================================================== starter goals
+local function starterDone(data, s): boolean
+	if s.Check == "Perch" then
+		return counted(data.Nests and data.Nests.Slots or {}) >= s.Need
+	elseif s.Check == "Upgrade" then
+		for _, level in data.Upgrades or {} do
+			if (tonumber(level) or 0) > 0 then
+				return true
+			end
+		end
+		for _, level in data.Tree or {} do
+			if (tonumber(level) or 0) > 0 then
+				return true
+			end
+		end
+		return false
+	end
+	return stat(data, s.Check) >= s.Need
+end
+
+local function starterClaimed(data, id: string): boolean
+	return data.Quests.Starter ~= nil and data.Quests.Starter[id] == true
+end
+
+-- ============================================================== active quests
+local function pickTemplate(active: { any }, avoid: string?): string
+	local used = {}
+	for _, q in active do
+		used[q.Template] = true
+	end
+	local pool = {}
+	for _, id in QuestConfig.TemplateOrder do
+		if not used[id] and id ~= avoid then
+			table.insert(pool, id)
+		end
+	end
+	if #pool == 0 then
+		pool = table.clone(QuestConfig.TemplateOrder)
+	end
+	return pool[rng:NextInteger(1, #pool)]
+end
+
+local function newQuest(player: Player, data, active: { any }, avoid: string?)
+	local template = pickTemplate(active, avoid)
+	local serial = (tonumber(data.Quests.Serial) or 0) + 1
+	Data.Set(player, { "Quests", "Serial" }, serial)
+	local income = Services.EconomyService.IncomeRate(player)
+	return {
+		Id = "q" .. serial,
+		Template = template,
+		Goal = QuestConfig.goal(template, levelOf(data), income),
+		Base = stat(data, QuestConfig.Templates[template].Stat),
+	}
+end
+
+-- Makes sure the player has ActiveCount valid quests.
+function QuestService.Ensure(player: Player)
+	local data = Data.Get(player)
+	if not data then
+		return
+	end
+	if type(data.Quests) ~= "table" then
+		return
+	end
+	local active = {}
+	for _, q in data.Quests.Active or {} do
+		if type(q) == "table" and QuestConfig.Templates[q.Template] and type(q.Id) == "string" then
+			table.insert(active, q)
+		end
+	end
+	local changed = #active ~= counted(data.Quests.Active or {})
+	while #active < QuestConfig.ActiveCount do
+		table.insert(active, newQuest(player, data, active, nil))
+		changed = true
+	end
+	if changed then
+		Data.Set(player, { "Quests", "Active" }, active)
+	end
+end
+
+local function progress(data, q): number
+	local template = QuestConfig.Templates[q.Template]
+	local value = stat(data, template.Stat) - (tonumber(q.Base) or 0)
+	return math.clamp(value, 0, q.Goal)
+end
+
+-- Rewards waiting: finished starter goals not yet taken + finished active quests.
+function QuestService.Claimable(player: Player): number
+	local data = Data.Get(player)
+	if not data or type(data.Quests) ~= "table" then
+		return 0
+	end
+	local n = 0
+	for _, s in QuestConfig.Starter do
+		if not starterClaimed(data, s.Id) and starterDone(data, s) then
+			n += 1
+		end
+	end
+	for _, q in data.Quests.Active or {} do
+		if QuestConfig.Templates[q.Template] and progress(data, q) >= q.Goal then
+			n += 1
+		end
+	end
+	return n
+end
+
+function QuestService.State(player: Player)
+	local data = Data.Get(player)
+	if not data or type(data.Quests) ~= "table" then
+		return nil
+	end
+	QuestService.Ensure(player)
+	local level = levelOf(data)
+	local income = Services.EconomyService.IncomeRate(player)
+	local starter, left = {}, 0
+	for _, s in QuestConfig.Starter do
+		local claimed = starterClaimed(data, s.Id)
+		if not claimed then
+			left += 1
+		end
+		table.insert(starter, { Id = s.Id, Text = s.Text, Hint = s.Hint, Reward = s.Reward, Spins = s.Spins or 0, Done = starterDone(data, s), Claimed = claimed })
+	end
+	if left == 0 then
+		starter = {}
+	end
+	local active = {}
+	for _, q in data.Quests.Active do
+		local template = QuestConfig.Templates[q.Template]
+		local value = progress(data, q)
+		table.insert(active, {
+			Id = q.Id,
+			Template = q.Template,
+			Text = goalText(template, q.Goal),
+			Progress = value,
+			Goal = q.Goal,
+			Fmt = template.Fmt,
+			Cash = QuestConfig.cash(q.Template, level, income),
+			XP = QuestConfig.xp(level),
+			Ready = value >= q.Goal,
+		})
+	end
+	local completed = tonumber(data.Quests.Completed) or 0
+	return {
+		Level = level,
+		Completed = completed,
+		SpinIn = QuestConfig.SpinEvery - completed % QuestConfig.SpinEvery,
+		Claimable = QuestService.Claimable(player),
+		StarterLeft = left,
+		StarterTotal = #QuestConfig.Starter,
+		Starter = starter,
+		Active = active,
+	}
+end
+
+-- ============================================================== claiming
+local function claimStarter(player: Player, data, id: string)
+	local s = QuestConfig.StarterById[id]
+	if not s then
+		return false, "BAD_REQUEST"
+	end
+	if starterClaimed(data, id) then
+		return false, "ALREADY_CLAIMED", "You already took that reward."
+	end
+	if not starterDone(data, s) then
+		return false, "NOT_DONE", "Not finished yet: " .. s.Text
+	end
+	Data.Set(player, { "Quests", "Starter", id }, true)
+	Services.EconomyService.Earn(player, s.Reward, "Quest")
+	local parts = { Format.cash(s.Reward) }
+	if s.Spins then
+		Services.SpinService.AddTickets(player, s.Spins)
+		table.insert(parts, string.format("%d spins", s.Spins))
+	end
+	Net.notify(player, "success", string.format("GOAL DONE: %s  +%s", s.Text, table.concat(parts, "  +")))
+	return true, { Cash = s.Reward, XP = 0, Spins = s.Spins or 0 }
+end
+
+local function claimQuest(player: Player, data, id: string)
+	local index
+	for i, q in data.Quests.Active do
+		if q.Id == id then
+			index = i
+			break
+		end
+	end
+	if not index then
+		return false, "GONE", "That quest is gone."
+	end
+	local q = data.Quests.Active[index]
+	local template = QuestConfig.Templates[q.Template]
+	if not template then
+		return false, "GONE"
+	end
+	if progress(data, q) < q.Goal then
+		return false, "NOT_DONE", "Not finished yet: " .. goalText(template, q.Goal)
+	end
+	local level = levelOf(data)
+	local income = Services.EconomyService.IncomeRate(player)
+	local cash = QuestConfig.cash(q.Template, level, income)
+	local xp = QuestConfig.xp(level)
+	local text = goalText(template, q.Goal)
+	-- a new quest takes its place
+	local rest = {}
+	for i, other in data.Quests.Active do
+		if i ~= index then
+			table.insert(rest, other)
+		end
+	end
+	local fresh = newQuest(player, data, rest, q.Template)
+	table.insert(rest, math.min(index, #rest + 1), fresh)
+	local completed = (tonumber(data.Quests.Completed) or 0) + 1
+	Data.Set(player, { "Quests", "Active" }, rest)
+	Data.Set(player, { "Quests", "Completed" }, completed)
+	Services.EconomyService.Earn(player, cash, "Quest")
+	Services.LevelService.Add(player, xp, "Quest")
+	local parts = { Format.cash(cash), xp .. " XP" }
+	local spins = 0
+	if completed % QuestConfig.SpinEvery == 0 then
+		spins = 1
+		Services.SpinService.AddTickets(player, 1)
+		table.insert(parts, "1 free spin")
+	end
+	Net.notify(player, "success", string.format("QUEST DONE: %s  +%s", text, table.concat(parts, "  +")))
+	return true, { Cash = cash, XP = xp, Spins = spins }
+end
+
+local function handleState(player: Player)
+	local state = QuestService.State(player)
+	if not state then
+		return false, "NOT_LOADED"
+	end
+	return true, state
+end
+
+local function handleClaim(player: Player, p)
+	if not Net.check.str(p.Id, 24) then
+		return false, "BAD_REQUEST"
+	end
+	local data = Data.Get(player)
+	if not data or type(data.Quests) ~= "table" then
+		return false, "NOT_LOADED"
+	end
+	QuestService.Ensure(player)
+	local ok, a, b
+	if string.sub(p.Id, 1, 2) == "s:" then
+		ok, a, b = claimStarter(player, data, string.sub(p.Id, 3))
+	else
+		ok, a, b = claimQuest(player, data, p.Id)
+	end
+	if ok then
+		lastCount[player] = QuestService.Claimable(player)
+		Net.signal(player, "QuestReady", { Count = lastCount[player] })
+	end
+	return ok, a, b
+end
+
+-- ============================================================== lifecycle
+function QuestService.Init(services)
+	Services = services
+	Data = services.PlayerDataService
+	Net.handle("Quests", "State", handleState, { Burst = 6, PerSecond = 2 })
+	Net.handle("Quests", "Claim", handleClaim, { Burst = 4, PerSecond = 1.5 })
+end
+
+function QuestService.Start()
+	Data.Loaded:Connect(function(player)
+		QuestService.Ensure(player)
+		lastCount[player] = QuestService.Claimable(player)
+		if lastCount[player] > 0 then
+			Net.signal(player, "QuestReady", { Count = lastCount[player] })
+		end
+	end)
+	local mount = Services.MountService
+	if mount and mount.Mounted then
+		mount.Mounted:Connect(function(player)
+			if Data.Get(player) then
+				Data.Increment(player, { "Stats", "Rides" }, 1)
+			end
+		end)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		lastCount[player] = nil
+	end)
+	-- once a second: boost seconds; every two seconds: tell the player when rewards are waiting
+	task.spawn(function()
+		local tick = 0
+		while true do
+			task.wait(1)
+			tick += 1
+			for _, player in Players:GetPlayers() do
+				local data = Data.Get(player)
+				if data then
+					local comp = mount and mount.Get(player)
+					if comp and comp.Riding and comp.Model and comp.Model.Parent and comp.Model:GetAttribute("Boost") == true then
+						Data.Increment(player, { "Stats", "BoostSeconds" }, 1)
+					end
+					if tick % 2 == 0 then
+						local n = QuestService.Claimable(player)
+						if n ~= lastCount[player] then
+							lastCount[player] = n
+							Net.signal(player, "QuestReady", { Count = n })
+						end
+					end
+				end
+			end
+		end
+	end)
+end
+
+return QuestService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000090">
 				<Properties>
 					<string name="Name">RaceService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19864,7 +20319,7 @@ return RaceService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000090">
+			<Item class="ModuleScript" referent="RBX000091">
 				<Properties>
 					<string name="Name">RankService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20177,7 +20632,7 @@ return RankService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000091">
+			<Item class="ModuleScript" referent="RBX000092">
 				<Properties>
 					<string name="Name">SanctuaryService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20439,7 +20894,7 @@ return SanctuaryService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000092">
+			<Item class="ModuleScript" referent="RBX000093">
 				<Properties>
 					<string name="Name">SettingsService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20497,7 +20952,7 @@ return SettingsService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000093">
+			<Item class="ModuleScript" referent="RBX000094">
 				<Properties>
 					<string name="Name">ShopService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20551,7 +21006,7 @@ return ShopService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000094">
+			<Item class="ModuleScript" referent="RBX000095">
 				<Properties>
 					<string name="Name">SpinService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20850,7 +21305,7 @@ return SpinService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000095">
+			<Item class="ModuleScript" referent="RBX000096">
 				<Properties>
 					<string name="Name">StatueService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -20858,7 +21313,8 @@ return SpinService
 	The statue in the middle of the plaza is the OWNER: it stands on the plinth of the fountain instead of
 	the stone dragon. It is built from the owner's real Roblox avatar (WorldConfig.PlazaStatue.Username /
 	UserId): Players:GetHumanoidDescriptionFromUserId + CreateHumanoidModelFromDescription, scaled up,
-	posed (right fist raised, standing tall), anchored. If the avatar cannot be loaded (no web access, the
+	dressed in a preset "Dragon King" outfit (armor, cape, crown; WorldConfig.PlazaStatue.Outfit), posed (right fist raised,
+	standing tall), anchored. If the avatar cannot be loaded (no web access, the
 	name is wrong) a marble-and-gold "Dragon King" built from parts stands there instead. A plaque on the
 	plinth and a floating title ("OWNER - Dragon King", the rank colours of RankConfig) say whose it is.
 
@@ -20982,6 +21438,104 @@ local function settle(model: Model, feetY: number)
 	end
 	if lowest < math.huge then
 		model:PivotTo(model:GetPivot() + V(0, feetY - lowest, 0))
+	end
+end
+
+-- ============================================================== the preset outfit
+-- The statue keeps the owner's face, hair and skin, but wears a fixed "Dragon King" outfit instead of
+-- whatever the avatar wears today: a dark suit, a gold breastplate with a gem, pauldrons, belt and
+-- gauntlets, a red cape and a crown. Every piece is a part welded to the body part it sits on, so it
+-- follows the pose. (WorldConfig.PlazaStatue.Outfit = "DragonKing"; anything else keeps the avatar's own clothes.)
+local SUIT = Color3.fromRGB(38, 44, 74)
+local BOOTS = Color3.fromRGB(58, 40, 34)
+local GOLD = Color3.fromRGB(236, 190, 70)
+local CAPE = Color3.fromRGB(176, 38, 52)
+local GEM = Color3.fromRGB(120, 230, 255)
+
+local function outfitPiece(model: Model, body: BasePart, shape: Enum.PartType, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material)
+	local part = Instance.new("Part")
+	part.Name = "Outfit"
+	part.Shape = shape
+	part.Size = size
+	part.CFrame = cf
+	part.Color = color
+	part.Material = material
+	part.CanCollide = false
+	part.Massless = true
+	part.Anchored = false
+	part.Parent = model
+	local weld = Instance.new("Weld")
+	weld.Name = "OutfitWeld"
+	weld.Part0 = body
+	weld.Part1 = part
+	weld.C0 = body.CFrame:Inverse() * part.CFrame
+	weld.Parent = part
+	return part
+end
+
+local function dress(model: Model)
+	-- take off the avatar's clothes and accessories (the hair stays)
+	for _, d in model:GetDescendants() do
+		if d:IsA("Shirt") or d:IsA("Pants") or d:IsA("ShirtGraphic") then
+			d:Destroy()
+		elseif d:IsA("Accessory") then
+			local handle = d:FindFirstChild("Handle")
+			if not (handle and handle:FindFirstChild("HairAttachment")) then
+				d:Destroy()
+			end
+		end
+	end
+	local function part(name: string): BasePart?
+		local p = model:FindFirstChild(name, true)
+		return p and p:IsA("BasePart") and p or nil
+	end
+	for _, name in { "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm", "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg" } do
+		local p = part(name)
+		if p then
+			p.Color = SUIT
+		end
+	end
+	for _, name in { "LeftFoot", "RightFoot" } do
+		local p = part(name)
+		if p then
+			p.Color = BOOTS
+		end
+	end
+	local block, ball, cyl = Enum.PartType.Block, Enum.PartType.Ball, Enum.PartType.Cylinder
+	local metal, fabric, neon = Enum.Material.Metal, Enum.Material.Fabric, Enum.Material.Neon
+	local ut = part("UpperTorso")
+	if ut then
+		local z = ut.Size.Z
+		outfitPiece(model, ut, block, V(ut.Size.X * 1.06, ut.Size.Y * 0.85, z * 0.22), ut.CFrame * CF(0, ut.Size.Y * 0.02, -(z / 2 + z * 0.1)), GOLD, metal)
+		outfitPiece(model, ut, ball, V(ut.Size.Y * 0.3, ut.Size.Y * 0.3, ut.Size.Y * 0.3), ut.CFrame * CF(0, ut.Size.Y * 0.08, -(z / 2 + z * 0.24)), GEM, neon)
+		-- the cape: from the shoulders down the back
+		outfitPiece(model, ut, block, V(ut.Size.X * 1.18, ut.Size.Y * 2.5, z * 0.12), ut.CFrame * CF(0, -ut.Size.Y * 0.85, z / 2 + z * 0.2) * ANG(math.rad(-7), 0, 0), CAPE, fabric)
+		outfitPiece(model, ut, block, V(ut.Size.X * 1.22, ut.Size.Y * 0.14, z * 0.2), ut.CFrame * CF(0, ut.Size.Y * 0.46, z * 0.1), GOLD, metal)
+	end
+	local lt = part("LowerTorso")
+	if lt then
+		outfitPiece(model, lt, block, V(lt.Size.X * 1.08, lt.Size.Y * 1.15, lt.Size.Z * 1.12), lt.CFrame, GOLD, metal)
+	end
+	for _, side in { "Left", "Right" } do
+		local ua = part(side .. "UpperArm")
+		if ua then
+			outfitPiece(model, ua, ball, V(ua.Size.X * 1.7, ua.Size.X * 1.7, ua.Size.X * 1.7), ua.CFrame * CF(0, ua.Size.Y * 0.38, 0), GOLD, metal)
+		end
+		local la = part(side .. "LowerArm")
+		if la then
+			outfitPiece(model, la, block, V(la.Size.X * 1.14, la.Size.Y * 0.7, la.Size.Z * 1.14), la.CFrame * CF(0, -la.Size.Y * 0.1, 0), GOLD, metal)
+		end
+	end
+	local head = part("Head")
+	if head then
+		local hs = head.Size
+		local d = math.max(hs.X, hs.Z)
+		outfitPiece(model, head, cyl, V(hs.Y * 0.26, d * 1.02, d * 1.02), head.CFrame * CF(0, hs.Y * 0.4, 0) * ANG(0, 0, math.rad(90)), GOLD, metal)
+		for i = 0, 4 do
+			local a = i / 5 * math.pi * 2
+			local at = head.CFrame * CF(math.cos(a) * d * 0.42, hs.Y * 0.62, math.sin(a) * d * 0.42)
+			outfitPiece(model, head, block, V(d * 0.13, hs.Y * 0.34, d * 0.13), at, GOLD, metal)
+		end
 	end
 end
 
@@ -21130,6 +21684,12 @@ local function build()
 			model:ScaleTo(def.Scale)
 		end)
 		model:PivotTo(frame * CF(0, 6 * def.Scale, 0))
+		if def.Outfit == "DragonKing" then
+			local okDress, dressErr = pcall(dress, model)
+			if not okDress then
+				warn("[Statue] outfit failed: " .. tostring(dressErr))
+			end
+		end
 		local okPose, err = pcall(pose, model, frame)
 		if not okPose then
 			warn("[Statue] pose failed: " .. tostring(err))
@@ -21155,7 +21715,7 @@ local function build()
 end
 
 -- (exposed for the tests: the posing runs on a rig built by hand)
-StatueService._test = { pose = pose, freeze = freeze, settle = settle }
+StatueService._test = { pose = pose, freeze = freeze, settle = settle, dress = dress }
 
 function StatueService.Init(_services) end
 
@@ -21172,7 +21732,7 @@ return StatueService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000096">
+			<Item class="ModuleScript" referent="RBX000097">
 				<Properties>
 					<string name="Name">TravelService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21300,7 +21860,7 @@ return TravelService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000097">
+			<Item class="ModuleScript" referent="RBX000098">
 				<Properties>
 					<string name="Name">TreeService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21422,7 +21982,7 @@ return TreeService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000098">
+			<Item class="ModuleScript" referent="RBX000099">
 				<Properties>
 					<string name="Name">WildEggService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21669,7 +22229,7 @@ return WildEggService
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000099">
+			<Item class="ModuleScript" referent="RBX000100">
 				<Properties>
 					<string name="Name">WorldService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -21826,11 +22386,11 @@ return WorldService
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000100">
+		<Item class="Folder" referent="RBX000101">
 			<Properties>
 				<string name="Name">World</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000101">
+			<Item class="ModuleScript" referent="RBX000102">
 				<Properties>
 					<string name="Name">GreatTree</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -22031,7 +22591,7 @@ return GreatTree
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000102">
+			<Item class="ModuleScript" referent="RBX000103">
 				<Properties>
 					<string name="Name">Haven</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -22206,7 +22766,7 @@ return Haven
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000103">
+			<Item class="ModuleScript" referent="RBX000104">
 				<Properties>
 					<string name="Name">HavenLayout</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/layout.py - do not edit by hand.
@@ -26592,7 +27152,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000104">
+			<Item class="ModuleScript" referent="RBX000105">
 				<Properties>
 					<string name="Name">HavenTerrainData</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/terrain_data.py - do not edit by hand.
@@ -26643,7 +27203,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000105">
+			<Item class="ModuleScript" referent="RBX000106">
 				<Properties>
 					<string name="Name">Kit</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -26989,7 +27549,7 @@ return Kit
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000106">
+			<Item class="ModuleScript" referent="RBX000107">
 				<Properties>
 					<string name="Name">Landmarks</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -27351,7 +27911,7 @@ return Landmarks
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000107">
+			<Item class="ModuleScript" referent="RBX000108">
 				<Properties>
 					<string name="Name">Props</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -27547,7 +28107,7 @@ return Props
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000108">
+			<Item class="ModuleScript" referent="RBX000109">
 				<Properties>
 					<string name="Name">RaceIsland</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -27987,7 +28547,7 @@ return RaceIsland
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000109">
+			<Item class="ModuleScript" referent="RBX000110">
 				<Properties>
 					<string name="Name">Sanctuaries</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -28375,7 +28935,7 @@ return Sanctuaries
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000110">
+			<Item class="ModuleScript" referent="RBX000111">
 				<Properties>
 					<string name="Name">SkyIslands</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -28715,7 +29275,7 @@ return SkyIslands
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000111">
+			<Item class="ModuleScript" referent="RBX000112">
 				<Properties>
 					<string name="Name">TerrainWriter</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -29129,7 +29689,7 @@ return TerrainWriter
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000112">
+			<Item class="ModuleScript" referent="RBX000113">
 				<Properties>
 					<string name="Name">Village</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -29587,7 +30147,7 @@ return Village
 			</Item>
 		</Item>
 	</Item>
-	<Item class="StarterPlayer" referent="RBX000113">
+	<Item class="StarterPlayer" referent="RBX000114">
 		<Properties>
 			<string name="Name">StarterPlayer</string>
 			<bool name="EnableMouseLockOption">false</bool>
@@ -29595,15 +30155,15 @@ return Village
 			<float name="CameraMinZoomDistance">6.0</float>
 			<float name="CharacterWalkSpeed">20.0</float>
 		</Properties>
-		<Item class="StarterPlayerScripts" referent="RBX000114">
+		<Item class="StarterPlayerScripts" referent="RBX000115">
 			<Properties>
 				<string name="Name">StarterPlayerScripts</string>
 			</Properties>
-			<Item class="Folder" referent="RBX000115">
+			<Item class="Folder" referent="RBX000116">
 				<Properties>
 					<string name="Name">Controllers</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000116">
+				<Item class="ModuleScript" referent="RBX000117">
 					<Properties>
 						<string name="Name">AnimationController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30208,7 +30768,7 @@ return AnimationController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000117">
+				<Item class="ModuleScript" referent="RBX000118">
 					<Properties>
 						<string name="Name">AnnounceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30472,7 +31032,7 @@ return AnnounceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000118">
+				<Item class="ModuleScript" referent="RBX000119">
 					<Properties>
 						<string name="Name">AudioController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30645,7 +31205,7 @@ return AudioController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000119">
+				<Item class="ModuleScript" referent="RBX000120">
 					<Properties>
 						<string name="Name">BondController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -30973,7 +31533,7 @@ return BondController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000120">
+				<Item class="ModuleScript" referent="RBX000121">
 					<Properties>
 						<string name="Name">CameraController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31343,7 +31903,7 @@ return CameraController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000121">
+				<Item class="ModuleScript" referent="RBX000122">
 					<Properties>
 						<string name="Name">ChatController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31436,7 +31996,7 @@ return ChatController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000122">
+				<Item class="ModuleScript" referent="RBX000123">
 					<Properties>
 						<string name="Name">CoinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -31871,7 +32431,7 @@ return CoinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000123">
+				<Item class="ModuleScript" referent="RBX000124">
 					<Properties>
 						<string name="Name">CombatController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32711,7 +33271,7 @@ return CombatController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000124">
+				<Item class="ModuleScript" referent="RBX000125">
 					<Properties>
 						<string name="Name">DailyController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32773,7 +33333,7 @@ return DailyController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000125">
+				<Item class="ModuleScript" referent="RBX000126">
 					<Properties>
 						<string name="Name">DataController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -32904,7 +33464,7 @@ return DataController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000126">
+				<Item class="ModuleScript" referent="RBX000127">
 					<Properties>
 						<string name="Name">DragonController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -33553,7 +34113,7 @@ return DragonController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000127">
+				<Item class="ModuleScript" referent="RBX000128">
 					<Properties>
 						<string name="Name">DuelController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -34895,7 +35455,7 @@ return DuelController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000128">
+				<Item class="ModuleScript" referent="RBX000129">
 					<Properties>
 						<string name="Name">EggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35210,7 +35770,7 @@ return EggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000129">
+				<Item class="ModuleScript" referent="RBX000130">
 					<Properties>
 						<string name="Name">GraphicsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -35347,7 +35907,7 @@ return GraphicsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000130">
+				<Item class="ModuleScript" referent="RBX000131">
 					<Properties>
 						<string name="Name">HatchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -36699,7 +37259,7 @@ return HatchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000131">
+				<Item class="ModuleScript" referent="RBX000132">
 					<Properties>
 						<string name="Name">HeldEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37096,7 +37656,7 @@ return HeldEggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000132">
+				<Item class="ModuleScript" referent="RBX000133">
 					<Properties>
 						<string name="Name">InputController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37319,7 +37879,7 @@ return InputController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000133">
+				<Item class="ModuleScript" referent="RBX000134">
 					<Properties>
 						<string name="Name">InteractionController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37382,7 +37942,7 @@ return InteractionController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000134">
+				<Item class="ModuleScript" referent="RBX000135">
 					<Properties>
 						<string name="Name">PerchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -37846,7 +38406,69 @@ return PerchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000135">
+				<Item class="ModuleScript" referent="RBX000136">
+					<Properties>
+						<string name="Name">QuestController</string>
+						<ProtectedString name="Source"><![CDATA[--[[
+	QuestController
+	Lights the QUESTS button of the HUD with the number of rewards waiting (server signal "QuestReady", and
+	once at start in case the signal came before this controller was running). The Quests window calls
+	QuestController.setCount(n) after every refresh.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Net"))
+
+local QuestController = {}
+
+local registry
+local count = 0
+
+local function show(n: number)
+	count = n
+	local hud = registry and registry.Hud
+	if hud and hud.SetBadge then
+		hud:SetBadge("Quests", n > 0 and n or nil)
+	end
+end
+
+function QuestController.setCount(n: number)
+	show(n)
+end
+
+function QuestController.count(): number
+	return count
+end
+
+function QuestController.Init(reg)
+	registry = reg
+end
+
+function QuestController.Start()
+	Net.onSignal("QuestReady", function(payload)
+		show(payload and tonumber(payload.Count) or 0)
+	end)
+	task.spawn(function()
+		-- the HUD is built after the controllers start: wait for it, then ask what is waiting
+		for _ = 1, 40 do
+			if registry.Hud then
+				break
+			end
+			task.wait(0.5)
+		end
+		local res = Net.request("Quests", "State", {})
+		if res.ok and res.data then
+			show(res.data.Claimable or 0)
+		end
+	end)
+end
+
+return QuestController
+]]></ProtectedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX000137">
 					<Properties>
 						<string name="Name">RaceController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -38880,7 +39502,7 @@ return RaceController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000136">
+				<Item class="ModuleScript" referent="RBX000138">
 					<Properties>
 						<string name="Name">RadarController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39193,7 +39815,7 @@ return RadarController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000137">
+				<Item class="ModuleScript" referent="RBX000139">
 					<Properties>
 						<string name="Name">SanctuaryController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39702,7 +40324,7 @@ return SanctuaryController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000138">
+				<Item class="ModuleScript" referent="RBX000140">
 					<Properties>
 						<string name="Name">SettingsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -39790,7 +40412,7 @@ return SettingsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000139">
+				<Item class="ModuleScript" referent="RBX000141">
 					<Properties>
 						<string name="Name">SpinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40218,7 +40840,7 @@ return SpinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000140">
+				<Item class="ModuleScript" referent="RBX000142">
 					<Properties>
 						<string name="Name">TitleController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40422,7 +41044,7 @@ return TitleController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000141">
+				<Item class="ModuleScript" referent="RBX000143">
 					<Properties>
 						<string name="Name">TreeController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40562,7 +41184,7 @@ return TreeController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000142">
+				<Item class="ModuleScript" referent="RBX000144">
 					<Properties>
 						<string name="Name">UIController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -40980,7 +41602,7 @@ return UIController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000143">
+				<Item class="ModuleScript" referent="RBX000145">
 					<Properties>
 						<string name="Name">WildEggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41481,7 +42103,7 @@ return WildEggController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000144">
+			<Item class="ModuleScript" referent="RBX000146">
 				<Properties>
 					<string name="Name">Diagnostics</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -41738,7 +42360,7 @@ return Diagnostics
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="LocalScript" referent="RBX000145">
+			<Item class="LocalScript" referent="RBX000147">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -41804,6 +42426,7 @@ local ORDER = {
 	"RadarController",
 	"CoinController",
 	"DailyController",
+	"QuestController",
 	"ChatController",
 	"InventoryController",
 	"TutorialController",
@@ -41874,16 +42497,16 @@ end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000146">
+			<Item class="Folder" referent="RBX000148">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000147">
+				<Item class="Folder" referent="RBX000149">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000148">
+				<Item class="ModuleScript" referent="RBX000150">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -41963,11 +42586,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000149">
+				<Item class="Folder" referent="RBX000151">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000150">
+					<Item class="ModuleScript" referent="RBX000152">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -42134,7 +42757,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000151">
+					<Item class="ModuleScript" referent="RBX000153">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -42567,7 +43190,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000152">
+				<Item class="ModuleScript" referent="RBX000154">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -42633,11 +43256,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000153">
+				<Item class="Folder" referent="RBX000155">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000154">
+					<Item class="ModuleScript" referent="RBX000156">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -43935,7 +44558,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000155">
+					<Item class="ModuleScript" referent="RBX000157">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -44308,7 +44931,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000156">
+				<Item class="ModuleScript" referent="RBX000158">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -44739,7 +45362,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000157">
+				<Item class="ModuleScript" referent="RBX000159">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -46073,11 +46696,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000158">
+				<Item class="Folder" referent="RBX000160">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000159">
+					<Item class="ModuleScript" referent="RBX000161">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -46294,7 +46917,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000160">
+					<Item class="ModuleScript" referent="RBX000162">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -46500,7 +47123,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000161">
+					<Item class="ModuleScript" referent="RBX000163">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -46589,7 +47212,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000162">
+				<Item class="ModuleScript" referent="RBX000164">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -46847,7 +47470,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000163">
+				<Item class="ModuleScript" referent="RBX000165">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -46977,7 +47600,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000164">
+				<Item class="ModuleScript" referent="RBX000166">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -47153,11 +47776,11 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000165">
+				<Item class="Folder" referent="RBX000167">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000166">
+					<Item class="ModuleScript" referent="RBX000168">
 						<Properties>
 							<string name="Name">DailyWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -47426,7 +48049,7 @@ return DailyWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000167">
+					<Item class="ModuleScript" referent="RBX000169">
 						<Properties>
 							<string name="Name">DuelWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -47661,7 +48284,7 @@ return DuelWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000168">
+					<Item class="ModuleScript" referent="RBX000170">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -47953,7 +48576,7 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000169">
+					<Item class="ModuleScript" referent="RBX000171">
 						<Properties>
 							<string name="Name">IndexWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -48403,7 +49026,7 @@ return IndexWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000170">
+					<Item class="ModuleScript" referent="RBX000172">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -49893,7 +50516,203 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000171">
+					<Item class="ModuleScript" referent="RBX000173">
+						<Properties>
+							<string name="Name">QuestsWindow</string>
+							<ProtectedString name="Source"><![CDATA[--[[
+	QuestsWindow  (Elder Rowan's quests, key Q, the QUESTS button)
+	GETTING STARTED goals for a new player and the active quests (QuestService / QuestConfig): every row has
+	its progress and a CLAIM button that lights up when the goal is done. The server decides everything.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+
+local UI = script.Parent.Parent
+local Theme = require(UI.Theme)
+local Responsive = require(UI.Responsive)
+local Kit = require(UI.Kit)
+local Icons = require(UI.Icons)
+local WindowBase = require(UI.WindowBase)
+
+local C = Theme.Colors
+
+local QuestsWindow = {}
+QuestsWindow.__index = QuestsWindow
+setmetatable(QuestsWindow, { __index = WindowBase })
+
+local PURPLE = Color3.fromRGB(205, 164, 222)
+local GREEN = Color3.fromRGB(110, 208, 104)
+local GOLD = Color3.fromRGB(255, 196, 48)
+
+function QuestsWindow.new(ui, registry)
+	local self = WindowBase.new({
+		Name = "Quests",
+		Title = "Quests",
+		Subtitle = "Elder Rowan's tasks",
+		Icon = "Scroll",
+		Spec = {
+			Desktop = { Width = 0.46, Height = 0.8, Aspect = 0.9 },
+			Tablet = { Width = 0.74, Height = 0.88, Aspect = 0.95 },
+			Phone = { Width = 0.72, Height = 1 },
+			PhonePortrait = { Width = 0.97, Height = 1 },
+		},
+	})
+	setmetatable(self, QuestsWindow)
+	self.UIC = ui
+	self.Registry = registry
+	self.State = nil
+	self.Busy = false
+	self.Rows = {}
+	self:Build()
+	return self
+end
+
+function QuestsWindow:Build()
+	local content = self.Content
+	local scroll = Kit.scroll({ Name = "List", Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(1, 0.9), Parent = content })
+	self.List = scroll
+	Kit.padding(scroll, 2, 8, 2, 2)
+	Kit.list(scroll, "V", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
+	self.Footer = Kit.text({ Name = "Footer", Text = "", Role = "Caption", Scaled = true, Color = C.TextMuted, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0, 0.915), Size = UDim2.fromScale(1, 0.075), Parent = content })
+	self.Empty = Kit.text({ Name = "Empty", Text = "Loading...", Role = "Label", Scaled = true, Color = C.TextMuted, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.1, 0.45), Size = UDim2.fromScale(0.8, 0.08), Parent = content })
+end
+
+function QuestsWindow:Clear()
+	for _, r in self.Rows do
+		r:Destroy()
+	end
+	table.clear(self.Rows)
+end
+
+local function rowSize(row, tall: boolean)
+	Responsive.bind(row, "Size", function(R)
+		local phone = R.Device == "Phone"
+		return UDim2.new(1, 0, 0, R.px(tall and (phone and 92 or 86) or (phone and 68 or 62)))
+	end)
+end
+
+function QuestsWindow:Section(order: number, text: string, color: Color3?)
+	local h = Kit.text({ Name = "Header" .. order, Text = text, Role = "Heading", Color = color or C.Gold, LayoutOrder = order, Truncate = true, Parent = self.List })
+	Responsive.bind(h, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(34))
+	end)
+	table.insert(self.Rows, h)
+	return h
+end
+
+local function disc(row, color: Color3, icon: string)
+	local d = Kit.frame({ Name = "Disc", BackgroundTransparency = 0, BackgroundColor3 = color, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0.025, 0.5), Size = UDim2.fromScale(0.64, 0.64), SizeConstraint = Enum.SizeConstraint.RelativeYY, Parent = row })
+	Kit.corner(d, 999)
+	local box = Kit.frame({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.62, 0.62), Parent = d })
+	Icons.make(icon, { Color = C.Ink, Accent = C.Text, Ink = color }).Parent = box
+end
+
+function QuestsWindow:StarterRow(order: number, s)
+	local color = s.Claimed and GREEN or (s.Done and GOLD or PURPLE)
+	local row = Kit.surface({ Name = "Starter_" .. s.Id, LayoutOrder = order, StrokeColor = color, StrokeTransparency = s.Done and not s.Claimed and 0.2 or 0.6, Parent = self.List })
+	rowSize(row, false)
+	disc(row, color, s.Claimed and "Check" or "Star")
+	Kit.text({ Name = "Title", Text = s.Text, Role = "Label", Color = s.Claimed and C.TextMuted or C.Text, Position = UDim2.fromScale(0.15, 0.1), Size = UDim2.fromScale(0.5, 0.42), Truncate = true, Parent = row })
+	local reward = Format.cash(s.Reward) .. (s.Spins > 0 and string.format("  +  %d SPINS", s.Spins) or "")
+	Kit.text({ Name = "Sub", Text = s.Claimed and "DONE" or (s.Done and reward or s.Hint), Role = "Caption", Color = s.Done and not s.Claimed and C.GoldBright or C.TextMuted, Position = UDim2.fromScale(0.15, 0.55), Size = UDim2.fromScale(0.5, 0.34), Truncate = true, Parent = row })
+	if not s.Claimed then
+		local go = Kit.button({ Name = "Claim", Text = "CLAIM", Style = s.Done and "Success" or "Secondary", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(0.975, 0.5), Size = UDim2.fromScale(0.26, 0.66), Parent = row })
+		go:SetEnabled(s.Done)
+		go.Activated:Connect(function()
+			self:Claim("s:" .. s.Id, go)
+		end)
+	end
+	table.insert(self.Rows, row)
+end
+
+function QuestsWindow:QuestRow(order: number, i: number, q)
+	local color = q.Ready and GOLD or PURPLE
+	local row = Kit.surface({ Name = "Quest" .. i, LayoutOrder = order, StrokeColor = color, StrokeTransparency = q.Ready and 0.15 or 0.5, Parent = self.List })
+	rowSize(row, true)
+	disc(row, color, "Scroll")
+	Kit.text({ Name = "Title", Text = q.Text, Role = "Heading", Position = UDim2.fromScale(0.15, 0.08), Size = UDim2.fromScale(0.55, 0.34), Truncate = true, Parent = row })
+	local bar = Kit.progress({ Name = "Bar", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0.15, 0.55), Size = UDim2.fromScale(0.55, 0.14), Color = C.Accent, Color2 = C.GoldBright, Parent = row })
+	bar:SetValue(q.Goal > 0 and q.Progress / q.Goal or 0)
+	local progressText = q.Fmt == "cash" and string.format("%s / %s", Format.cash(q.Progress), Format.cash(q.Goal)) or string.format("%s / %s", Format.abbreviate(q.Progress), Format.abbreviate(q.Goal))
+	Kit.text({ Name = "Progress", Text = progressText, Role = "Caption", Color = C.TextMuted, Position = UDim2.fromScale(0.15, 0.7), Size = UDim2.fromScale(0.3, 0.24), Truncate = true, Parent = row })
+	Kit.text({ Name = "Reward", Text = string.format("%s  +  %d XP", Format.cash(q.Cash), q.XP), Role = "Caption", Color = C.GoldBright, XAlign = Enum.TextXAlignment.Right, Position = UDim2.fromScale(0.3, 0.7), Size = UDim2.fromScale(0.4, 0.24), Truncate = true, Parent = row })
+	local go = Kit.button({ Name = "Claim", Text = "CLAIM", Style = q.Ready and "Success" or "Secondary", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(0.975, 0.5), Size = UDim2.fromScale(0.24, 0.6), Parent = row })
+	go:SetEnabled(q.Ready)
+	go.Activated:Connect(function()
+		self:Claim(q.Id, go)
+	end)
+	table.insert(self.Rows, row)
+end
+
+function QuestsWindow:Render()
+	local st = self.State
+	self:Clear()
+	self.Empty.Visible = st == nil
+	if not st then
+		return
+	end
+	local order = 0
+	if #st.Starter > 0 then
+		order += 1
+		self:Section(order, string.format("GETTING STARTED   %d / %d", st.StarterTotal - st.StarterLeft, st.StarterTotal), PURPLE)
+		for _, s in st.Starter do
+			order += 1
+			self:StarterRow(order, s)
+		end
+	end
+	order += 1
+	self:Section(order, "ACTIVE QUESTS", C.Gold)
+	for i, q in st.Active do
+		order += 1
+		self:QuestRow(order, i, q)
+	end
+	self.Footer.Text = string.format("QUESTS DONE: %d   -   FREE SPIN IN %d MORE", st.Completed, st.SpinIn)
+	local controller = self.Registry and self.Registry.QuestController
+	if controller then
+		controller.setCount(st.Claimable or 0)
+	end
+end
+
+function QuestsWindow:Refresh()
+	local res = Net.request("Quests", "State", {})
+	if res.ok and res.data then
+		self.State = res.data
+		self:Render()
+	end
+end
+
+function QuestsWindow:Claim(id: string, button)
+	if self.Busy then
+		return
+	end
+	self.Busy = true
+	button:SetBusy(true)
+	task.spawn(function()
+		local res = Net.request("Quests", "Claim", { Id = id })
+		self.Busy = false
+		if not res.ok then
+			self.UIC.HandleResult(res)
+		end
+		self:Refresh()
+	end)
+end
+
+function QuestsWindow:OnOpen()
+	self:Render()
+	task.spawn(function()
+		self:Refresh()
+	end)
+end
+
+return QuestsWindow
+]]></ProtectedString>
+						</Properties>
+					</Item>
+					<Item class="ModuleScript" referent="RBX000174">
 						<Properties>
 							<string name="Name">RaceWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -50359,7 +51178,7 @@ return RaceWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000172">
+					<Item class="ModuleScript" referent="RBX000175">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -50575,7 +51394,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000173">
+					<Item class="ModuleScript" referent="RBX000176">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -51076,7 +51895,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000174">
+					<Item class="ModuleScript" referent="RBX000177">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -51408,7 +52227,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000175">
+					<Item class="ModuleScript" referent="RBX000178">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -51584,7 +52403,7 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000176">
+					<Item class="ModuleScript" referent="RBX000179">
 						<Properties>
 							<string name="Name">TreeWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -52129,7 +52948,7 @@ return TreeWindow
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000177">
+	<Item class="Workspace" referent="RBX000180">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -52138,7 +52957,7 @@ return TreeWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000178">
+		<Item class="Terrain" referent="RBX000181">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -52150,7 +52969,7 @@ return TreeWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000179">
+	<Item class="Lighting" referent="RBX000182">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -52162,18 +52981,18 @@ return TreeWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000180">
+	<Item class="SoundService" referent="RBX000183">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000181">
+	<Item class="StarterGui" referent="RBX000184">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000182">
+	<Item class="Players" referent="RBX000185">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>
