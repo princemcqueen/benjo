@@ -54,7 +54,7 @@ local TEMPLATE = {
 	Index = {},
 	IndexClaims = {}, -- Dragon Index milestones already paid, see IndexConfig
 	Regions = { Haven = true },
-	Quests = { Active = {}, Completed = 0, Serial = 0 },
+	Quests = { Active = {}, Completed = 0, Serial = 0, Starter = {} }, -- see QuestService
 	Tutorial = { Step = 1, Done = false },
 	Daily = { LastClaim = 0, Streak = 0 },
 	Settings = {
@@ -85,6 +85,7 @@ local TEMPLATE = {
 		Coins = 0,
 		DuelsWon = 0,
 		DuelsLost = 0,
+		Rides = 0,
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},

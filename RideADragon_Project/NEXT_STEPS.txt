@@ -17,6 +17,7 @@ HOW WE WORK (the owner writes Bosnian; answer in Bosnian, code and comments in E
     (Cash Potion still has Id 0 - the developer product is missing.)
 
 DONE IN TEST 10: four sky islands + random eggs on land and islands, the owner's statue on the plaza.
+DONE IN TEST 11: QUESTS (service, window, badge, starter goals), the statue's preset outfit.
 
 THE OWNER'S WISHES THAT ARE NOT DONE YET (in this order)
   0. SOUNDS: the footstep / running sound is heard while flying (find which sound it is: the dragon's
@@ -30,8 +31,8 @@ THE OWNER'S WISHES THAT ARE NOT DONE YET (in this order)
   3. BETTER ANIMATIONS: dragon idle variety (look around, tail sway, blink, yawn), secondary motion,
      take-off and landing, wing beat sync, hatch emerge. Code: ReplicatedStorage/Shared/Dragons/Animator.luau,
      tests: toolchain/tests/anim_test.py, mesh_pose.py, toolchain/pose_sheet.py (renders poses).
-  4. QUESTS (Elder Rowan at WorldConfig.Stations.Quests) + guided TUTORIAL with an objective line in the HUD.
-     QuestConfig exists; QuestService, QuestsWindow, TutorialController do not. The QUESTS button of the
+  4. A guided TUTORIAL with an objective line in the HUD (the starter goals of the Quests window are the first step;
+     QuestConfig.Tutorial has the old waypoint steps). The QUESTS button of the
      HUD does nothing yet.
   5. Series C: abilities, World Boss, titles, streaks (see the task list in the old notes).
 

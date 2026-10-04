@@ -185,7 +185,7 @@ WorldConfig.SkyIslands = {
 }
 -- The statue in the middle of the plaza is the owner (StatueService): built from this player's avatar,
 -- or a marble king when the avatar cannot be loaded. Scale = times the size of a normal avatar.
-WorldConfig.PlazaStatue = { Username = "Bendzaminoo", UserId = 0, Scale = 3.6 }
+WorldConfig.PlazaStatue = { Username = "Bendzaminoo", UserId = 0, Scale = 3.6, Outfit = "DragonKing" } -- Outfit: "DragonKing" (preset) or "Own" (the avatar's own clothes)
 
 WorldConfig.SkyIslandById = {}
 for _, isle in WorldConfig.SkyIslands do

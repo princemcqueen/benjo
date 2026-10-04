@@ -196,6 +196,58 @@ shared.R = { rootOnly = rootOnly, feetY = lowest, humanoid = model:FindFirstChil
     check(r["frozen"]["rootOnly"] and r["frozen"]["humanoid"], "frozen: only the root is anchored (the limbs hang on it), the humanoid is gone")
     check(abs(r["frozen"]["feetY"] - 20) < 0.3, f"settled: the feet are on the plate ({r['frozen']['feetY']:.2f})")
 
+    # the preset outfit: the avatar's own clothes and accessories go (the hair stays), the Dragon King set is welded on
+    d = srv(sim, RIG + '''
+local head = Instance.new("Part") head.Name = "Head" head.Size = Vector3.new(1.2, 1.2, 1.2) head.CFrame = CFrame.new(0, 6.9, 0) head.Parent = model
+local neck = Instance.new("Motor6D") neck.Name = "Neck" neck.Part0 = model.UpperTorso neck.Part1 = head neck.C0 = CFrame.new(0, 1, 0) neck.C1 = CFrame.new(0, -0.6, 0) neck.Parent = head
+local function accessory(name, hair)
+	local a = Instance.new("Accessory")
+	a.Name = name
+	local h = Instance.new("Part") h.Name = "Handle" h.Size = Vector3.new(1, 1, 1) h.CFrame = head.CFrame h.Parent = a
+	if hair then local at = Instance.new("Attachment") at.Name = "HairAttachment" at.Parent = h end
+	a.Parent = model
+end
+accessory("Hair", true)
+accessory("Antlers", false)
+accessory("SoccerWing", false)
+local shirt = Instance.new("Shirt") shirt.Parent = model
+local pants = Instance.new("Pants") pants.Parent = model
+SS._test.dress(model)
+local pieces, welded, front, back = 0, 0, false, false
+local cape, breast, crown = nil, nil, 0
+for _, dsc in model:GetDescendants() do
+	if dsc:IsA("BasePart") and dsc.Name == "Outfit" then
+		pieces += 1
+		local w = dsc:FindFirstChild("OutfitWeld")
+		if w and w.Part0 and w.Part1 == dsc then welded += 1 end
+		if dsc.Color == Color3.fromRGB(176, 38, 52) then cape = dsc end
+		if dsc.Size.Z < 0.4 and dsc.Color == Color3.fromRGB(236, 190, 70) and dsc.Size.Y > 1.0 then breast = dsc end
+		if dsc.Position.Y > 7.2 then crown += 1 end
+	end
+end
+local torsoZ = model.UpperTorso.Position.Z
+local rightArmWeld = false
+for _, dsc in model:GetDescendants() do
+	if dsc.Name == "OutfitWeld" and dsc.Part0 and dsc.Part0.Name == "RightUpperArm" then rightArmWeld = true end
+end
+shared.R = {
+	pieces = pieces, welded = welded, capeBehind = cape ~= nil and cape.Position.Z > torsoZ + 0.2, breastFront = breast ~= nil and breast.Position.Z < torsoZ - 0.2,
+	crown = crown, shirt = model:FindFirstChildOfClass("Shirt") ~= nil, pants = model:FindFirstChildOfClass("Pants") ~= nil,
+	hair = model:FindFirstChild("Hair") ~= nil, antlers = model:FindFirstChild("Antlers") ~= nil, wing = model:FindFirstChild("SoccerWing") ~= nil,
+	suit = model.UpperTorso.Color == Color3.fromRGB(38, 44, 74), boots = model.RightFoot.Color == Color3.fromRGB(58, 40, 34), rightArmWeld = rightArmWeld,
+}
+''')
+    print("dress", d)
+    check(d["pieces"] >= 13 and d["pieces"] == d["welded"], f"{d['pieces']:.0f} outfit pieces, every one welded to a body part")
+    check(d["capeBehind"] and d["breastFront"], "the cape hangs down the back, the breastplate is on the chest")
+    check(d["crown"] >= 5, f"a crown (band + spikes) sits on the head ({d['crown']:.0f} parts above it)")
+    check(d["rightArmWeld"], "the pauldron is welded to the arm (it swings with the pose)")
+    check(not d["shirt"] and not d["pants"] and not d["antlers"] and not d["wing"], "the shirt, pants, antlers and wing are taken off")
+    check(d["hair"], "...but the hair stays")
+    check(d["suit"] and d["boots"], "the body is colored as the dark suit with brown boots")
+    cfg = srv(sim, 'shared.R = { outfit = WC.PlazaStatue.Outfit }')
+    check(cfg["outfit"] == "DragonKing", "WorldConfig.PlazaStatue.Outfit = DragonKing")
+
     print("ERRORS:", len(sim.errors))
     for e in sim.errors[:10]:
         print("  ", e)

@@ -90,6 +90,10 @@ cls("Instance", None, {
 
 cls("Folder", "Instance")
 cls("Configuration", "Instance")
+cls("Accessory", "Instance", {"AccessoryType": ("str", "Hat")})
+cls("Shirt", "Instance", {"ShirtTemplate": ("str", "")})
+cls("Pants", "Instance", {"PantsTemplate": ("str", "")})
+cls("ShirtGraphic", "Instance", {"Graphic": ("str", "")})
 cls("TextChatCommand", "Instance", {"PrimaryAlias": ("str", ""), "SecondaryAlias": ("str", ""),
                                      "AutocompleteVisible": ("bool", True), "Enabled": ("bool", True)}, "Triggered")
 cls("TextChatMessageProperties", "Instance", {"PrefixText": ("str", ""), "Text": ("str", ""),

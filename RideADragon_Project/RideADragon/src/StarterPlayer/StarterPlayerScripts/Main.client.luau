@@ -61,6 +61,7 @@ local ORDER = {
 	"RadarController",
 	"CoinController",
 	"DailyController",
+	"QuestController",
 	"ChatController",
 	"InventoryController",
 	"TutorialController",

@@ -1,5 +1,9 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 10)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 11)
 ======================================================
+
+NEW IN TEST 11 (short)
+  - QUESTS WORK NOW (the QUESTS button, key Q, and Elder Rowan's hut): see QUESTS below.
+  - The owner's statue wears a preset "Dragon King" outfit (armor, cape, crown) instead of your own clothes.
 
 NEW IN TEST 10 (short)
   - FOUR NEW SKY ISLANDS: Crystal Isle, Bloom Isle, Ember Isle, Frost Isle (see SKY ISLANDS below).
@@ -102,6 +106,18 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
 
+QUESTS (new in TEST 11)  -  the QUESTS button of the HUD, key Q, or Elder Rowan's hut (Teleport > ELDER ROWAN)
+  - GETTING STARTED: seven first goals for a new player (ride, fly 500 studs, pick up an egg, hatch a dragon, rest a
+    dragon on a perch, feed a dragon, buy an upgrade). Each pays once ($150-$500, the last one also 2 spins); the
+    list disappears when you have taken them all.
+  - ACTIVE QUESTS: always 3 quests from 11 kinds (find eggs, hatch, fly, earn from perch dragons, feed, boost, collect
+    coins, sell dragons, spin the wheel, mutation tries, win a duel). A quest counts from the moment it is given. The
+    reward is cash (grows with your level, never less than 150 s of your income) + player XP; every 3rd quest also
+    gives a free spin; a NEW quest takes the place of the one you took.
+  - A red number on the QUESTS button says how many rewards wait.
+  - Numbers: ReplicatedStorage > Configs > QuestConfig (Templates, Starter, RewardPerLevel, ...).
+    Code: Services/QuestService, Controllers/QuestController, UI/Windows/QuestsWindow, tests/quest_test.py.
+
 SKY ISLANDS + EGGS EVERYWHERE (new in TEST 10)  -  Teleport menu > CRYSTAL / BLOOM / EMBER / FROST ISLE
   Four floating LEGO islands (WorldConfig.SkyIslands: position, size, theme, egg region). Fly there on a dragon
   (they float at 290-430 studs, away from the race circuit) or use the Teleport menu (a landing pad):
@@ -122,7 +138,8 @@ SKY ISLANDS + EGGS EVERYWHERE (new in TEST 10)  -  Teleport menu > CRYSTAL / BLO
 THE OWNER'S STATUE (new in TEST 10)
   The statue in the middle of the plaza (on the fountain plinth) is now the owner instead of the stone dragon: built
   from the real avatar of WorldConfig.PlazaStatue.Username ("Bendzaminoo"; or set UserId), 3.6 times the size of a
-  normal avatar, right fist raised, with a plaque on the plinth and a floating "OWNER - Dragon King" title in the
+  normal avatar, in a PRESET "Dragon King" outfit (your face, hair and skin; dark suit, gold breastplate with a gem,
+  pauldrons, belt, gauntlets, red cape, crown - set PlazaStatue.Outfit = "Own" to keep your own clothes), right fist raised, with a plaque on the plinth and a floating "OWNER - Dragon King" title in the
   rank colours. If the avatar cannot be loaded (no web access, wrong name) a marble king with a crown stands
   there instead. Change who it is or how big in ReplicatedStorage > Configs > WorldConfig > PlazaStatue.
   Code: Services/StatueService.luau, toolchain/tests/statue_test.py.

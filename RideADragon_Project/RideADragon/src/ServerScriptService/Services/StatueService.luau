@@ -3,7 +3,8 @@
 	The statue in the middle of the plaza is the OWNER: it stands on the plinth of the fountain instead of
 	the stone dragon. It is built from the owner's real Roblox avatar (WorldConfig.PlazaStatue.Username /
 	UserId): Players:GetHumanoidDescriptionFromUserId + CreateHumanoidModelFromDescription, scaled up,
-	posed (right fist raised, standing tall), anchored. If the avatar cannot be loaded (no web access, the
+	dressed in a preset "Dragon King" outfit (armor, cape, crown; WorldConfig.PlazaStatue.Outfit), posed (right fist raised,
+	standing tall), anchored. If the avatar cannot be loaded (no web access, the
 	name is wrong) a marble-and-gold "Dragon King" built from parts stands there instead. A plaque on the
 	plinth and a floating title ("OWNER - Dragon King", the rank colours of RankConfig) say whose it is.
 
@@ -127,6 +128,104 @@ local function settle(model: Model, feetY: number)
 	end
 	if lowest < math.huge then
 		model:PivotTo(model:GetPivot() + V(0, feetY - lowest, 0))
+	end
+end
+
+-- ============================================================== the preset outfit
+-- The statue keeps the owner's face, hair and skin, but wears a fixed "Dragon King" outfit instead of
+-- whatever the avatar wears today: a dark suit, a gold breastplate with a gem, pauldrons, belt and
+-- gauntlets, a red cape and a crown. Every piece is a part welded to the body part it sits on, so it
+-- follows the pose. (WorldConfig.PlazaStatue.Outfit = "DragonKing"; anything else keeps the avatar's own clothes.)
+local SUIT = Color3.fromRGB(38, 44, 74)
+local BOOTS = Color3.fromRGB(58, 40, 34)
+local GOLD = Color3.fromRGB(236, 190, 70)
+local CAPE = Color3.fromRGB(176, 38, 52)
+local GEM = Color3.fromRGB(120, 230, 255)
+
+local function outfitPiece(model: Model, body: BasePart, shape: Enum.PartType, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material)
+	local part = Instance.new("Part")
+	part.Name = "Outfit"
+	part.Shape = shape
+	part.Size = size
+	part.CFrame = cf
+	part.Color = color
+	part.Material = material
+	part.CanCollide = false
+	part.Massless = true
+	part.Anchored = false
+	part.Parent = model
+	local weld = Instance.new("Weld")
+	weld.Name = "OutfitWeld"
+	weld.Part0 = body
+	weld.Part1 = part
+	weld.C0 = body.CFrame:Inverse() * part.CFrame
+	weld.Parent = part
+	return part
+end
+
+local function dress(model: Model)
+	-- take off the avatar's clothes and accessories (the hair stays)
+	for _, d in model:GetDescendants() do
+		if d:IsA("Shirt") or d:IsA("Pants") or d:IsA("ShirtGraphic") then
+			d:Destroy()
+		elseif d:IsA("Accessory") then
+			local handle = d:FindFirstChild("Handle")
+			if not (handle and handle:FindFirstChild("HairAttachment")) then
+				d:Destroy()
+			end
+		end
+	end
+	local function part(name: string): BasePart?
+		local p = model:FindFirstChild(name, true)
+		return p and p:IsA("BasePart") and p or nil
+	end
+	for _, name in { "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm", "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg" } do
+		local p = part(name)
+		if p then
+			p.Color = SUIT
+		end
+	end
+	for _, name in { "LeftFoot", "RightFoot" } do
+		local p = part(name)
+		if p then
+			p.Color = BOOTS
+		end
+	end
+	local block, ball, cyl = Enum.PartType.Block, Enum.PartType.Ball, Enum.PartType.Cylinder
+	local metal, fabric, neon = Enum.Material.Metal, Enum.Material.Fabric, Enum.Material.Neon
+	local ut = part("UpperTorso")
+	if ut then
+		local z = ut.Size.Z
+		outfitPiece(model, ut, block, V(ut.Size.X * 1.06, ut.Size.Y * 0.85, z * 0.22), ut.CFrame * CF(0, ut.Size.Y * 0.02, -(z / 2 + z * 0.1)), GOLD, metal)
+		outfitPiece(model, ut, ball, V(ut.Size.Y * 0.3, ut.Size.Y * 0.3, ut.Size.Y * 0.3), ut.CFrame * CF(0, ut.Size.Y * 0.08, -(z / 2 + z * 0.24)), GEM, neon)
+		-- the cape: from the shoulders down the back
+		outfitPiece(model, ut, block, V(ut.Size.X * 1.18, ut.Size.Y * 2.5, z * 0.12), ut.CFrame * CF(0, -ut.Size.Y * 0.85, z / 2 + z * 0.2) * ANG(math.rad(-7), 0, 0), CAPE, fabric)
+		outfitPiece(model, ut, block, V(ut.Size.X * 1.22, ut.Size.Y * 0.14, z * 0.2), ut.CFrame * CF(0, ut.Size.Y * 0.46, z * 0.1), GOLD, metal)
+	end
+	local lt = part("LowerTorso")
+	if lt then
+		outfitPiece(model, lt, block, V(lt.Size.X * 1.08, lt.Size.Y * 1.15, lt.Size.Z * 1.12), lt.CFrame, GOLD, metal)
+	end
+	for _, side in { "Left", "Right" } do
+		local ua = part(side .. "UpperArm")
+		if ua then
+			outfitPiece(model, ua, ball, V(ua.Size.X * 1.7, ua.Size.X * 1.7, ua.Size.X * 1.7), ua.CFrame * CF(0, ua.Size.Y * 0.38, 0), GOLD, metal)
+		end
+		local la = part(side .. "LowerArm")
+		if la then
+			outfitPiece(model, la, block, V(la.Size.X * 1.14, la.Size.Y * 0.7, la.Size.Z * 1.14), la.CFrame * CF(0, -la.Size.Y * 0.1, 0), GOLD, metal)
+		end
+	end
+	local head = part("Head")
+	if head then
+		local hs = head.Size
+		local d = math.max(hs.X, hs.Z)
+		outfitPiece(model, head, cyl, V(hs.Y * 0.26, d * 1.02, d * 1.02), head.CFrame * CF(0, hs.Y * 0.4, 0) * ANG(0, 0, math.rad(90)), GOLD, metal)
+		for i = 0, 4 do
+			local a = i / 5 * math.pi * 2
+			local at = head.CFrame * CF(math.cos(a) * d * 0.42, hs.Y * 0.62, math.sin(a) * d * 0.42)
+			outfitPiece(model, head, block, V(d * 0.13, hs.Y * 0.34, d * 0.13), at, GOLD, metal)
+		end
 	end
 end
 
@@ -275,6 +374,12 @@ local function build()
 			model:ScaleTo(def.Scale)
 		end)
 		model:PivotTo(frame * CF(0, 6 * def.Scale, 0))
+		if def.Outfit == "DragonKing" then
+			local okDress, dressErr = pcall(dress, model)
+			if not okDress then
+				warn("[Statue] outfit failed: " .. tostring(dressErr))
+			end
+		end
 		local okPose, err = pcall(pose, model, frame)
 		if not okPose then
 			warn("[Statue] pose failed: " .. tostring(err))
@@ -300,7 +405,7 @@ local function build()
 end
 
 -- (exposed for the tests: the posing runs on a rig built by hand)
-StatueService._test = { pose = pose, freeze = freeze, settle = settle }
+StatueService._test = { pose = pose, freeze = freeze, settle = settle, dress = dress }
 
 function StatueService.Init(_services) end
 
