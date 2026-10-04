@@ -11,6 +11,7 @@ local TerrainWriter = require(script.Parent:WaitForChild("TerrainWriter"))
 local Village = require(script.Parent:WaitForChild("Village"))
 local Sanctuaries = require(script.Parent:WaitForChild("Sanctuaries"))
 local Landmarks = require(script.Parent:WaitForChild("Landmarks"))
+local GreatTree = require(script.Parent:WaitForChild("GreatTree"))
 local Props = require(script.Parent:WaitForChild("Props"))
 local Kit = require(script.Parent:WaitForChild("Kit"))
 local WorldConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WorldConfig"))
@@ -64,6 +65,9 @@ function Haven.build(ctx)
 			end
 		end
 	end
+	-- the Great Tree (skill tree station) north-east of the statue
+	local treePos, treeYaw = GreatTree.position(ground)
+	stations.Tree = GreatTree.build(hub, treePos, treeYaw)
 	local lamps = Kit.new(hub, CFrame.identity, "Lamps")
 	for _, l in layout.Lamps do
 		lamps:lampPost(V(l[1], l[2] - 0.2, l[3]), 10)

@@ -23,6 +23,7 @@ local TableUtil = require(Shared.Util.TableUtil)
 local DragonStats = require(Shared.DragonStats)
 local GameConfig = require(Configs.GameConfig)
 local EconomyConfig = require(Configs.EconomyConfig)
+local TreeConfig = require(Configs.TreeConfig)
 
 local DataSync: RemoteEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DataSync")
 
@@ -49,6 +50,7 @@ local TEMPLATE = {
 	Incubator = { Unlocked = 2, Slots = {} },
 	PendingIncome = 0,
 	Upgrades = { EggStorage = 0, DragonStorage = 0, HatchLuck = 0, Radar = 0 },
+	Tree = {}, -- Great Tree levels { [branchId] = level }, see TreeConfig
 	Index = {},
 	Regions = { Haven = true },
 	Quests = { Active = {}, Completed = 0, Serial = 0 },
@@ -143,6 +145,15 @@ local function migrate(data)
 	end
 	data.Nests.Unlocked = math.clamp(math.floor(tonumber(data.Nests.Unlocked) or 2), EconomyConfig.StartingNests, #EconomyConfig.NestPrices)
 	data.Cash = math.max(0, tonumber(data.Cash) or 0)
+	-- Great Tree: only known branches, levels inside their range
+	for id, level in data.Tree do
+		local branch = TreeConfig.ById[id]
+		if not branch then
+			data.Tree[id] = nil
+		else
+			data.Tree[id] = math.clamp(math.floor(tonumber(level) or 0), 0, #branch.Levels)
+		end
+	end
 	return data
 end
 

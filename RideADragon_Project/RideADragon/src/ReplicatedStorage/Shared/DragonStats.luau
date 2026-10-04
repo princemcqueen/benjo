@@ -78,8 +78,9 @@ function DragonStats.score(record): number
 	return record.IncomePerSecond * 1000 + record.FlightSpeed * 0.01 + DragonConfig.rarityRank(record.Rarity)
 end
 
-function DragonStats.cruiseSpeed(record): number
-	return GameConfig.flightCruiseSpeed(record.FlightSpeed)
+-- flyBonus: Great Tree "Wind Wings" (fraction, 0.1 = +10% cruise speed)
+function DragonStats.cruiseSpeed(record, flyBonus: number?): number
+	return GameConfig.flightCruiseSpeed(record.FlightSpeed) * (1 + math.max(0, flyBonus or 0))
 end
 
 function DragonStats.runSpeed(record): number

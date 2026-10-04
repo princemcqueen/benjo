@@ -262,6 +262,66 @@ function Builder:fence(a: Vector3, b: Vector3, height: number?)
 	end
 end
 
+-- ============================================================== LEGO-style bricks
+-- Chunky toy bricks with round studs on top (the game's building-block look).
+Kit.STUD_PITCH = 4
+Kit.STUD_D = 2.4
+Kit.STUD_H = 0.8
+
+local function studFinish(p: BasePart)
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+end
+
+-- Rectangular brick: size (w, h, d) centred at `at`; studs on a 4-stud grid unless opts.NoStuds.
+function Builder:brick(size: Vector3, at: any, color: Color3, opts: { [string]: any }?): Part
+	local o = opts or {}
+	local cf = toCF(at)
+	local p = self:box(size, cf, color, Enum.Material.SmoothPlastic, o.Props)
+	if not o.NoStuds then
+		local nx = math.max(1, math.floor(size.X / Kit.STUD_PITCH + 0.5))
+		local nz = math.max(1, math.floor(size.Z / Kit.STUD_PITCH + 0.5))
+		for ix = 1, nx do
+			for iz = 1, nz do
+				local sx = (ix - (nx + 1) / 2) * Kit.STUD_PITCH
+				local sz = (iz - (nz + 1) / 2) * Kit.STUD_PITCH
+				local stud = self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(sx, size.Y / 2 + Kit.STUD_H / 2, sz), color, Enum.Material.SmoothPlastic)
+				studFinish(stud)
+			end
+		end
+	end
+	return p
+end
+
+-- Round brick (upright cylinder). opts.Studs: "Top" (centre cluster), "Ring" (ring of studs at
+-- opts.RingRadius), "None". Returns the part.
+function Builder:roundBrick(height: number, diameter: number, at: any, color: Color3, opts: { [string]: any }?): Part
+	local o = opts or {}
+	local cf = toCF(at)
+	local p = self:cyl(height, diameter, cf, color, Enum.Material.SmoothPlastic, o.Props)
+	local mode = o.Studs or "None"
+	local topY = height / 2 + Kit.STUD_H / 2
+	if mode == "Top" then
+		local radius = diameter / 2 - Kit.STUD_D
+		local n = radius > 1.5 and math.max(1, math.floor(2 * math.pi * radius / (Kit.STUD_PITCH * 1.05))) or 0
+		studFinish(self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(0, topY, 0), color, Enum.Material.SmoothPlastic))
+		for i = 1, n do
+			local a = (i - 0.5) / n * math.pi * 2
+			studFinish(self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(math.cos(a) * radius, topY, math.sin(a) * radius), color, Enum.Material.SmoothPlastic))
+		end
+	elseif mode == "Ring" then
+		local radius = o.RingRadius or (diameter / 2 - Kit.STUD_D)
+		local n = math.max(3, math.floor(2 * math.pi * radius / (Kit.STUD_PITCH * 1.05)))
+		for i = 1, n do
+			local a = (i - 0.5) / n * math.pi * 2
+			studFinish(self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(math.cos(a) * radius, topY, math.sin(a) * radius), o.StudColor or color, Enum.Material.SmoothPlastic))
+		end
+	end
+	return p
+end
+
 function Builder:prompt(attachTo: BasePart, action: string, object: string, attrs: { [string]: any }?)
 	local p = Instance.new("ProximityPrompt")
 	p.ActionText = action

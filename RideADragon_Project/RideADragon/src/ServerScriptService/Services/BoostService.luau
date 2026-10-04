@@ -19,6 +19,7 @@ local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
 local BoostService = {}
 
 local Data
+local Services
 
 local function now(): number
 	return os.time()
@@ -50,9 +51,16 @@ function BoostService.HasOwnerPass(player: Player): boolean
 	return data ~= nil and data.Flags ~= nil and data.Flags.OwnerPass == true
 end
 
+-- Great Tree branch bonus (0 when the tree service is absent or nothing is bought).
+local function treeBonus(player: Player, id: string): number
+	local tree = Services and Services.TreeService
+	return tree and tree.Bonus(player, id) or 0
+end
+
 function BoostService.LuckMultiplier(player: Player): number
 	local m = 1
 	m *= MonetizationConfig.passLuck(Data.Get(player))
+	m *= 1 + treeBonus(player, "RollLuck")
 	for id, def in MonetizationConfig.Boosts do
 		if def.Luck and BoostService.Remaining(player, id) > 0 then
 			m *= def.Luck
@@ -66,7 +74,7 @@ function BoostService.Multiplier(player: Player, kind: string): number
 	if kind ~= "Coins" then
 		return 1
 	end
-	local m = 1
+	local m = 1 + treeBonus(player, "Income")
 	for id, def in MonetizationConfig.Boosts do
 		if def.Cash and BoostService.Remaining(player, id) > 0 then
 			m *= def.Cash
@@ -95,6 +103,7 @@ local function sweep()
 end
 
 function BoostService.Init(services)
+	Services = services
 	Data = services.PlayerDataService
 end
 

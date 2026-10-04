@@ -35,6 +35,7 @@ local MathUtil = require(Shared.Util.MathUtil)
 local DragonConfig = require(Configs.DragonConfig)
 local EconomyConfig = require(Configs.EconomyConfig)
 local MonetizationConfig = require(Configs.MonetizationConfig)
+local TreeConfig = require(Configs.TreeConfig)
 
 local C = Theme.Colors
 local H = Theme.Hud
@@ -270,6 +271,7 @@ function Hud:RefreshBoosts()
 	local luck, luckLeft = 1, math.huge
 	local cash, cashLeft = 1, math.huge
 	luck *= MonetizationConfig.passLuck(data)
+	luck *= 1 + TreeConfig.bonus(data, "RollLuck") -- Great Tree: Roll Luck
 	for id, t in data.Boosts or {} do
 		local def = MonetizationConfig.Boosts[id]
 		local left = (tonumber(t) or 0) - now

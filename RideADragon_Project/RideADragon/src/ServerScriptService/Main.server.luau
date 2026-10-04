@@ -21,6 +21,7 @@ local ORDER = {
 	"SanctuaryService",
 	"TravelService",
 	"BoostService",
+	"TreeService",
 	"EggService",
 	"ShopService",
 	"MonetizationService",

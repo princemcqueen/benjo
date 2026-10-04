@@ -22,6 +22,7 @@ local ORDER = {
 	"PerchController",
 	"TitleController",
 	"SpinController",
+	"TreeController",
 	"HatchController",
 	"InventoryController",
 	"TutorialController",

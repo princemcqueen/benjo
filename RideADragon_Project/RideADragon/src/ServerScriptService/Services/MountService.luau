@@ -38,6 +38,7 @@ MountService.Dismounted = Signal.new() -- (player, model)
 local Data
 local DragonService
 local PhysicsGroups
+local TreeService
 
 local folder: Folder
 local companions: { [Player]: any } = {}
@@ -107,8 +108,13 @@ local function despawn(player: Player)
 	end
 end
 
+-- Great Tree "Wind Wings" bonus of the owner (fraction).
+local function flyBonus(player: Player?): number
+	return player and TreeService and TreeService.Bonus(player, "FlySpeed") or 0
+end
+
 -- Identity + stat attributes of the companion model for a dragon record.
-local function writeRecordAttributes(model: Model, record, info)
+local function writeRecordAttributes(model: Model, record, info, bonus: number?)
 	model:SetAttribute("DragonUid", record.UniqueId)
 	model:SetAttribute("SpeciesId", record.SpeciesId)
 	model:SetAttribute("Mutation", record.Mutation)
@@ -119,7 +125,7 @@ local function writeRecordAttributes(model: Model, record, info)
 	model:SetAttribute("BodyRadius", info.BodyRadius)
 	model:SetAttribute("Scale", info.Scale)
 	model:SetAttribute("RunSpeed", DragonStats.runSpeed(record))
-	model:SetAttribute("CruiseSpeed", DragonStats.cruiseSpeed(record))
+	model:SetAttribute("CruiseSpeed", DragonStats.cruiseSpeed(record, bonus))
 	model:SetAttribute("Odds", Odds.ofRecord(record))
 	model:SetAttribute("Exclusive", Odds.isExclusive(record.SpeciesId))
 end
@@ -154,7 +160,7 @@ local function spawnFor(player: Player)
 	local model = Instance.new("Model")
 	model.Name = "Dragon_" .. player.UserId
 	model:SetAttribute("OwnerUserId", player.UserId)
-	writeRecordAttributes(model, record, info)
+	writeRecordAttributes(model, record, info, flyBonus(player))
 	model:SetAttribute("Mode", "Ground")
 	model:SetAttribute("Boost", false)
 	model:SetAttribute("RiderUserId", 0)
@@ -200,6 +206,7 @@ local function spawnFor(player: Player)
 	end)
 
 	local comp = {
+		Player = player,
 		Model = model,
 		Root = root,
 		Uid = uid,
@@ -224,7 +231,7 @@ MountService.Spawn = spawnFor
 local function swapRecord(comp, record)
 	local info = Builder.mountInfo(record.SpeciesId)
 	local model = comp.Model
-	writeRecordAttributes(model, record, info)
+	writeRecordAttributes(model, record, info, flyBonus(comp.Player))
 	comp.Root.Size = info.RootSize
 	comp.Uid = record.UniqueId
 	comp.Record = record
@@ -315,6 +322,14 @@ end
 MountService.Mount = mount
 MountService.Dismount = dismount
 
+-- Re-reads stat attributes after something changed them (Great Tree "Wind Wings").
+function MountService.RefreshStats(player: Player)
+	local comp = companions[player]
+	if comp and comp.Model.Parent then
+		writeRecordAttributes(comp.Model, comp.Record, comp.Info, flyBonus(player))
+	end
+end
+
 function MountService.IsRiding(player: Player): boolean
 	local comp = companions[player]
 	return comp ~= nil and comp.Riding
@@ -341,7 +356,7 @@ end
 
 -- ============================================================== validation
 local function maxSpeedFor(comp): number
-	local cruise = DragonStats.cruiseSpeed(comp.Record)
+	local cruise = DragonStats.cruiseSpeed(comp.Record, flyBonus(comp.Player))
 	local run = DragonStats.runSpeed(comp.Record)
 	local m = GameConfig.Movement
 	-- boost + dive bonus + generous slack for latency
@@ -430,6 +445,7 @@ function MountService.Init(services)
 	Data = services.PlayerDataService
 	DragonService = services.DragonService
 	PhysicsGroups = services.PhysicsGroups
+	TreeService = services.TreeService
 
 	folder = Workspace:FindFirstChild("Dragons") :: Folder
 	if not folder then
@@ -475,7 +491,7 @@ function MountService.Start()
 			if comp.Uid == uid and comp.Record.Mutation == record.Mutation then
 				-- same dragon (fed / levelled): refresh stats and labels
 				comp.Record = record
-				writeRecordAttributes(comp.Model, record, comp.Info)
+				writeRecordAttributes(comp.Model, record, comp.Info, flyBonus(player))
 			else
 				-- another dragon or a new mutation: hot swap in place
 				swapRecord(comp, record)

@@ -92,8 +92,9 @@ function DragonStats.score(record): number
 	return record.IncomePerSecond * 1000 + record.FlightSpeed * 0.01 + DragonConfig.rarityRank(record.Rarity)
 end
 
-function DragonStats.cruiseSpeed(record): number
-	return GameConfig.flightCruiseSpeed(record.FlightSpeed)
+-- flyBonus: Great Tree "Wind Wings" (fraction, 0.1 = +10% cruise speed)
+function DragonStats.cruiseSpeed(record, flyBonus: number?): number
+	return GameConfig.flightCruiseSpeed(record.FlightSpeed) * (1 + math.max(0, flyBonus or 0))
 end
 
 function DragonStats.runSpeed(record): number
@@ -8699,6 +8700,7 @@ local ORDER = {
 	"SanctuaryService",
 	"TravelService",
 	"BoostService",
+	"TreeService",
 	"EggService",
 	"ShopService",
 	"MonetizationService",
@@ -8767,6 +8769,7 @@ local MonetizationConfig = require(Configs:WaitForChild("MonetizationConfig"))
 local BoostService = {}
 
 local Data
+local Services
 
 local function now(): number
 	return os.time()
@@ -8798,9 +8801,16 @@ function BoostService.HasOwnerPass(player: Player): boolean
 	return data ~= nil and data.Flags ~= nil and data.Flags.OwnerPass == true
 end
 
+-- Great Tree branch bonus (0 when the tree service is absent or nothing is bought).
+local function treeBonus(player: Player, id: string): number
+	local tree = Services and Services.TreeService
+	return tree and tree.Bonus(player, id) or 0
+end
+
 function BoostService.LuckMultiplier(player: Player): number
 	local m = 1
 	m *= MonetizationConfig.passLuck(Data.Get(player))
+	m *= 1 + treeBonus(player, "RollLuck")
 	for id, def in MonetizationConfig.Boosts do
 		if def.Luck and BoostService.Remaining(player, id) > 0 then
 			m *= def.Luck
@@ -8814,7 +8824,7 @@ function BoostService.Multiplier(player: Player, kind: string): number
 	if kind ~= "Coins" then
 		return 1
 	end
-	local m = 1
+	local m = 1 + treeBonus(player, "Income")
 	for id, def in MonetizationConfig.Boosts do
 		if def.Cash and BoostService.Remaining(player, id) > 0 then
 			m *= def.Cash
@@ -8843,6 +8853,7 @@ local function sweep()
 end
 
 function BoostService.Init(services)
+	Services = services
 	Data = services.PlayerDataService
 end
 
@@ -11380,6 +11391,7 @@ MountService.Dismounted = Signal.new() -- (player, model)
 local Data
 local DragonService
 local PhysicsGroups
+local TreeService
 
 local folder: Folder
 local companions: { [Player]: any } = {}
@@ -11449,8 +11461,13 @@ local function despawn(player: Player)
 	end
 end
 
+-- Great Tree "Wind Wings" bonus of the owner (fraction).
+local function flyBonus(player: Player?): number
+	return player and TreeService and TreeService.Bonus(player, "FlySpeed") or 0
+end
+
 -- Identity + stat attributes of the companion model for a dragon record.
-local function writeRecordAttributes(model: Model, record, info)
+local function writeRecordAttributes(model: Model, record, info, bonus: number?)
 	model:SetAttribute("DragonUid", record.UniqueId)
 	model:SetAttribute("SpeciesId", record.SpeciesId)
 	model:SetAttribute("Mutation", record.Mutation)
@@ -11461,7 +11478,7 @@ local function writeRecordAttributes(model: Model, record, info)
 	model:SetAttribute("BodyRadius", info.BodyRadius)
 	model:SetAttribute("Scale", info.Scale)
 	model:SetAttribute("RunSpeed", DragonStats.runSpeed(record))
-	model:SetAttribute("CruiseSpeed", DragonStats.cruiseSpeed(record))
+	model:SetAttribute("CruiseSpeed", DragonStats.cruiseSpeed(record, bonus))
 	model:SetAttribute("Odds", Odds.ofRecord(record))
 	model:SetAttribute("Exclusive", Odds.isExclusive(record.SpeciesId))
 end
@@ -11496,7 +11513,7 @@ local function spawnFor(player: Player)
 	local model = Instance.new("Model")
 	model.Name = "Dragon_" .. player.UserId
 	model:SetAttribute("OwnerUserId", player.UserId)
-	writeRecordAttributes(model, record, info)
+	writeRecordAttributes(model, record, info, flyBonus(player))
 	model:SetAttribute("Mode", "Ground")
 	model:SetAttribute("Boost", false)
 	model:SetAttribute("RiderUserId", 0)
@@ -11542,6 +11559,7 @@ local function spawnFor(player: Player)
 	end)
 
 	local comp = {
+		Player = player,
 		Model = model,
 		Root = root,
 		Uid = uid,
@@ -11566,7 +11584,7 @@ MountService.Spawn = spawnFor
 local function swapRecord(comp, record)
 	local info = Builder.mountInfo(record.SpeciesId)
 	local model = comp.Model
-	writeRecordAttributes(model, record, info)
+	writeRecordAttributes(model, record, info, flyBonus(comp.Player))
 	comp.Root.Size = info.RootSize
 	comp.Uid = record.UniqueId
 	comp.Record = record
@@ -11657,6 +11675,14 @@ end
 MountService.Mount = mount
 MountService.Dismount = dismount
 
+-- Re-reads stat attributes after something changed them (Great Tree "Wind Wings").
+function MountService.RefreshStats(player: Player)
+	local comp = companions[player]
+	if comp and comp.Model.Parent then
+		writeRecordAttributes(comp.Model, comp.Record, comp.Info, flyBonus(player))
+	end
+end
+
 function MountService.IsRiding(player: Player): boolean
 	local comp = companions[player]
 	return comp ~= nil and comp.Riding
@@ -11683,7 +11709,7 @@ end
 
 -- ============================================================== validation
 local function maxSpeedFor(comp): number
-	local cruise = DragonStats.cruiseSpeed(comp.Record)
+	local cruise = DragonStats.cruiseSpeed(comp.Record, flyBonus(comp.Player))
 	local run = DragonStats.runSpeed(comp.Record)
 	local m = GameConfig.Movement
 	-- boost + dive bonus + generous slack for latency
@@ -11772,6 +11798,7 @@ function MountService.Init(services)
 	Data = services.PlayerDataService
 	DragonService = services.DragonService
 	PhysicsGroups = services.PhysicsGroups
+	TreeService = services.TreeService
 
 	folder = Workspace:FindFirstChild("Dragons") :: Folder
 	if not folder then
@@ -11817,7 +11844,7 @@ function MountService.Start()
 			if comp.Uid == uid and comp.Record.Mutation == record.Mutation then
 				-- same dragon (fed / levelled): refresh stats and labels
 				comp.Record = record
-				writeRecordAttributes(comp.Model, record, comp.Info)
+				writeRecordAttributes(comp.Model, record, comp.Info, flyBonus(player))
 			else
 				-- another dragon or a new mutation: hot swap in place
 				swapRecord(comp, record)
@@ -12006,6 +12033,7 @@ local TableUtil = require(Shared.Util.TableUtil)
 local DragonStats = require(Shared.DragonStats)
 local GameConfig = require(Configs.GameConfig)
 local EconomyConfig = require(Configs.EconomyConfig)
+local TreeConfig = require(Configs.TreeConfig)
 
 local DataSync: RemoteEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DataSync")
 
@@ -12032,6 +12060,7 @@ local TEMPLATE = {
 	Incubator = { Unlocked = 2, Slots = {} },
 	PendingIncome = 0,
 	Upgrades = { EggStorage = 0, DragonStorage = 0, HatchLuck = 0, Radar = 0 },
+	Tree = {}, -- Great Tree levels { [branchId] = level }, see TreeConfig
 	Index = {},
 	Regions = { Haven = true },
 	Quests = { Active = {}, Completed = 0, Serial = 0 },
@@ -12126,6 +12155,15 @@ local function migrate(data)
 	end
 	data.Nests.Unlocked = math.clamp(math.floor(tonumber(data.Nests.Unlocked) or 2), EconomyConfig.StartingNests, #EconomyConfig.NestPrices)
 	data.Cash = math.max(0, tonumber(data.Cash) or 0)
+	-- Great Tree: only known branches, levels inside their range
+	for id, level in data.Tree do
+		local branch = TreeConfig.ById[id]
+		if not branch then
+			data.Tree[id] = nil
+		else
+			data.Tree[id] = math.clamp(math.floor(tonumber(level) or 0), 0, #branch.Levels)
+		end
+	end
 	return data
 end
 
@@ -13217,6 +13255,128 @@ return TravelService
 			</Item>
 			<Item class="ModuleScript" referent="RBX000069">
 				<Properties>
+					<string name="Name">TreeService</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	TreeService
+	The Great Tree: permanent upgrades bought with cash (TreeConfig).
+	Five branches (RollLuck, MutationLuck, Income, FlySpeed, HatchSpeed), five
+	levels each, bought strictly in order. Server authority: the price, the
+	level order and every bonus come from TreeConfig - the client only asks to
+	buy "the next level" of a branch.
+
+	data.Tree = { [branchId] = level }  (replicated to the client)
+
+	API:
+	  TreeService.Bonus(player, id) -> total bonus of that branch (0 if not bought)
+	Net (domain "Tree"):
+	  Buy { Id } -> { Id, Level, Bonus }
+	Player attribute "TreeFlySpeed" mirrors the FlySpeed bonus for the client.
+	Signal: Bought(player, id, level)
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Signal = require(Shared:WaitForChild("Util"):WaitForChild("Signal"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+
+local TreeService = {}
+TreeService.Bought = Signal.new() -- (player, branchId, level)
+
+local Data
+local Services
+
+function TreeService.Bonus(player: Player, id: string): number
+	return TreeConfig.bonus(Data.Get(player), id)
+end
+
+function TreeService.Level(player: Player, id: string): number
+	return TreeConfig.level(Data.Get(player), id)
+end
+
+-- Mirrors bonuses other systems read (attribute for the client's flight stats, HUD luck).
+function TreeService.Refresh(player: Player)
+	player:SetAttribute("TreeFlySpeed", TreeService.Bonus(player, "FlySpeed"))
+	local boosts = Services.BoostService
+	if boosts then
+		boosts.Refresh(player)
+	end
+	local mount = Services.MountService
+	if mount and mount.RefreshStats then
+		mount.RefreshStats(player)
+	end
+end
+
+-- Eggs already warming up get faster the moment Warm Nest is upgraded.
+local function speedUpIncubator(player: Player, oldBonus: number, newBonus: number)
+	local data = Data.Get(player)
+	if not data or newBonus <= oldBonus then
+		return
+	end
+	local t = os.time()
+	local ratio = (1 - newBonus) / (1 - oldBonus)
+	for key, slot in data.Incubator.Slots do
+		local ready = tonumber(slot.Ready) or 0
+		if ready > t then
+			local newReady = t + math.max(1, math.floor((ready - t) * ratio + 0.5))
+			Data.Set(player, { "Incubator", "Slots", key, "Ready" }, newReady)
+		end
+	end
+end
+
+local function handleBuy(player: Player, p)
+	if not Net.check.str(p.Id, 24) then
+		return false, "BAD_REQUEST"
+	end
+	local branch = TreeConfig.ById[p.Id]
+	local data = Data.Get(player)
+	if not branch or not data then
+		return false, "BAD_BRANCH"
+	end
+	local level = TreeConfig.level(data, p.Id)
+	local entry = branch.Levels[level + 1]
+	if not entry then
+		return false, "MAXED", branch.Name .. " is fully grown."
+	end
+	local oldBonus = TreeConfig.bonus(data, p.Id)
+	if not Services.EconomyService.Spend(player, entry.Price, "Tree") then
+		return false, "NO_CASH", "Not enough cash."
+	end
+	Data.Set(player, { "Tree", p.Id }, level + 1)
+	if p.Id == "HatchSpeed" then
+		speedUpIncubator(player, oldBonus, entry.Bonus)
+	end
+	TreeService.Refresh(player)
+	TreeService.Bought:Fire(player, p.Id, level + 1)
+	return true, { Id = p.Id, Level = level + 1, Bonus = entry.Bonus }
+end
+
+function TreeService.Init(services)
+	Services = services
+	Data = services.PlayerDataService
+	Net.handle("Tree", "Buy", handleBuy, { Burst = 6, PerSecond = 3 })
+end
+
+function TreeService.Start()
+	Data.Loaded:Connect(function(player)
+		TreeService.Refresh(player)
+	end)
+	for _, player in Players:GetPlayers() do
+		if Data.Get(player) then
+			TreeService.Refresh(player)
+		end
+	end
+end
+
+return TreeService
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000070">
+				<Properties>
 					<string name="Name">WorldService</string>
 					<ProtectedString name="Source"><![CDATA[--[[
 	WorldService
@@ -13372,11 +13532,211 @@ return WorldService
 				</Properties>
 			</Item>
 		</Item>
-		<Item class="Folder" referent="RBX000070">
+		<Item class="Folder" referent="RBX000071">
 			<Properties>
 				<string name="Name">World</string>
 			</Properties>
-			<Item class="ModuleScript" referent="RBX000071">
+			<Item class="ModuleScript" referent="RBX000072">
+				<Properties>
+					<string name="Name">GreatTree</string>
+					<ProtectedString name="Source"><![CDATA[--[[
+	GreatTree - the giant LEGO-style tree in the plaza (skill tree station).
+
+	A stepped stone base, a trunk of stacked round bricks, a tiered studded crown
+	and five limbs, one per TreeConfig branch. Every limb ends in a pod with five
+	fruit orbs (one per level). The orbs are tagged "TreeOrb" with attributes
+	Branch / Level: the client lights the ones the player has bought
+	(TreeController), so the tree itself shows your progress.
+
+	Local frame: origin on the ground in the middle of the base, local -Z faces
+	the plaza (where the prompt and the sign are).
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Kit = require(script.Parent:WaitForChild("Kit"))
+local Village = require(script.Parent:WaitForChild("Village"))
+local TreeConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TreeConfig"))
+
+local V = Vector3.new
+local CF = CFrame.new
+local ANG = CFrame.Angles
+local C = Kit.C
+local M = Kit.M
+
+local GreatTree = {}
+
+local BARK = { Color3.fromRGB(122, 78, 48), Color3.fromRGB(104, 66, 42) }
+local LEAF = {
+	Color3.fromRGB(52, 140, 60),
+	Color3.fromRGB(68, 160, 70),
+	Color3.fromRGB(88, 180, 80),
+	Color3.fromRGB(112, 200, 94),
+	Color3.fromRGB(140, 220, 108),
+}
+local SPARKLE = "rbxasset://textures/particles/sparkles_main.dds"
+local ORB_OFF = Color3.fromRGB(88, 94, 104)
+
+GreatTree.CrownTop = 28.8 + 5 * 3.4 -- height of the crown top above the base
+
+-- World position (plaza, north-east of the statue) from TreeConfig.
+function GreatTree.position(ground: (number, number) -> number): (Vector3, number)
+	local a = math.rad(TreeConfig.WorldAngle)
+	local x, z = math.sin(a) * TreeConfig.WorldRing, -math.cos(a) * TreeConfig.WorldRing
+	local yaw = math.atan2(x, z) -- local -Z looks back at the plaza centre
+	return V(x, ground(x, z), z), yaw
+end
+
+local function label(parent: BasePart, text: string, color: Color3, offset: Vector3)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "BranchLabel"
+	gui.Size = UDim2.fromOffset(180, 34)
+	gui.StudsOffsetWorldSpace = offset
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = 140
+	gui.LightInfluence = 0
+	gui.Adornee = parent
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Size = UDim2.fromScale(1, 1)
+	t.Font = Enum.Font.GothamBlack
+	t.TextScaled = true
+	t.Text = text
+	t.TextColor3 = color:Lerp(Color3.new(1, 1, 1), 0.35)
+	local st = Instance.new("UIStroke")
+	st.Thickness = 2
+	st.Color = Color3.fromRGB(22, 30, 22)
+	st.Parent = t
+	t.Parent = gui
+	gui.Parent = parent
+end
+
+function GreatTree.build(parent: Instance, at: Vector3, yaw: number)
+	local b = Kit.new(parent, CF(at) * ANG(0, yaw, 0), "GreatTree")
+	b.Model:SetAttribute("Station", "Tree")
+	local rng = Random.new(2026)
+
+	-- ---- stepped stone base (each step is at most 1.4 studs: walkable)
+	b:cyl(1.4, 32, V(0, 0.7, 0), C.StoneDark, M.Cobblestone)
+	b:cyl(1.0, 26, V(0, 1.9, 0), C.Stone, M.Slate)
+	b:roundBrick(0.8, 22, V(0, 2.8, 0), LEAF[1], { Studs = "Ring", RingRadius = 9.4 })
+	-- toy flower bricks around the edge
+	local flowers = { Color3.fromRGB(226, 70, 70), Color3.fromRGB(252, 206, 60), Color3.fromRGB(246, 150, 60), Color3.fromRGB(150, 110, 230) }
+	for i = 1, 12 do
+		local a = i / 12 * math.pi * 2 + 0.2
+		if math.abs(math.sin(a) + 1) > 0.35 then -- keep the front (local -Z) clear for the sign
+			local br = b:brick(V(2.4, 2.4, 2.4), CF(math.cos(a) * 12.6, 3.4, math.sin(a) * 12.6) * ANG(0, -a, 0), flowers[(i % #flowers) + 1], { NoStuds = true })
+			br.CanCollide = false
+			b:roundBrick(1, 1.6, V(math.cos(a) * 12.6, 4.9, math.sin(a) * 12.6), LEAF[3], { Studs = "None", Props = { CanCollide = false } })
+		end
+	end
+
+	-- ---- trunk: stacked round bricks, slightly tapering
+	local y0 = 3.2
+	for i = 0, 7 do
+		b:roundBrick(3.2, 9.6 - i * 0.35, V(0, y0 + i * 3.2 + 1.6, 0), BARK[i % 2 + 1], { Studs = "None" })
+	end
+	-- roots
+	for k = 0, 4 do
+		local a = math.rad(k * 72 + 36)
+		b:beam(V(math.cos(a) * 3.6, 6.2, math.sin(a) * 3.6), V(math.cos(a) * 11.5, 3.1, math.sin(a) * 11.5), 3, BARK[1], M.SmoothPlastic)
+	end
+
+	-- ---- crown: tiered studded layers
+	local crownBase = y0 + 8 * 3.2 -- 28.8
+	local dia = { 34, 27, 20, 13.5, 7 }
+	local crownTop
+	for i = 1, 5 do
+		local d = dia[i]
+		local y = crownBase + (i - 1) * 3.4 + 1.7
+		local opts
+		if i < 5 then
+			opts = { Studs = "Ring", RingRadius = (d / 2 + dia[i + 1] / 2) / 2 }
+		else
+			opts = { Studs = "Top" }
+		end
+		local layer = b:roundBrick(3.4, d, V(0, y, 0), LEAF[i], opts)
+		layer.Name = "Crown" .. i
+		crownTop = layer
+	end
+	-- leaf puffs around the lower rim
+	for i = 1, 11 do
+		local a = i / 11 * math.pi * 2 + rng:NextNumber(-0.12, 0.12)
+		local r = 17.2 + rng:NextNumber(-0.8, 1.2)
+		b:roundBrick(3.4, rng:NextNumber(5.5, 7.5), V(math.cos(a) * r, crownBase + (i % 2 == 0 and 1.7 or 0.3), math.sin(a) * r), LEAF[(i % 3) + 1], { Studs = "Top" })
+	end
+	local pl = Instance.new("PointLight")
+	pl.Color = Color3.fromRGB(190, 255, 160)
+	pl.Range = 38
+	pl.Brightness = 0.9
+	pl.Shadows = false
+	pl.Parent = crownTop
+	-- drifting sparkles over the crown
+	local fx = b:box(V(30, 1, 30), V(0, crownBase + 17.5, 0), C.Leaf, M.SmoothPlastic, { Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+	fx.Name = "CrownFX"
+	local pe = Instance.new("ParticleEmitter")
+	pe.Texture = SPARKLE
+	pe.Color = ColorSequence.new(Color3.fromRGB(190, 255, 150), Color3.fromRGB(255, 240, 150))
+	pe.LightEmission = 0.6
+	pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 0) })
+	pe.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1) })
+	pe.Lifetime = NumberRange.new(4, 6)
+	pe.Rate = 5
+	pe.Speed = NumberRange.new(1, 3)
+	pe.Acceleration = V(0, -2.5, 0)
+	pe.SpreadAngle = Vector2.new(60, 60)
+	pe.EmissionDirection = Enum.NormalId.Bottom
+	pe.Parent = fx
+	CollectionService:AddTag(pe, "FX")
+
+	-- ---- five limbs: one per branch, each ending in a pod with five fruit orbs
+	local limbY = { 13, 11, 15, 12, 14 }
+	for idx, branch in TreeConfig.Branches do
+		local a = math.rad((idx - 1) * 72 + 18)
+		local radial = V(math.cos(a), 0, math.sin(a))
+		local tangent = V(-math.sin(a), 0, math.cos(a))
+		local pod = radial * 13.5 + V(0, limbY[idx] + 3, 0)
+		b:beam(radial * 3.8 + V(0, limbY[idx], 0), pod, 2.2, BARK[2], M.SmoothPlastic)
+		b:roundBrick(3.6, 11, pod, LEAF[2], { Studs = "None" })
+		local top = b:roundBrick(2.4, 7.5, pod + V(0, 3, 0), branch.Color, { Studs = "Top" })
+		top.Name = "Pod_" .. branch.Id
+		label(top, string.upper(branch.Name), branch.Color, V(0, 10, 0))
+		for level = 1, #branch.Levels do
+			local p = pod + V(0, 7.4, 0) + tangent * ((level - 3) * 3.4)
+			local orb = b:ball(2.4, p, ORB_OFF, M.SmoothPlastic, { Transparency = 0.35, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+			orb.Name = string.format("Orb_%s_%d", branch.Id, level)
+			orb:SetAttribute("Branch", branch.Id)
+			orb:SetAttribute("Level", level)
+			CollectionService:AddTag(orb, "TreeOrb")
+			local light = Instance.new("PointLight")
+			light.Color = branch.Color
+			light.Range = 9
+			light.Brightness = 1.4
+			light.Shadows = false
+			light.Enabled = false
+			light.Parent = orb
+		end
+	end
+
+	-- ---- sign + interaction
+	for _, sx in { -1, 1 } do
+		b:box(V(0.9, 6.4, 0.9), V(sx * 7.2, 6, -13.2), C.Timber, M.Wood)
+	end
+	Village.signBoard(b, CF(0, 7.4, -13.2), 14, 3, "THE GREAT TREE")
+	local trigger = b:box(V(12, 8, 7), V(0, 7, -9.5), C.Planks, M.WoodPlanks, { Transparency = 1, CanCollide = false, CanQuery = false, CastShadow = false })
+	trigger.Name = "TreeTrigger"
+	local prompt = b:prompt(trigger, "Upgrade", "Great Tree", { Station = "Tree", Window = "Tree" })
+	prompt.MaxActivationDistance = 24
+	prompt.Name = "StationPrompt"
+	return b.Model
+end
+
+return GreatTree
+]]></ProtectedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX000073">
 				<Properties>
 					<string name="Name">Haven</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -13392,6 +13752,7 @@ local TerrainWriter = require(script.Parent:WaitForChild("TerrainWriter"))
 local Village = require(script.Parent:WaitForChild("Village"))
 local Sanctuaries = require(script.Parent:WaitForChild("Sanctuaries"))
 local Landmarks = require(script.Parent:WaitForChild("Landmarks"))
+local GreatTree = require(script.Parent:WaitForChild("GreatTree"))
 local Props = require(script.Parent:WaitForChild("Props"))
 local Kit = require(script.Parent:WaitForChild("Kit"))
 local WorldConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WorldConfig"))
@@ -13445,6 +13806,9 @@ function Haven.build(ctx)
 			end
 		end
 	end
+	-- the Great Tree (skill tree station) north-east of the statue
+	local treePos, treeYaw = GreatTree.position(ground)
+	stations.Tree = GreatTree.build(hub, treePos, treeYaw)
 	local lamps = Kit.new(hub, CFrame.identity, "Lamps")
 	for _, l in layout.Lamps do
 		lamps:lampPost(V(l[1], l[2] - 0.2, l[3]), 10)
@@ -13538,7 +13902,7 @@ return Haven
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000072">
+			<Item class="ModuleScript" referent="RBX000074">
 				<Properties>
 					<string name="Name">HavenLayout</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/layout.py - do not edit by hand.
@@ -17924,7 +18288,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000073">
+			<Item class="ModuleScript" referent="RBX000075">
 				<Properties>
 					<string name="Name">HavenTerrainData</string>
 					<ProtectedString name="Source"><![CDATA[-- GENERATED by toolchain/worldgen/terrain_data.py - do not edit by hand.
@@ -17975,7 +18339,7 @@ return {
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000074">
+			<Item class="ModuleScript" referent="RBX000076">
 				<Properties>
 					<string name="Name">Kit</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18242,6 +18606,66 @@ function Builder:fence(a: Vector3, b: Vector3, height: number?)
 	end
 end
 
+-- ============================================================== LEGO-style bricks
+-- Chunky toy bricks with round studs on top (the game's building-block look).
+Kit.STUD_PITCH = 4
+Kit.STUD_D = 2.4
+Kit.STUD_H = 0.8
+
+local function studFinish(p: BasePart)
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+end
+
+-- Rectangular brick: size (w, h, d) centred at `at`; studs on a 4-stud grid unless opts.NoStuds.
+function Builder:brick(size: Vector3, at: any, color: Color3, opts: { [string]: any }?): Part
+	local o = opts or {}
+	local cf = toCF(at)
+	local p = self:box(size, cf, color, Enum.Material.SmoothPlastic, o.Props)
+	if not o.NoStuds then
+		local nx = math.max(1, math.floor(size.X / Kit.STUD_PITCH + 0.5))
+		local nz = math.max(1, math.floor(size.Z / Kit.STUD_PITCH + 0.5))
+		for ix = 1, nx do
+			for iz = 1, nz do
+				local sx = (ix - (nx + 1) / 2) * Kit.STUD_PITCH
+				local sz = (iz - (nz + 1) / 2) * Kit.STUD_PITCH
+				local stud = self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(sx, size.Y / 2 + Kit.STUD_H / 2, sz), color, Enum.Material.SmoothPlastic)
+				studFinish(stud)
+			end
+		end
+	end
+	return p
+end
+
+-- Round brick (upright cylinder). opts.Studs: "Top" (centre cluster), "Ring" (ring of studs at
+-- opts.RingRadius), "None". Returns the part.
+function Builder:roundBrick(height: number, diameter: number, at: any, color: Color3, opts: { [string]: any }?): Part
+	local o = opts or {}
+	local cf = toCF(at)
+	local p = self:cyl(height, diameter, cf, color, Enum.Material.SmoothPlastic, o.Props)
+	local mode = o.Studs or "None"
+	local topY = height / 2 + Kit.STUD_H / 2
+	if mode == "Top" then
+		local radius = diameter / 2 - Kit.STUD_D
+		local n = radius > 1.5 and math.max(1, math.floor(2 * math.pi * radius / (Kit.STUD_PITCH * 1.05))) or 0
+		studFinish(self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(0, topY, 0), color, Enum.Material.SmoothPlastic))
+		for i = 1, n do
+			local a = (i - 0.5) / n * math.pi * 2
+			studFinish(self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(math.cos(a) * radius, topY, math.sin(a) * radius), color, Enum.Material.SmoothPlastic))
+		end
+	elseif mode == "Ring" then
+		local radius = o.RingRadius or (diameter / 2 - Kit.STUD_D)
+		local n = math.max(3, math.floor(2 * math.pi * radius / (Kit.STUD_PITCH * 1.05)))
+		for i = 1, n do
+			local a = (i - 0.5) / n * math.pi * 2
+			studFinish(self:cyl(Kit.STUD_H, Kit.STUD_D, cf * CF(math.cos(a) * radius, topY, math.sin(a) * radius), o.StudColor or color, Enum.Material.SmoothPlastic))
+		end
+	end
+	return p
+end
+
 function Builder:prompt(attachTo: BasePart, action: string, object: string, attrs: { [string]: any }?)
 	local p = Instance.new("ProximityPrompt")
 	p.ActionText = action
@@ -18261,7 +18685,7 @@ return Kit
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000075">
+			<Item class="ModuleScript" referent="RBX000077">
 				<Properties>
 					<string name="Name">Landmarks</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18623,7 +19047,7 @@ return Landmarks
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000076">
+			<Item class="ModuleScript" referent="RBX000078">
 				<Properties>
 					<string name="Name">Props</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -18819,7 +19243,7 @@ return Props
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000077">
+			<Item class="ModuleScript" referent="RBX000079">
 				<Properties>
 					<string name="Name">Sanctuaries</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19034,7 +19458,7 @@ return Sanctuaries
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000078">
+			<Item class="ModuleScript" referent="RBX000080">
 				<Properties>
 					<string name="Name">TerrainWriter</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19448,7 +19872,7 @@ return TerrainWriter
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="ModuleScript" referent="RBX000079">
+			<Item class="ModuleScript" referent="RBX000081">
 				<Properties>
 					<string name="Name">Village</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -19862,7 +20286,7 @@ return Village
 			</Item>
 		</Item>
 	</Item>
-	<Item class="StarterPlayer" referent="RBX000080">
+	<Item class="StarterPlayer" referent="RBX000082">
 		<Properties>
 			<string name="Name">StarterPlayer</string>
 			<bool name="EnableMouseLockOption">false</bool>
@@ -19870,15 +20294,15 @@ return Village
 			<float name="CameraMinZoomDistance">6.0</float>
 			<float name="CharacterWalkSpeed">20.0</float>
 		</Properties>
-		<Item class="StarterPlayerScripts" referent="RBX000081">
+		<Item class="StarterPlayerScripts" referent="RBX000083">
 			<Properties>
 				<string name="Name">StarterPlayerScripts</string>
 			</Properties>
-			<Item class="Folder" referent="RBX000082">
+			<Item class="Folder" referent="RBX000084">
 				<Properties>
 					<string name="Name">Controllers</string>
 				</Properties>
-				<Item class="ModuleScript" referent="RBX000083">
+				<Item class="ModuleScript" referent="RBX000085">
 					<Properties>
 						<string name="Name">AnimationController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -20320,7 +20744,7 @@ return AnimationController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000084">
+				<Item class="ModuleScript" referent="RBX000086">
 					<Properties>
 						<string name="Name">AudioController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -20493,7 +20917,7 @@ return AudioController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000085">
+				<Item class="ModuleScript" referent="RBX000087">
 					<Properties>
 						<string name="Name">CameraController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -20856,7 +21280,7 @@ return CameraController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000086">
+				<Item class="ModuleScript" referent="RBX000088">
 					<Properties>
 						<string name="Name">DataController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -20987,7 +21411,7 @@ return DataController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000087">
+				<Item class="ModuleScript" referent="RBX000089">
 					<Properties>
 						<string name="Name">DragonController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -21084,7 +21508,9 @@ local function buildStats()
 	local handling = species.Handling or {}
 	return {
 		RunSpeed = record and DragonStats.runSpeed(record) or (m:GetAttribute("RunSpeed") or 40),
-		CruiseSpeed = record and DragonStats.cruiseSpeed(record) or (m:GetAttribute("CruiseSpeed") or 77),
+		-- Great Tree "Wind Wings": the server mirrors the bonus as a player attribute
+		CruiseSpeed = record and DragonStats.cruiseSpeed(record, LocalPlayer:GetAttribute("TreeFlySpeed") or 0)
+			or (m:GetAttribute("CruiseSpeed") or 77),
 		Scale = m:GetAttribute("Scale") or 1,
 		HipHeight = m:GetAttribute("HipHeight") or 4.8,
 		BodyRadius = m:GetAttribute("BodyRadius") or 4.2,
@@ -21527,6 +21953,12 @@ function DragonController.Start()
 			Locomotion.setStats(state, buildStats())
 		end
 	end)
+	-- Great Tree "Wind Wings" bought while flying: new cruise speed right away
+	LocalPlayer:GetAttributeChangedSignal("TreeFlySpeed"):Connect(function()
+		if state and model then
+			Locomotion.setStats(state, buildStats())
+		end
+	end)
 	wind = registry.AudioController.loop("Wind")
 	local folder = Workspace:WaitForChild("Dragons", 30)
 	if not folder then
@@ -21553,7 +21985,7 @@ return DragonController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000088">
+				<Item class="ModuleScript" referent="RBX000090">
 					<Properties>
 						<string name="Name">EggController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -21856,7 +22288,7 @@ return EggController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000089">
+				<Item class="ModuleScript" referent="RBX000091">
 					<Properties>
 						<string name="Name">GraphicsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -21993,7 +22425,7 @@ return GraphicsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000090">
+				<Item class="ModuleScript" referent="RBX000092">
 					<Properties>
 						<string name="Name">HatchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -22558,7 +22990,7 @@ return HatchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000091">
+				<Item class="ModuleScript" referent="RBX000093">
 					<Properties>
 						<string name="Name">InputController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -22776,7 +23208,7 @@ return InputController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000092">
+				<Item class="ModuleScript" referent="RBX000094">
 					<Properties>
 						<string name="Name">InteractionController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -22838,7 +23270,7 @@ return InteractionController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000093">
+				<Item class="ModuleScript" referent="RBX000095">
 					<Properties>
 						<string name="Name">PerchController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23302,7 +23734,7 @@ return PerchController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000094">
+				<Item class="ModuleScript" referent="RBX000096">
 					<Properties>
 						<string name="Name">SanctuaryController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23725,7 +24157,7 @@ return SanctuaryController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000095">
+				<Item class="ModuleScript" referent="RBX000097">
 					<Properties>
 						<string name="Name">SettingsController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -23813,7 +24245,7 @@ return SettingsController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000096">
+				<Item class="ModuleScript" referent="RBX000098">
 					<Properties>
 						<string name="Name">SpinController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -24241,7 +24673,7 @@ return SpinController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000097">
+				<Item class="ModuleScript" referent="RBX000099">
 					<Properties>
 						<string name="Name">TitleController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -24428,7 +24860,138 @@ return TitleController
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000098">
+				<Item class="ModuleScript" referent="RBX000100">
+					<Properties>
+						<string name="Name">TreeController</string>
+						<ProtectedString name="Source"><![CDATA[--[[
+	TreeController
+	Keeps the Great Tree in the plaza in sync with the player's upgrades: every
+	fruit orb (tagged "TreeOrb", attributes Branch / Level, built by the server in
+	World/GreatTree) glows in its branch colour once that level is bought, and a
+	sparkle burst plays on the orb that just lit up. Purely visual and local - the
+	levels themselves live in data.Tree (TreeService).
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local TreeConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TreeConfig"))
+
+local TreeController = {}
+
+local registry
+local levels: { [string]: number } = {}
+local lastLevels: { [string]: number }? = nil
+local lit: { [BasePart]: { Light: PointLight?, Level: number } } = {}
+
+local OFF_COLOR = Color3.fromRGB(88, 94, 104)
+local SPARKLE = "rbxasset://textures/particles/sparkles_main.dds"
+
+local function paintOrb(orb: Instance)
+	if not orb:IsA("BasePart") then
+		return
+	end
+	local branch = TreeConfig.ById[orb:GetAttribute("Branch")]
+	local level = orb:GetAttribute("Level")
+	if not branch or type(level) ~= "number" then
+		return
+	end
+	local owned = (levels[branch.Id] or 0) >= level
+	orb.Material = owned and Enum.Material.Neon or Enum.Material.SmoothPlastic
+	orb.Color = owned and branch.Color or OFF_COLOR
+	orb.Transparency = owned and 0.05 or 0.4
+	local light = orb:FindFirstChildOfClass("PointLight")
+	if light then
+		light.Enabled = owned
+	end
+	lit[orb :: BasePart] = owned and { Light = light, Level = level } or nil
+end
+
+local function repaintAll()
+	for _, orb in CollectionService:GetTagged("TreeOrb") do
+		paintOrb(orb)
+	end
+end
+
+-- Sparkle burst on the orb that just lit up.
+local function burst(orb: BasePart, color: Color3)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Transparency = 1
+	p.Size = Vector3.new(1, 1, 1)
+	p.CFrame = CFrame.new(orb.Position)
+	p.Parent = Workspace
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = SPARKLE
+	e.Color = ColorSequence.new(color:Lerp(Color3.new(1, 1, 1), 0.4), color)
+	e.LightEmission = 1
+	e.Rate = 0
+	e.Lifetime = NumberRange.new(0.8, 1.4)
+	e.Speed = NumberRange.new(10, 22)
+	e.SpreadAngle = Vector2.new(180, 180)
+	e.Acceleration = Vector3.new(0, -8, 0)
+	e.Drag = 2
+	e.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1.1), NumberSequenceKeypoint.new(1, 0) })
+	e.Parent = p
+	e:Emit(46)
+	task.delay(2, function()
+		p:Destroy()
+	end)
+end
+
+local function onTree(tree)
+	local new = {}
+	for _, branch in TreeConfig.Branches do
+		new[branch.Id] = type(tree) == "table" and math.max(0, math.floor(tonumber(tree[branch.Id]) or 0)) or 0
+	end
+	levels = new
+	repaintAll()
+	if lastLevels then
+		for _, orb in CollectionService:GetTagged("TreeOrb") do
+			local id, level = orb:GetAttribute("Branch"), orb:GetAttribute("Level")
+			if id and level and (lastLevels[id] or 0) < level and new[id] >= level then
+				burst(orb :: BasePart, TreeConfig.ById[id].Color)
+			end
+		end
+	end
+	lastLevels = table.clone(new)
+end
+
+function TreeController.Init(reg)
+	registry = reg
+end
+
+function TreeController.Start()
+	CollectionService:GetInstanceAddedSignal("TreeOrb"):Connect(paintOrb)
+	CollectionService:GetInstanceRemovedSignal("TreeOrb"):Connect(function(orb)
+		lit[orb :: BasePart] = nil
+	end)
+	registry.DataController.observe("Tree", onTree)
+	-- lit fruit breathes softly
+	RunService.Heartbeat:Connect(function()
+		local t = os.clock()
+		for _, info in lit do
+			if info.Light then
+				info.Light.Brightness = 1.3 + 0.45 * math.sin(t * 2.2 + info.Level)
+			end
+		end
+	end)
+end
+
+function TreeController.levels()
+	return levels
+end
+
+return TreeController
+]]></ProtectedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX000101">
 					<Properties>
 						<string name="Name">UIController</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -24847,7 +25410,7 @@ return UIController
 					</Properties>
 				</Item>
 			</Item>
-			<Item class="LocalScript" referent="RBX000099">
+			<Item class="LocalScript" referent="RBX000102">
 				<Properties>
 					<string name="Name">Main</string>
 					<ProtectedString name="Source"><![CDATA[--[[
@@ -24874,6 +25437,7 @@ local ORDER = {
 	"PerchController",
 	"TitleController",
 	"SpinController",
+	"TreeController",
 	"HatchController",
 	"InventoryController",
 	"TutorialController",
@@ -24923,16 +25487,16 @@ end
 ]]></ProtectedString>
 				</Properties>
 			</Item>
-			<Item class="Folder" referent="RBX000100">
+			<Item class="Folder" referent="RBX000103">
 				<Properties>
 					<string name="Name">UI</string>
 				</Properties>
-				<Item class="Folder" referent="RBX000101">
+				<Item class="Folder" referent="RBX000104">
 					<Properties>
 						<string name="Name">Components</string>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000102">
+				<Item class="ModuleScript" referent="RBX000105">
 					<Properties>
 						<string name="Name">Create</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -25012,11 +25576,11 @@ return Create
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000103">
+				<Item class="Folder" referent="RBX000106">
 					<Properties>
 						<string name="Name">Dev</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000104">
+					<Item class="ModuleScript" referent="RBX000107">
 						<Properties>
 							<string name="Name">UIChecks</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -25174,7 +25738,7 @@ return UIChecks
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000105">
+					<Item class="ModuleScript" referent="RBX000108">
 						<Properties>
 							<string name="Name">UILab</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -25217,7 +25781,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "Riding", "Inventory", "Details", "Shop", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -25489,7 +26053,7 @@ return UILab
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000106">
+				<Item class="ModuleScript" referent="RBX000109">
 					<Properties>
 						<string name="Name">Fade</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -25555,11 +26119,11 @@ return Fade
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000107">
+				<Item class="Folder" referent="RBX000110">
 					<Properties>
 						<string name="Name">Hud</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000108">
+					<Item class="ModuleScript" referent="RBX000111">
 						<Properties>
 							<string name="Name">Hud</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -25599,6 +26163,7 @@ local MathUtil = require(Shared.Util.MathUtil)
 local DragonConfig = require(Configs.DragonConfig)
 local EconomyConfig = require(Configs.EconomyConfig)
 local MonetizationConfig = require(Configs.MonetizationConfig)
+local TreeConfig = require(Configs.TreeConfig)
 
 local C = Theme.Colors
 local H = Theme.Hud
@@ -25834,6 +26399,7 @@ function Hud:RefreshBoosts()
 	local luck, luckLeft = 1, math.huge
 	local cash, cashLeft = 1, math.huge
 	luck *= MonetizationConfig.passLuck(data)
+	luck *= 1 + TreeConfig.bonus(data, "RollLuck") -- Great Tree: Roll Luck
 	for id, t in data.Boosts or {} do
 		local def = MonetizationConfig.Boosts[id]
 		local left = (tonumber(t) or 0) - now
@@ -26524,7 +27090,7 @@ return Hud
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000109">
+					<Item class="ModuleScript" referent="RBX000112">
 						<Properties>
 							<string name="Name">MobileControls</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -26833,7 +27399,7 @@ return MobileControls
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000110">
+				<Item class="ModuleScript" referent="RBX000113">
 					<Properties>
 						<string name="Name">Icons</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -27231,7 +27797,7 @@ return Icons
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000111">
+				<Item class="ModuleScript" referent="RBX000114">
 					<Properties>
 						<string name="Name">Kit</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -28565,11 +29131,11 @@ return Kit
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000112">
+				<Item class="Folder" referent="RBX000115">
 					<Properties>
 						<string name="Name">Overlays</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000113">
+					<Item class="ModuleScript" referent="RBX000116">
 						<Properties>
 							<string name="Name">Modal</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -28786,7 +29352,7 @@ return Modal
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000114">
+					<Item class="ModuleScript" referent="RBX000117">
 						<Properties>
 							<string name="Name">Notifications</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -28992,7 +29558,7 @@ return Notifications
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000115">
+					<Item class="ModuleScript" referent="RBX000118">
 						<Properties>
 							<string name="Name">Tooltip</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -29081,7 +29647,7 @@ return Tooltip
 						</Properties>
 					</Item>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000116">
+				<Item class="ModuleScript" referent="RBX000119">
 					<Properties>
 						<string name="Name">Responsive</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29339,7 +29905,7 @@ return Responsive
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000117">
+				<Item class="ModuleScript" referent="RBX000120">
 					<Properties>
 						<string name="Name">Theme</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29469,7 +30035,7 @@ return Theme
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="ModuleScript" referent="RBX000118">
+				<Item class="ModuleScript" referent="RBX000121">
 					<Properties>
 						<string name="Name">WindowBase</string>
 						<ProtectedString name="Source"><![CDATA[--[[
@@ -29645,11 +30211,11 @@ return WindowBase
 ]]></ProtectedString>
 					</Properties>
 				</Item>
-				<Item class="Folder" referent="RBX000119">
+				<Item class="Folder" referent="RBX000122">
 					<Properties>
 						<string name="Name">Windows</string>
 					</Properties>
-					<Item class="ModuleScript" referent="RBX000120">
+					<Item class="ModuleScript" referent="RBX000123">
 						<Properties>
 							<string name="Name">EggStorageWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -29929,7 +30495,7 @@ return EggStorageWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000121">
+					<Item class="ModuleScript" referent="RBX000124">
 						<Properties>
 							<string name="Name">InventoryWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -31258,7 +31824,7 @@ return InventoryWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000122">
+					<Item class="ModuleScript" referent="RBX000125">
 						<Properties>
 							<string name="Name">SettingsWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -31474,7 +32040,7 @@ return SettingsWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000123">
+					<Item class="ModuleScript" referent="RBX000126">
 						<Properties>
 							<string name="Name">ShopWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -31920,7 +32486,7 @@ return ShopWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000124">
+					<Item class="ModuleScript" referent="RBX000127">
 						<Properties>
 							<string name="Name">SpinWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -32250,7 +32816,7 @@ return SpinWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX000125">
+					<Item class="ModuleScript" referent="RBX000128">
 						<Properties>
 							<string name="Name">TeleportWindow</string>
 							<ProtectedString name="Source"><![CDATA[--[[
@@ -32419,11 +32985,452 @@ return TeleportWindow
 ]]></ProtectedString>
 						</Properties>
 					</Item>
+					<Item class="ModuleScript" referent="RBX000129">
+						<Properties>
+							<string name="Name">TreeWindow</string>
+							<ProtectedString name="Source"><![CDATA[--[[
+	TreeWindow (the Great Tree skill tree)
+	Five branches (rows), five levels each (nodes joined by a vine). Levels are
+	bought strictly in order: owned nodes are filled with the branch colour and a
+	check, the next node pulses when you can afford it, later nodes are locked.
+	Tap a node to inspect it; the strip at the bottom shows what it gives and
+	buys it. All prices and bonuses come from TreeConfig; the server validates
+	every purchase (TreeService).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Configs = ReplicatedStorage:WaitForChild("Configs")
+local Net = require(Shared:WaitForChild("Net"))
+local Format = require(Shared:WaitForChild("Util"):WaitForChild("Format"))
+local TreeConfig = require(Configs:WaitForChild("TreeConfig"))
+
+local UI = script.Parent.Parent
+local Theme = require(UI.Theme)
+local Responsive = require(UI.Responsive)
+local Create = require(UI.Create)
+local Kit = require(UI.Kit)
+local Icons = require(UI.Icons)
+local WindowBase = require(UI.WindowBase)
+
+local C = Theme.Colors
+
+local TreeWindow = {}
+TreeWindow.__index = TreeWindow
+setmetatable(TreeWindow, { __index = WindowBase })
+
+local SPEC = {
+	Desktop = { Width = 0.7, Height = 0.8, Aspect = 1.55 },
+	Tablet = { Width = 0.92, Height = 0.86, Aspect = 1.5 },
+	Phone = { Width = 0.98, Height = 1 },
+	PhonePortrait = { Width = 0.98, Height = 1 },
+}
+
+local WHITE = Color3.new(1, 1, 1)
+
+local function px(n: number)
+	return Responsive.px(n)
+end
+
+-- Re-applies fn(R) -> value to inst[prop] whenever the screen metrics change.
+local function bind(inst: Instance, prop: string, fn)
+	Responsive.bind(inst, prop, fn)
+end
+
+local function iconDisc(parent: Instance, icon: string, color: Color3, props)
+	local disc = Kit.frame({
+		Name = "IconDisc",
+		BackgroundTransparency = 0,
+		BackgroundColor3 = color,
+		SizeConstraint = Enum.SizeConstraint.RelativeYY,
+		Parent = parent,
+	})
+	for k, v in props do
+		(disc :: any)[k] = v
+	end
+	Kit.corner(disc, 999)
+	Create("UIGradient", { Rotation = 90, Color = ColorSequence.new(color:Lerp(WHITE, 0.25), color:Lerp(Color3.new(0, 0, 0), 0.2)), Parent = disc })
+	local box = Kit.frame({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.6, 0.6), Parent = disc })
+	Icons.make(icon, { Color = C.Ink, Accent = C.Text, Ink = color }).Parent = box
+	return disc
+end
+
+function TreeWindow.new(ui, registry)
+	local self = WindowBase.new({
+		Name = "Tree",
+		Title = "Great Tree",
+		Subtitle = "Permanent upgrades",
+		Icon = "Clover",
+		Spec = SPEC,
+	})
+	setmetatable(self, TreeWindow)
+	self.UIC = ui
+	self.Registry = registry
+	self.Data = registry.DataController
+	self.Rows = {} -- [branchId] = { Nodes = {...}, Segments = {...}, Now = TextLabel }
+	self.Selected = nil -- { Id, Level }
+	self.Busy = false
+	self:Build()
+	return self
+end
+
+-- ============================================================== build
+function TreeWindow:Build()
+	local content = self.Content
+	-- top strip: hint + cash
+	local top = Kit.frame({ Name = "Top", Size = UDim2.new(1, 0, 0, px(30)), Parent = content })
+	bind(top, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(30))
+	end)
+	Kit.text({ Name = "Hint", Text = "Grow each branch from the left. Upgrades are permanent.", Role = "Label", Color = C.TextMuted, Size = UDim2.fromScale(0.62, 1), Truncate = true, Parent = top })
+	self.CashText = Kit.text({
+		Name = "Cash",
+		Text = "$0",
+		Role = "Heading",
+		Color = C.GoldBright,
+		XAlign = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.fromScale(0.36, 1),
+		Parent = top,
+	})
+
+	-- branch rows (scrolls when the window is short, e.g. phones)
+	local scroll = Kit.scroll({ Name = "Branches", Parent = content })
+	self.Scroll = scroll
+	Kit.list(scroll, "V", 8, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top)
+	bind(scroll, "Position", function(R)
+		return UDim2.new(0, 0, 0, R.px(36))
+	end)
+	bind(scroll, "Size", function(R)
+		return UDim2.new(1, 0, 1, -(R.px(36) + R.px(86)))
+	end)
+	for i, branch in TreeConfig.Branches do
+		self:BuildRow(scroll, branch, i)
+	end
+
+	-- detail strip
+	local detail = Kit.surface({ Name = "Detail", AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Parent = content })
+	self.Detail = detail
+	bind(detail, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(78))
+	end)
+	self.DetailDisc = iconDisc(detail, "Clover", C.Gold, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromScale(0.62, 0.62) })
+	self.DetailTitle = Kit.text({ Name = "Title", Text = "", Role = "Heading", Position = UDim2.fromScale(0.085, 0.12), Size = UDim2.fromScale(0.56, 0.36), Truncate = true, Parent = detail })
+	self.DetailBody = Kit.text({ Name = "Body", Text = "", Role = "Caption", Color = C.TextMuted, Position = UDim2.fromScale(0.085, 0.5), Size = UDim2.fromScale(0.56, 0.36), Truncate = true, Parent = detail })
+	self.BuyButton = Kit.button({
+		Name = "Buy",
+		Text = "BUY",
+		Style = "Gold",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromScale(0.3, 0.64),
+		Parent = detail,
+	})
+	self.BuyButton.Activated:Connect(function()
+		self:Buy()
+	end)
+
+	-- the nodes of the next purchasable level pulse while you can afford them
+	RunService.RenderStepped:Connect(function()
+		if not self.Root.Visible then
+			return
+		end
+		local k = 0.5 + 0.5 * math.sin(os.clock() * 4)
+		for _, row in self.Rows do
+			local node = row.Next
+			if node and node.Pulse then
+				node.Stroke.Thickness = px(3) + px(2.2) * k
+			end
+		end
+	end)
+end
+
+function TreeWindow:BuildRow(parent: Instance, branch, order: number)
+	local row = Kit.surface({ Name = branch.Id, LayoutOrder = order, StrokeColor = branch.Color, StrokeTransparency = 0.55, Parent = parent })
+	bind(row, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(R.Device == "Phone" and 104 or 118))
+	end)
+	local info = { Nodes = {}, Segments = {}, Branch = branch }
+	self.Rows[branch.Id] = info
+
+	-- head: icon + name + current bonus
+	local head = Kit.frame({ Name = "Head", Position = UDim2.fromScale(0.012, 0), Size = UDim2.fromScale(0.23, 1), Parent = row })
+	iconDisc(head, branch.Icon, branch.Color, { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromScale(0.55, 0.55) })
+	Kit.text({ Name = "Name", Text = string.upper(branch.Name), Role = "Label", Font = Theme.Fonts.Heading, Wrapped = true, YAlign = Enum.TextYAlignment.Bottom, Position = UDim2.fromScale(0.36, 0.04), Size = UDim2.fromScale(0.64, 0.5), Parent = head })
+	info.Now = Kit.text({ Name = "Now", Text = "", Role = "Caption", Color = branch.Color, YAlign = Enum.TextYAlignment.Top, Position = UDim2.fromScale(0.36, 0.55), Size = UDim2.fromScale(0.64, 0.3), Truncate = true, Parent = head })
+
+	-- nodes block
+	local outer = Kit.frame({ Name = "Levels", Position = UDim2.fromScale(0.25, 0), Size = UDim2.fromScale(0.74, 1), Parent = row })
+	-- fixed-height strip centred in the row, so taller rows keep the nodes tight
+	local block = Kit.frame({ Name = "Inner", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), Parent = outer })
+	bind(block, "Size", function(R)
+		return UDim2.new(1, 0, 0, R.px(98))
+	end)
+	-- vine segments behind the nodes (between node centres)
+	for k = 1, #branch.Levels - 1 do
+		local seg = Kit.frame({
+			Name = "Vine" .. k,
+			BackgroundTransparency = 0,
+			BackgroundColor3 = C.Disabled,
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0.1 + (k - 1) * 0.2, 0, 0, px(33)),
+			Parent = block,
+		})
+		bind(seg, "Size", function(R)
+			return UDim2.new(0.2, 0, 0, R.px(5))
+		end)
+		bind(seg, "Position", function(R)
+			return UDim2.new(0.1 + (k - 1) * 0.2, 0, 0, R.px(33))
+		end)
+		Kit.corner(seg, 999)
+		info.Segments[k] = seg
+	end
+	for k, entry in branch.Levels do
+		local cell = Kit.frame({ Name = "Level" .. k, Position = UDim2.fromScale((k - 1) * 0.2, 0), Size = UDim2.fromScale(0.2, 1), Parent = block })
+		local btn = Create("TextButton", {
+			Name = "Node",
+			AutoButtonColor = false,
+			Text = "",
+			BackgroundColor3 = C.Surface,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(0.5, 0),
+			ZIndex = 3,
+			Parent = cell,
+		})
+		bind(btn, "Size", function(R)
+			return UDim2.fromOffset(R.px(46), R.px(46))
+		end)
+		bind(btn, "Position", function(R)
+			return UDim2.new(0.5, 0, 0, R.px(10))
+		end)
+		Kit.corner(btn, 999)
+		local stroke = Kit.stroke(btn, branch.Color, 3, 0)
+		local scale = Create("UIScale", { Parent = btn })
+		local numeral = Kit.text({ Name = "Numeral", Text = tostring(k), Role = "Heading", Font = Theme.Fonts.Number, Color = branch.Color, XAlign = Enum.TextXAlignment.Center, ZIndex = 4, Parent = btn })
+		local checkBox = Kit.frame({ Name = "Check", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.58, 0.58), ZIndex = 4, Visible = false, Parent = btn })
+		Icons.make("Check", { Color = C.Ink, Accent = C.Ink, Ink = branch.Color }).Parent = checkBox
+		local lockBox = Kit.frame({ Name = "Lock", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.5, 0.5), ZIndex = 4, Visible = false, Parent = btn })
+		Icons.make("Lock", { Color = C.TextDim, Accent = C.TextDim, Ink = C.Surface }).Parent = lockBox
+		local bonus = Kit.text({ Name = "Bonus", Text = TreeConfig.formatBonus(branch, entry.Bonus), Role = "Label", XAlign = Enum.TextXAlignment.Center, Truncate = true, Parent = cell })
+		bind(bonus, "Position", function(R)
+			return UDim2.new(0, 0, 0, R.px(62))
+		end)
+		bind(bonus, "Size", function(R)
+			return UDim2.new(1, 0, 0, R.px(18))
+		end)
+		local price = Kit.text({ Name = "Price", Text = Format.cash(entry.Price), Role = "Caption", XAlign = Enum.TextXAlignment.Center, Truncate = true, Parent = cell })
+		bind(price, "Position", function(R)
+			return UDim2.new(0, 0, 0, R.px(80))
+		end)
+		bind(price, "Size", function(R)
+			return UDim2.new(1, 0, 0, R.px(16))
+		end)
+		local node = { Button = btn, Stroke = stroke, Scale = scale, Numeral = numeral, Check = checkBox, Lock = lockBox, Bonus = bonus, Price = price, Level = k, Id = branch.Id }
+		info.Nodes[k] = node
+		btn.Activated:Connect(function()
+			self.UIC.sound("Click")
+			self:Select(branch.Id, k)
+		end)
+	end
+end
+
+-- ============================================================== state
+function TreeWindow:Snapshot()
+	local data = self.Data and self.Data.all()
+	return data, data and (tonumber(data.Cash) or 0) or 0
+end
+
+function TreeWindow:LevelOf(id: string): number
+	local data = self:Snapshot()
+	return TreeConfig.level(data, id)
+end
+
+function TreeWindow:Select(id: string, level: number)
+	self.Selected = { Id = id, Level = level }
+	self:Refresh()
+end
+
+-- default selection: an affordable next level, else the first next level, else the first branch
+function TreeWindow:PickDefault()
+	local data, cash = self:Snapshot()
+	local firstOpen
+	for _, branch in TreeConfig.Branches do
+		local lvl = TreeConfig.level(data, branch.Id)
+		local nxt = branch.Levels[lvl + 1]
+		if nxt then
+			firstOpen = firstOpen or { Id = branch.Id, Level = lvl + 1 }
+			if cash >= nxt.Price then
+				return { Id = branch.Id, Level = lvl + 1 }
+			end
+		end
+	end
+	return firstOpen or { Id = TreeConfig.Branches[1].Id, Level = #TreeConfig.Branches[1].Levels }
+end
+
+function TreeWindow:Refresh()
+	local data, cash = self:Snapshot()
+	if not data then
+		return
+	end
+	self.CashText.Text = Format.cash(cash)
+	for _, branch in TreeConfig.Branches do
+		local info = self.Rows[branch.Id]
+		local cur = TreeConfig.level(data, branch.Id)
+		info.Next = nil
+		info.Now.Text = cur > 0 and ("NOW " .. TreeConfig.formatBonus(branch, TreeConfig.bonus(data, branch.Id))) or "NOT GROWN YET"
+		for k, node in info.Nodes do
+			local entry = branch.Levels[k]
+			local owned = k <= cur
+			local isNext = k == cur + 1
+			local affordable = isNext and cash >= entry.Price
+			local selected = self.Selected and self.Selected.Id == branch.Id and self.Selected.Level == k
+			node.Pulse = affordable
+			if owned then
+				node.Button.BackgroundColor3 = branch.Color
+				node.Stroke.Color = WHITE
+				node.Stroke.Thickness = px(2)
+				node.Numeral.Visible = false
+				node.Check.Visible = true
+				node.Lock.Visible = false
+				node.Bonus.TextColor3 = C.Text
+				node.Price.Text = "OWNED"
+				node.Price.TextColor3 = C.Success
+			elseif isNext then
+				node.Button.BackgroundColor3 = C.Surface
+				node.Stroke.Color = branch.Color
+				node.Stroke.Thickness = px(3)
+				node.Numeral.Visible = true
+				node.Check.Visible = false
+				node.Lock.Visible = false
+				node.Bonus.TextColor3 = branch.Color
+				node.Price.Text = Format.cash(entry.Price)
+				node.Price.TextColor3 = affordable and C.GoldBright or C.Danger
+				info.Next = node
+			else
+				node.Button.BackgroundColor3 = C.SurfaceDeep
+				node.Stroke.Color = C.Disabled
+				node.Stroke.Thickness = px(2)
+				node.Numeral.Visible = false
+				node.Check.Visible = false
+				node.Lock.Visible = true
+				node.Bonus.TextColor3 = C.TextDim
+				node.Price.Text = Format.cash(entry.Price)
+				node.Price.TextColor3 = C.TextDim
+			end
+			if selected then
+				node.Stroke.Color = WHITE
+				node.Stroke.Thickness = px(4)
+				node.Pulse = false
+			end
+		end
+		for k, seg in info.Segments do
+			seg.BackgroundColor3 = (cur >= k + 1) and branch.Color or C.Disabled
+		end
+	end
+	self:UpdateDetail()
+end
+
+function TreeWindow:UpdateDetail()
+	local sel = self.Selected
+	local data, cash = self:Snapshot()
+	local branch = sel and TreeConfig.ById[sel.Id]
+	if not branch or not data then
+		return
+	end
+	local cur = TreeConfig.level(data, sel.Id)
+	local entry = branch.Levels[sel.Level]
+	self.DetailDisc.BackgroundColor3 = branch.Color
+	self.DetailTitle.Text = string.format("%s  -  LEVEL %d", string.upper(branch.Name), sel.Level)
+	local after = TreeConfig.formatBonus(branch, entry.Bonus)
+	local body = branch.Description .. "  "
+	if cur > 0 and sel.Level > cur then
+		body ..= TreeConfig.formatBonus(branch, TreeConfig.bonus(data, sel.Id)) .. " > " .. after
+	else
+		body ..= after
+	end
+	self.DetailBody.Text = body
+	if sel.Level <= cur then
+		self.BuyButton:SetText("OWNED")
+		self.BuyButton:SetStyle("Secondary")
+		self.BuyButton:SetEnabled(false)
+	elseif sel.Level == cur + 1 then
+		self.BuyButton:SetText("BUY  " .. Format.cash(entry.Price))
+		self.BuyButton:SetStyle("Gold")
+		self.BuyButton:SetEnabled(cash >= entry.Price)
+	else
+		self.BuyButton:SetText("LOCKED")
+		self.BuyButton:SetStyle("Secondary")
+		self.BuyButton:SetEnabled(false)
+	end
+end
+
+-- ============================================================== buying
+function TreeWindow:Buy()
+	local sel = self.Selected
+	if not sel or self.Busy then
+		return
+	end
+	self.Busy = true
+	self.BuyButton:SetBusy(true)
+	task.spawn(function()
+		local res = Net.request("Tree", "Buy", { Id = sel.Id })
+		self.Busy = false
+		self.BuyButton:SetBusy(false)
+		local branch = TreeConfig.ById[sel.Id]
+		if self.UIC.HandleResult(res, branch.Name .. " level " .. tostring(res.data and res.data.Level or "") .. "!") then
+			self.UIC.sound("Purchase")
+			local level = res.data and res.data.Level or sel.Level
+			local node = self.Rows[sel.Id].Nodes[level]
+			if node then
+				TweenService:Create(node.Scale, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.4 }):Play()
+				task.delay(0.18, function()
+					TweenService:Create(node.Scale, TweenInfo.new(0.22, Enum.EasingStyle.Quad), { Scale = 1 }):Play()
+				end)
+			end
+			-- move on to the next level of this branch
+			local nextLevel = math.min(level + 1, #branch.Levels)
+			self.Selected = { Id = sel.Id, Level = nextLevel }
+			self:Refresh()
+		end
+	end)
+end
+
+-- ============================================================== lifecycle
+function TreeWindow:OnOpen(args)
+	local branchId = args and args.Branch
+	if branchId and TreeConfig.ById[branchId] then
+		local lvl = self:LevelOf(branchId)
+		self.Selected = { Id = branchId, Level = math.min(lvl + 1, #TreeConfig.ById[branchId].Levels) }
+	else
+		self.Selected = self:PickDefault()
+	end
+	self.Scroll.CanvasPosition = Vector2.zero
+	self:Refresh()
+	if not self._observing and self.Data then
+		self._observing = true
+		for _, key in { "Tree", "Cash" } do
+			self.Data.changed(key):Connect(function()
+				if self.Root.Visible then
+					self:Refresh()
+				end
+			end)
+		end
+	end
+end
+
+return TreeWindow
+]]></ProtectedString>
+						</Properties>
+					</Item>
 				</Item>
 			</Item>
 		</Item>
 	</Item>
-	<Item class="Workspace" referent="RBX000126">
+	<Item class="Workspace" referent="RBX000130">
 		<Properties>
 			<string name="Name">Workspace</string>
 			<bool name="StreamingEnabled">true</bool>
@@ -32432,7 +33439,7 @@ return TeleportWindow
 			<token name="StreamOutBehavior">1</token>
 			<float name="Gravity">196.2</float>
 		</Properties>
-		<Item class="Terrain" referent="RBX000127">
+		<Item class="Terrain" referent="RBX000131">
 			<Properties>
 				<string name="Name">Terrain</string>
 				<bool name="Decoration">true</bool>
@@ -32444,7 +33451,7 @@ return TeleportWindow
 			</Properties>
 		</Item>
 	</Item>
-	<Item class="Lighting" referent="RBX000128">
+	<Item class="Lighting" referent="RBX000132">
 		<Properties>
 			<string name="Name">Lighting</string>
 			<token name="Technology">4</token>
@@ -32456,18 +33463,18 @@ return TeleportWindow
 			<float name="EnvironmentSpecularScale">0.8</float>
 		</Properties>
 	</Item>
-	<Item class="SoundService" referent="RBX000129">
+	<Item class="SoundService" referent="RBX000133">
 		<Properties>
 			<string name="Name">SoundService</string>
 		</Properties>
 	</Item>
-	<Item class="StarterGui" referent="RBX000130">
+	<Item class="StarterGui" referent="RBX000134">
 		<Properties>
 			<string name="Name">StarterGui</string>
 			<bool name="ResetPlayerGuiOnSpawn">false</bool>
 		</Properties>
 	</Item>
-	<Item class="Players" referent="RBX000131">
+	<Item class="Players" referent="RBX000135">
 		<Properties>
 			<string name="Name">Players</string>
 			<bool name="CharacterAutoLoads">false</bool>

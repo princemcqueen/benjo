@@ -92,7 +92,9 @@ local function buildStats()
 	local handling = species.Handling or {}
 	return {
 		RunSpeed = record and DragonStats.runSpeed(record) or (m:GetAttribute("RunSpeed") or 40),
-		CruiseSpeed = record and DragonStats.cruiseSpeed(record) or (m:GetAttribute("CruiseSpeed") or 77),
+		-- Great Tree "Wind Wings": the server mirrors the bonus as a player attribute
+		CruiseSpeed = record and DragonStats.cruiseSpeed(record, LocalPlayer:GetAttribute("TreeFlySpeed") or 0)
+			or (m:GetAttribute("CruiseSpeed") or 77),
 		Scale = m:GetAttribute("Scale") or 1,
 		HipHeight = m:GetAttribute("HipHeight") or 4.8,
 		BodyRadius = m:GetAttribute("BodyRadius") or 4.2,
@@ -531,6 +533,12 @@ function DragonController.Start()
 		end
 	end)
 	registry.DataController.observe("Dragons", function()
+		if state and model then
+			Locomotion.setStats(state, buildStats())
+		end
+	end)
+	-- Great Tree "Wind Wings" bought while flying: new cruise speed right away
+	LocalPlayer:GetAttributeChangedSignal("TreeFlySpeed"):Connect(function()
 		if state and model then
 			Locomotion.setStats(state, buildStats())
 		end
