@@ -32,8 +32,7 @@ THE OWNER'S WISHES THAT ARE NOT DONE YET (in this order)
      take-off and landing, wing beat sync, hatch emerge. Code: ReplicatedStorage/Shared/Dragons/Animator.luau,
      tests: toolchain/tests/anim_test.py, mesh_pose.py, toolchain/pose_sheet.py (renders poses).
   4. A guided TUTORIAL with an objective line in the HUD (the starter goals of the Quests window are the first step;
-     QuestConfig.Tutorial has the old waypoint steps). The QUESTS button of the
-     HUD does nothing yet.
+     QuestConfig.Tutorial has the old waypoint steps). 
   5. Series C: abilities, World Boss, titles, streaks (see the task list in the old notes).
 
 ECONOMY NOTES (TEST 9)
