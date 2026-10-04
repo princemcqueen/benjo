@@ -1,5 +1,5 @@
-RIDE A DRAGON - what is left after TEST 9  (hand-over notes for the next session)
-===================================================================================
+RIDE A DRAGON - what is left after TEST 12  (hand-over notes for the next session)
+====================================================================================
 
 HOW WE WORK (the owner writes Bosnian; answer in Bosnian, code and comments in English)
   - After every feature: lint + tests, build the place, send it.
@@ -18,12 +18,18 @@ HOW WE WORK (the owner writes Bosnian; answer in Bosnian, code and comments in E
 
 DONE IN TEST 10: four sky islands + random eggs on land and islands, the owner's statue on the plaza.
 DONE IN TEST 11: QUESTS (service, window, badge, starter goals), the statue's preset outfit.
+DONE IN TEST 12: EGG GUARDIANS (every world egg lies in a nest guarded by a dragon you must beat in a duel; stronger
+  egg = stronger guardian; see README 'EGG GUARDIANS'), riders no longer hear running steps while flying.
+  Balance knobs: EggConfig.Guardians (Pools, Soften, LevelPerPower, LevelBase, XPBase). Idea for later: guardian
+  drops, a guardian boss for the Golden / Rainbow eggs, sound of the guardian waking up (key Roar).
 
 THE OWNER'S WISHES THAT ARE NOT DONE YET (in this order)
-  0. SOUNDS: the footstep / running sound is heard while flying (find which sound it is: the dragon's
-     Footstep from Animator.OnFootstep, or the default character sounds) and the dragon sounds are missing
-     (AudioConfig WingFlap / Roar / Eat... have empty ids: the owner pastes Creator Store ids; the hooks
-     are in AnimationController.OnFlap / OnFootstep and AudioController.play3D).
+  0. SOUNDS: the running sound while flying is FIXED (the default Roblox character sounds are muted on
+     mounted characters - AudioController.Start; dragon footsteps only after 0.35 s on the ground).
+     STILL OPEN: the dragon sounds are silent because AudioConfig WingFlap / Roar / Eat / Strike / Hit... have
+     empty ids: the owner pastes Creator Store ids (no audio can be made offline); the hooks are in
+     AnimationController.OnFlap / OnFootstep, DragonController (Roar key F), EggController (guardian wakes up)
+     and AudioController.play3D.
   1. NEW EGG TYPES (EggConfig.Eggs + region weights + egg look + Index / shop text); more islands / maps.
   2. IMPROVE THE MAP: more landmarks / hidden egg spots / ambient life (birds, butterflies), weather and
      events (roadmap "Series B": Frostpeak, Ember Caldera, Skyreach, treasure, Golden Dragon, cinematic
