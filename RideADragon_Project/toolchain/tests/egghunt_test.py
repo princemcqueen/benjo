@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import luau_interp as LI  # noqa: E402
 import rbx_physics  # noqa: E402
 from rbx_types import CFrame  # noqa: E402
-from sim_runner import boot, run_client_lua, lua_table_to_py  # noqa: E402
+from sim_runner import boot, run_client_lua, lua_table_to_py, NO_GUARDIANS  # noqa: E402
 
 FAIL = []
 
@@ -72,7 +72,7 @@ def buy(sim, player, item):
 
 def main():
     t0 = time.time()
-    sim = boot()
+    sim = boot(extra_server=[NO_GUARDIANS])
     sim.physics = rbx_physics.make_physics()
     player = sim.add_player("Hunter", 1001)
     sim.run_for(6, 1 / 30)

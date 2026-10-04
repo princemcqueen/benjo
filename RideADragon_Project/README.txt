@@ -1,5 +1,10 @@
-RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 11)
+RIDE A DRAGON - project snapshot (4 Oct 2026, TEST 12)
 ======================================================
+
+NEW IN TEST 12 (short)
+  - EGG GUARDIANS: every egg in the world lies in a NEST and a dragon guards it. To take the egg you must beat the
+    guardian in a Pokemon-style duel. The stronger the egg (tier + luck), the stronger the guardian (see EGG
+    GUARDIANS below). Lucky Egg Call eggs (Robux) and the wild event eggs have no guardian.
 
 NEW IN TEST 11 (short)
   - QUESTS WORK NOW (the QUESTS button, key Q, and Elder Rowan's hut): see QUESTS below.
@@ -106,12 +111,33 @@ RACE & BATTLE ISLAND (new in TEST 5)  -  Teleport menu > RACE ISLAND (or fly nor
     numbers and a hit point bar, falls and stands up again, pays nothing.
   - New animations: Strike, Cast, Hurt. Numbers live in RaceConfig / CombatConfig.
 
+EGG GUARDIANS (new in TEST 12)  -  fly to any glowing egg in the world
+  - Every egg of the normal spawn cycle (24 per player) lies in a nest of twigs and stones. A dragon - its GUARDIAN -
+    stands next to it, wakes up when you come near (it turns to you and roars) and has a label: its name, level and
+    how dangerous it is for YOUR equipped dragon (EASY / FAIR / HARD / DEADLY).
+  - Flying or walking through the egg does NOT take it any more (the Egg Magnet only widens the challenge range).
+    When you are close, the CHALLENGE button appears at the bottom (key X, or tap it): the Pokemon-style duel scene
+    starts. WIN = the egg jumps into your hand (or the bag) + XP, the guardian fades away and a new egg grows later.
+    LOSS or RUN AWAY = the egg stays; the same guardian needs 6 seconds before the next challenge.
+  - Strength: power = egg tier + log10(luck). The guardian's species comes from the rarity pool of the power
+    (Common ... Secret), its level is yours + a bonus that grows with the power, a lucky egg also has a mutated
+    guardian (stronger SPECIAL), and a stronger guardian is drawn bigger. The weakest guardians are a bit softer
+    so the first egg is a fair win. Typical result: an equal dragon wins ~75%, one tier stronger ~45%, two tiers
+    ~20% (type advantages and good moves change that).
+  - A full egg bag cannot start a challenge; if the bag fills up during the duel the won egg still comes.
+  - XP for a win: 20 x 1.55^(power - 1)  (Haven Egg x1: 20 XP, Celestial Egg x1000: ~670 XP). A new quest kind
+    "Beat egg guardians" and the Getting Started goal "Win an egg from its guardian" use it (Stats.Guardians).
+  - Numbers: ReplicatedStorage > Configs > EggConfig > Guardians (Enabled, Range, Pools, Mutations, Soften, XP...).
+    Code: EggConfig.guardian, Services/EggService (GuardInfo / CollectGuarded / GuardLost), Services/DuelService
+    (Duel.Guardian), Controllers/EggController (nest, guardian model, button), Controllers/DuelController,
+    tests/guardian_test.py. Tests that walk into eggs switch guardians off with sim_runner.NO_GUARDIANS.
+
 QUESTS (new in TEST 11)  -  the QUESTS button of the HUD, key Q, or Elder Rowan's hut (Teleport > ELDER ROWAN)
-  - GETTING STARTED: seven first goals for a new player (ride, fly 500 studs, pick up an egg, hatch a dragon, rest a
+  - GETTING STARTED: seven first goals for a new player (ride, fly 500 studs, win an egg, hatch a dragon, rest a
     dragon on a perch, feed a dragon, buy an upgrade). Each pays once ($150-$500, the last one also 2 spins); the
     list disappears when you have taken them all.
-  - ACTIVE QUESTS: always 3 quests from 11 kinds (find eggs, hatch, fly, earn from perch dragons, feed, boost, collect
-    coins, sell dragons, spin the wheel, mutation tries, win a duel). A quest counts from the moment it is given. The
+  - ACTIVE QUESTS: always 3 quests from 12 kinds (find eggs, hatch, fly, earn from perch dragons, feed, boost, collect
+    coins, sell dragons, spin the wheel, mutation tries, win a duel, beat egg guardians). A quest counts from the moment it is given. The
     reward is cash (grows with your level, never less than 150 s of your income) + player XP; every 3rd quest also
     gives a free spin; a NEW quest takes the place of the one you took.
   - A red number on the QUESTS button says how many rewards wait.

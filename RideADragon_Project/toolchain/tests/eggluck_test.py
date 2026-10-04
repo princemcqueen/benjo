@@ -7,7 +7,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import luau_interp as LI  # noqa: E402
 import rbx_physics  # noqa: E402
-from sim_runner import boot, run_client_lua, lua_table_to_py, render as ui_render  # noqa: E402
+from sim_runner import boot, run_client_lua, lua_table_to_py, render as ui_render, NO_GUARDIANS  # noqa: E402
 
 from paths import OUT  # noqa: E402
 FAIL = []
@@ -45,7 +45,7 @@ shared.RQ = {{ ok = r.ok, err = r.err or "", msg = r.msg or "", data = r.data }}
 
 def main():
     t0 = time.time()
-    sim = boot()
+    sim = boot(extra_server=[NO_GUARDIANS])
     sim.physics = rbx_physics.make_physics()
     p1 = sim.add_player("Player1", 1001)
     sim.run_for(6, 1 / 30)

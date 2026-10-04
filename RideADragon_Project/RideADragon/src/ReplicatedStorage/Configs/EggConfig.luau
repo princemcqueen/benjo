@@ -366,6 +366,56 @@ EggConfig.Spawning = {
 	RespawnMax = 30,
 }
 
+--[[
+	EGG GUARDIANS
+	Every egg that lies in the world (not the Robux bonus eggs and not the wild event eggs) sits in a nest and a dragon
+	guards it. You take the egg by winning a turn-based duel against the guardian (DuelService "Guardian"): lose and
+	the egg stays, win and it is yours.
+	  power  = egg tier + log10(luck)     (a Haven Egg x1 = 1, a Celestial Egg x1000 = 9)
+	  species = one of Pools[floor(power)]  (Common ... Secret), picked by the egg's serial so every client agrees
+	  level  = the level of your equipped dragon + Delta(power), so a fresh dragon is never locked out of the weak
+	           eggs, but a strong egg is guarded by a dragon that is better than yours
+	  a lucky egg also has a mutated guardian (a mutated dragon has the stronger BURST move)
+]]
+EggConfig.Guardians = {
+	Enabled = true,
+	Range = 60, -- studs: you must be this close to the nest to challenge (server)
+	PromptRange = 34, -- studs: the CHALLENGE button appears this close (client)
+	WakeRange = 90, -- studs: the guardian wakes up, looks at you and roars (client)
+	ShowRange = 240, -- studs: the guardian's model is built this close (the nest itself is always there)
+	Retry = 6, -- seconds before a guardian you lost against can be challenged again
+	XPBase = 20, -- XP for beating a guardian: XPBase * XPGrowth ^ (power - 1)
+	XPGrowth = 1.55,
+	LevelPerPower = 1.5, -- level over yours: floor((power - 1) * LevelPerPower + 0.5) - LevelBase
+	LevelBase = 3,
+	Pools = {
+		{ "GreenDrake", "PebbleDrake", "EmberPup", "SproutDrake", "PuddleWyrm", "SandScuttler" }, -- power 1 (Common)
+		{ "ForestWyvern", "CoralGlider", "Thornback", "Frostling", "SunbeamDrake", "NightWyvern" }, -- 2 (Uncommon)
+		{ "AquaSerpent", "CrystalWyvern", "StormHawk", "MagmaBrute", "JadeSerpent" }, -- 3 (Rare)
+		{ "FrostDragon", "ThunderDragon", "ToxicWyrm", "BloodmoonDrake", "SakuraSpirit" }, -- 4 (Epic)
+		{ "InfernoDragon", "GoldenEmperor", "AbyssLeviathan", "PhoenixDrake" }, -- 5 (Legendary)
+		{ "CelestialDragon", "GalaxyDragon" }, -- 6 (Mythic)
+		{ "VoidDragon", "EternalDragon" }, -- 7 and up (Secret)
+	},
+	-- The weakest guardians fight a little softer (HP and damage x this), so the first eggs are a fair first win.
+	Soften = { 0.8, 0.9 },
+	-- The best row whose Luck the egg reaches gives the guardian its mutation.
+	Mutations = {
+		{ Luck = 1000, Id = "Crystal" },
+		{ Luck = 250, Id = "Lava" },
+		{ Luck = 100, Id = "Golden" },
+		{ Luck = 25, Id = "Neon" },
+		{ Luck = 10, Id = "Shiny" },
+	},
+	-- Danger labels (client): guardian strength / your dragon's strength.
+	Threat = {
+		{ Max = 0.6, Name = "EASY", Color = Color3.fromRGB(110, 220, 100) },
+		{ Max = 1.15, Name = "FAIR", Color = Color3.fromRGB(255, 220, 80) },
+		{ Max = 1.9, Name = "HARD", Color = Color3.fromRGB(255, 150, 60) },
+		{ Max = math.huge, Name = "DEADLY", Color = Color3.fromRGB(255, 70, 70) },
+	},
+}
+
 local function weighted(list, rng: Random)
 	local total = 0
 	for _, e in list do
@@ -420,6 +470,44 @@ function EggConfig.luckColor(luck: number): Color3
 		return Color3.fromRGB(110, 220, 100)
 	end
 	return Color3.fromRGB(235, 235, 235)
+end
+
+-- ============================================================== guardians (helpers)
+-- How strong an egg is: its tier plus the digits of its luck (1 .. 9).
+function EggConfig.guardianPower(eggType: string, luck: number): number
+	local def = EggConfig.Eggs[eggType]
+	local tier = def and def.Tier or 1
+	return tier + math.log10(math.max(1, tonumber(luck) or 1))
+end
+
+-- The guardian of an egg: { Species, Mutation, Power, Delta, Scale } (plain data, goes to the client with the egg).
+-- `seed` (the egg's serial) picks the species inside the pool, so the same egg always has the same guardian.
+function EggConfig.guardian(eggType: string, luck: number, seed: number?)
+	local cfg = EggConfig.Guardians
+	local power = EggConfig.guardianPower(eggType, luck)
+	local row = math.clamp(math.floor(power + 1e-6), 1, #cfg.Pools)
+	local pool = cfg.Pools[row]
+	local species = pool[((math.floor(tonumber(seed) or 0)) % #pool) + 1]
+	local mutation = "None"
+	for _, m in cfg.Mutations do
+		if (tonumber(luck) or 1) >= m.Luck then
+			mutation = m.Id
+			break
+		end
+	end
+	local delta = math.floor((power - 1) * cfg.LevelPerPower + 0.5) - cfg.LevelBase
+	return { Species = species, Mutation = mutation, Power = math.floor(power * 100 + 0.5) / 100, Delta = delta, Scale = cfg.Soften[row] or 1 }
+end
+
+-- The level of the guardian for a player whose dragon has `playerLevel` (1 .. 50).
+function EggConfig.guardianLevel(guard, playerLevel: number): number
+	return math.clamp(math.floor(playerLevel) + guard.Delta, 1, 50)
+end
+
+-- XP for beating the guardian of an egg of this power.
+function EggConfig.guardianXP(power: number): number
+	local cfg = EggConfig.Guardians
+	return math.floor(cfg.XPBase * cfg.XPGrowth ^ (math.max(1, power) - 1) + 0.5)
 end
 
 -- Luck applies to results whose rarity rank is >= this.

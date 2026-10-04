@@ -9101,6 +9101,56 @@ EggConfig.Spawning = {
 	RespawnMax = 30,
 }
 
+--[[
+	EGG GUARDIANS
+	Every egg that lies in the world (not the Robux bonus eggs and not the wild event eggs) sits in a nest and a dragon
+	guards it. You take the egg by winning a turn-based duel against the guardian (DuelService "Guardian"): lose and
+	the egg stays, win and it is yours.
+	  power  = egg tier + log10(luck)     (a Haven Egg x1 = 1, a Celestial Egg x1000 = 9)
+	  species = one of Pools[floor(power)]  (Common ... Secret), picked by the egg's serial so every client agrees
+	  level  = the level of your equipped dragon + Delta(power), so a fresh dragon is never locked out of the weak
+	           eggs, but a strong egg is guarded by a dragon that is better than yours
+	  a lucky egg also has a mutated guardian (a mutated dragon has the stronger BURST move)
+]]
+EggConfig.Guardians = {
+	Enabled = true,
+	Range = 60, -- studs: you must be this close to the nest to challenge (server)
+	PromptRange = 34, -- studs: the CHALLENGE button appears this close (client)
+	WakeRange = 90, -- studs: the guardian wakes up, looks at you and roars (client)
+	ShowRange = 240, -- studs: the guardian's model is built this close (the nest itself is always there)
+	Retry = 6, -- seconds before a guardian you lost against can be challenged again
+	XPBase = 20, -- XP for beating a guardian: XPBase * XPGrowth ^ (power - 1)
+	XPGrowth = 1.55,
+	LevelPerPower = 1.5, -- level over yours: floor((power - 1) * LevelPerPower + 0.5) - LevelBase
+	LevelBase = 3,
+	Pools = {
+		{ "GreenDrake", "PebbleDrake", "EmberPup", "SproutDrake", "PuddleWyrm", "SandScuttler" }, -- power 1 (Common)
+		{ "ForestWyvern", "CoralGlider", "Thornback", "Frostling", "SunbeamDrake", "NightWyvern" }, -- 2 (Uncommon)
+		{ "AquaSerpent", "CrystalWyvern", "StormHawk", "MagmaBrute", "JadeSerpent" }, -- 3 (Rare)
+		{ "FrostDragon", "ThunderDragon", "ToxicWyrm", "BloodmoonDrake", "SakuraSpirit" }, -- 4 (Epic)
+		{ "InfernoDragon", "GoldenEmperor", "AbyssLeviathan", "PhoenixDrake" }, -- 5 (Legendary)
+		{ "CelestialDragon", "GalaxyDragon" }, -- 6 (Mythic)
+		{ "VoidDragon", "EternalDragon" }, -- 7 and up (Secret)
+	},
+	-- The weakest guardians fight a little softer (HP and damage x this), so the first eggs are a fair first win.
+	Soften = { 0.8, 0.9 },
+	-- The best row whose Luck the egg reaches gives the guardian its mutation.
+	Mutations = {
+		{ Luck = 1000, Id = "Crystal" },
+		{ Luck = 250, Id = "Lava" },
+		{ Luck = 100, Id = "Golden" },
+		{ Luck = 25, Id = "Neon" },
+		{ Luck = 10, Id = "Shiny" },
+	},
+	-- Danger labels (client): guardian strength / your dragon's strength.
+	Threat = {
+		{ Max = 0.6, Name = "EASY", Color = Color3.fromRGB(110, 220, 100) },
+		{ Max = 1.15, Name = "FAIR", Color = Color3.fromRGB(255, 220, 80) },
+		{ Max = 1.9, Name = "HARD", Color = Color3.fromRGB(255, 150, 60) },
+		{ Max = math.huge, Name = "DEADLY", Color = Color3.fromRGB(255, 70, 70) },
+	},
+}
+
 local function weighted(list, rng: Random)
 	local total = 0
 	for _, e in list do
@@ -9155,6 +9205,44 @@ function EggConfig.luckColor(luck: number): Color3
 		return Color3.fromRGB(110, 220, 100)
 	end
 	return Color3.fromRGB(235, 235, 235)
+end
+
+-- ============================================================== guardians (helpers)
+-- How strong an egg is: its tier plus the digits of its luck (1 .. 9).
+function EggConfig.guardianPower(eggType: string, luck: number): number
+	local def = EggConfig.Eggs[eggType]
+	local tier = def and def.Tier or 1
+	return tier + math.log10(math.max(1, tonumber(luck) or 1))
+end
+
+-- The guardian of an egg: { Species, Mutation, Power, Delta, Scale } (plain data, goes to the client with the egg).
+-- `seed` (the egg's serial) picks the species inside the pool, so the same egg always has the same guardian.
+function EggConfig.guardian(eggType: string, luck: number, seed: number?)
+	local cfg = EggConfig.Guardians
+	local power = EggConfig.guardianPower(eggType, luck)
+	local row = math.clamp(math.floor(power + 1e-6), 1, #cfg.Pools)
+	local pool = cfg.Pools[row]
+	local species = pool[((math.floor(tonumber(seed) or 0)) % #pool) + 1]
+	local mutation = "None"
+	for _, m in cfg.Mutations do
+		if (tonumber(luck) or 1) >= m.Luck then
+			mutation = m.Id
+			break
+		end
+	end
+	local delta = math.floor((power - 1) * cfg.LevelPerPower + 0.5) - cfg.LevelBase
+	return { Species = species, Mutation = mutation, Power = math.floor(power * 100 + 0.5) / 100, Delta = delta, Scale = cfg.Soften[row] or 1 }
+end
+
+-- The level of the guardian for a player whose dragon has `playerLevel` (1 .. 50).
+function EggConfig.guardianLevel(guard, playerLevel: number): number
+	return math.clamp(math.floor(playerLevel) + guard.Delta, 1, 50)
+end
+
+-- XP for beating the guardian of an egg of this power.
+function EggConfig.guardianXP(power: number): number
+	local cfg = EggConfig.Guardians
+	return math.floor(cfg.XPBase * cfg.XPGrowth ^ (math.max(1, power) - 1) + 0.5)
 end
 
 -- Luck applies to results whose rarity rank is >= this.
@@ -10195,15 +10283,16 @@ QuestConfig.Templates = {
 	SpinWheel = { Text = "Spin the wheel %s times", Goal = 2, GoalPerLevel = 0.1, Reward = 300, Stat = "Spins", Fmt = "count" },
 	TryMutation = { Text = "Try the mutation machine %s times", Goal = 2, GoalPerLevel = 0.1, Reward = 350, Stat = "MutateTries", Fmt = "count" },
 	WinDuel = { Text = "Win %s duel in the Battle Hall", Goal = 1, GoalPerLevel = 0.04, Reward = 600, Stat = "DuelsWon", Fmt = "count" },
+	DefeatGuardians = { Text = "Beat %s egg guardians", Goal = 1, GoalPerLevel = 0.12, Reward = 500, Stat = "Guardians", Fmt = "count" },
 }
 
-QuestConfig.TemplateOrder = { "FindEggs", "HatchDragons", "FlyDistance", "CollectIncome", "FeedDragons", "BoostTime", "CollectCoins", "SellDragons", "SpinWheel", "TryMutation", "WinDuel" }
+QuestConfig.TemplateOrder = { "FindEggs", "HatchDragons", "FlyDistance", "CollectIncome", "FeedDragons", "BoostTime", "CollectCoins", "SellDragons", "SpinWheel", "TryMutation", "WinDuel", "DefeatGuardians" }
 
 -- First goals. Check = which fact of the player's data makes it done (QuestService.starterDone).
 QuestConfig.Starter = {
 	{ Id = "Ride", Text = "Ride your dragon", Hint = "Press R or tap RIDE", Check = "Rides", Need = 1, Reward = 150 },
 	{ Id = "Fly", Text = "Fly 500 studs", Hint = "SPACE to take off, SHIFT to boost", Check = "DistanceFlown", Need = 500, Reward = 200 },
-	{ Id = "FindEgg", Text = "Pick up an egg", Hint = "Follow the egg arrow", Check = "EggsFound", Need = 1, Reward = 200 },
+	{ Id = "FindEgg", Text = "Win an egg from its guardian", Hint = "Fly to a nest, press X and beat the dragon that guards it", Check = "EggsFound", Need = 1, Reward = 200 },
 	{ Id = "Hatch", Text = "Hatch a dragon", Hint = "Put an egg in a nest at your sanctuary", Check = "Hatched", Need = 1, Reward = 300 },
 	{ Id = "Perch", Text = "Rest a dragon on a perch", Hint = "Open DRAGONS (G) and press PLACE", Check = "Perch", Need = 1, Reward = 400 },
 	{ Id = "Feed", Text = "Feed a dragon", Hint = "Open DRAGONS (G) and press FEED", Check = "Fed", Need = 1, Reward = 250 },
@@ -14660,6 +14749,8 @@ return DragonService
 	  Start { Trainer }      -> match view (see view())
 	  Challenge { UserId }   -> {} (the other player gets the signal DuelChallenge)
 	  Respond { From, Accept } -> match view when accepted
+	  Guardian { Key }       -> match view: the duel against the dragon that guards the world egg `Key` (a win gives
+	                            the egg - EggService.CollectGuarded - and XP; a loss starts a short retry wait)
 	  Move { Id, Move }      -> { Waiting = true } (the result of the turn arrives as signal DuelTurn)
 	  Forfeit { Id }         -> {}
 	Signals to the players of a match:
@@ -14684,6 +14775,7 @@ local DragonStats = require(Shared:WaitForChild("DragonStats"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local DuelConfig = require(Configs:WaitForChild("DuelConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
 
 local DuelService = {}
 
@@ -14782,8 +14874,14 @@ local function view(match, side: number)
 		Turn = match.Turn,
 		Title = match.Title,
 		Color = match.Color,
+		Egg = match.Egg and { Type = match.Egg.Type, Luck = match.Egg.Luck } or nil,
 		Fighters = { fighterView(me), fighterView(foe) },
 	}
+end
+
+-- A match against the computer (a trainer or an egg guardian) instead of another player.
+local function vsAI(match): boolean
+	return match.Kind == "NPC" or match.Kind == "Guardian"
 end
 
 -- The player's equipped dragon (a copy of the record) or nil.
@@ -14998,7 +15096,17 @@ local function finish(match, winner: number?, forfeit: boolean?)
 			local rewardOut = nil
 			local data = Data.Get(player)
 			if winner == side then
-				if match.Kind == "NPC" then
+				if match.Kind == "Guardian" then
+					-- the egg is the prize (and XP by how strong the egg - and so the guardian - was)
+					local egg = match.Egg
+					local given = Services.EggService.CollectGuarded(player, egg.Key)
+					local xp = EggConfig.guardianXP(egg.Power)
+					Services.LevelService.Add(player, xp, "Guardian")
+					if data then
+						Data.Increment(player, { "Stats", "Guardians" }, 1)
+					end
+					rewardOut = { Cash = 0, XP = xp, Egg = given and { Type = given.Type, Luck = given.Luck, Held = given.Held } or nil, Gone = given == nil }
+				elseif match.Kind == "NPC" then
 					lastWin[player] = lastWin[player] or {}
 					local last = lastWin[player][match.Trainer.Id] or -math.huge
 					local fresh = clock() - last >= DuelConfig.TrainerCooldown
@@ -15019,15 +15127,21 @@ local function finish(match, winner: number?, forfeit: boolean?)
 					end
 					pairLast[key] = clock()
 				end
-				if data then
+				if data and match.Kind ~= "Guardian" then
 					Data.Increment(player, { "Stats", "DuelsWon" }, 1)
 				end
 			elseif winner then
-				if data then
-					Data.Increment(player, { "Stats", "DuelsLost" }, 1)
+				if match.Kind == "Guardian" then
+					-- the guardian keeps its egg; it needs a moment before it takes the next challenger
+					Services.EggService.GuardLost(player, match.Egg.Key)
+					rewardOut = { Cash = 0, XP = 0, Retry = EggConfig.Guardians.Retry }
+				else
+					if data then
+						Data.Increment(player, { "Stats", "DuelsLost" }, 1)
+					end
+					rewardOut = { Cash = 0, XP = DuelConfig.LoserXP }
+					Services.LevelService.Add(player, DuelConfig.LoserXP, "Duel")
 				end
-				rewardOut = { Cash = 0, XP = DuelConfig.LoserXP }
-				Services.LevelService.Add(player, DuelConfig.LoserXP, "Duel")
 			end
 			Net.signal(player, "DuelEnd", { Id = match.Id, Winner = winner, Side = side, Reward = rewardOut, Forfeit = forfeit == true, HP1 = match.Sides[side].HP, HP2 = match.Sides[3 - side].HP })
 		end
@@ -15100,6 +15214,36 @@ local function startNPC(player: Player, trainer)
 	return match
 end
 
+-- The duel for a guarded world egg: the guardian is a dragon of the egg's strength (EggConfig.guardian), its
+-- level follows the level of the player's equipped dragon.
+local function startGuardian(player: Player, egg)
+	local record = equipped(player)
+	local guard = egg.Guard
+	local me = makeFighter(player, player.DisplayName, record)
+	local foeRecord = DragonStats.newRecord("NPC", guard.Species, guard.Mutation, 0)
+	foeRecord.Level = EggConfig.guardianLevel(guard, record.Level)
+	DragonStats.refresh(foeRecord)
+	local foe = makeFighter(nil, "Egg Guardian", foeRecord)
+	local soften = guard.Scale or 1
+	foe.MaxHP = math.max(1, math.floor(foe.MaxHP * soften + 0.5))
+	foe.HP = foe.MaxHP
+	foe.Damage *= soften
+	local def = EggConfig.Eggs[egg.Type]
+	local match = {
+		Id = newId(),
+		Kind = "Guardian",
+		Egg = { Key = egg.Key, Type = egg.Type, Luck = egg.Luck or 1, Power = guard.Power },
+		Title = "Egg Guardian",
+		Color = def and def.Glow or Color3.fromRGB(255, 200, 90),
+		Sides = { me, foe },
+		Players = { player, nil },
+		Turn = 1,
+		Choices = {},
+	}
+	open(match)
+	return match
+end
+
 local function startPlayers(a: Player, b: Player)
 	local fa = makeFighter(a, a.DisplayName, equipped(a))
 	local fb = makeFighter(b, b.DisplayName, equipped(b))
@@ -15156,6 +15300,22 @@ local function handleStart(player: Player, p)
 		return false, code, msg
 	end
 	local match = startNPC(player, trainer)
+	return true, view(match, 1)
+end
+
+local function handleGuardian(player: Player, p)
+	if not Net.check.str(p.Key, 16) then
+		return false, "BAD_REQUEST"
+	end
+	local code, msg = blocked(player)
+	if code then
+		return false, code, msg
+	end
+	local egg, err, text = Services.EggService.GuardInfo(player, p.Key)
+	if not egg then
+		return false, err or "FAILED", text
+	end
+	local match = startGuardian(player, egg)
 	return true, view(match, 1)
 end
 
@@ -15235,7 +15395,7 @@ end
 
 local function playTurn(match)
 	local choices = { match.Choices[1], match.Choices[2] }
-	if match.Kind == "NPC" then
+	if vsAI(match) then
 		choices[2] = chooseFor(match.Sides[2], match.Sides[1])
 	end
 	match.Choices = {}
@@ -15290,7 +15450,7 @@ local function handleMove(player: Player, p)
 	end
 	match.Choices[side] = p.Move
 	match.LastAct = clock()
-	local ready = match.Choices[1] and (match.Kind == "NPC" or match.Choices[2])
+	local ready = match.Choices[1] and (vsAI(match) or match.Choices[2])
 	if ready then
 		playTurn(match)
 		return true, { Played = true }
@@ -15316,6 +15476,7 @@ function DuelService.Init(services)
 	Net.handle("Duel", "Start", handleStart, { Burst = 3, PerSecond = 1 })
 	Net.handle("Duel", "Challenge", handleChallenge, { Burst = 3, PerSecond = 1 })
 	Net.handle("Duel", "Respond", handleRespond, { Burst = 3, PerSecond = 1 })
+	Net.handle("Duel", "Guardian", handleGuardian, { Burst = 3, PerSecond = 1 })
 	Net.handle("Duel", "Move", handleMove, { Burst = 6, PerSecond = 3 })
 	Net.handle("Duel", "Forfeit", handleForfeit, { Burst = 3, PerSecond = 1 })
 end
@@ -15340,8 +15501,8 @@ function DuelService.Start()
 		while true do
 			task.wait(1)
 			for _, match in matches do
-				if not match.Closed and match.Kind == "NPC" and clock() - match.LastAct > DuelConfig.IdleSeconds then
-					finish(match, 2, true) -- the player went away: the trainer wins, nobody is paid
+				if not match.Closed and vsAI(match) and clock() - match.LastAct > DuelConfig.IdleSeconds then
+					finish(match, 2, true) -- the player went away: the trainer / guardian wins, nobody is paid
 				elseif not match.Closed and match.Kind == "PVP" and clock() > match.Deadline then
 					for side = 1, 2 do
 						if not match.Choices[side] then
@@ -15561,6 +15722,11 @@ return EconomyService
 
 	Robux items use EggService.GiveEgg(.., force) (the bag may overflow - paid eggs are never
 	lost) and EggService.SpawnBonusEggs (Lucky Egg Call: lucky eggs near the player for a while).
+
+	EGG GUARDIANS: every egg of the normal spawn cycle lies in a nest with a Guard (EggConfig.guardian: a dragon
+	as strong as the egg). Egg.Pickup refuses it ("GUARDED"); the egg is won with a duel: DuelService asks
+	EggService.GuardInfo (range, bag room, retry wait), and calls CollectGuarded (win) / GuardLost (loss).
+	Bonus eggs (Lucky Egg Call) and the wild event eggs have no guardian.
 ]]
 
 local Players = game:GetService("Players")
@@ -15748,7 +15914,7 @@ local function eggTypeFor(area): string
 end
 
 local function serialize(egg)
-	return { Key = egg.Key, Type = egg.Type, Position = egg.Position, Area = egg.Area, Luck = egg.Luck }
+	return { Key = egg.Key, Type = egg.Type, Position = egg.Position, Area = egg.Area, Luck = egg.Luck, Guard = egg.Guard }
 end
 
 local function spawnOne(player: Player): boolean
@@ -15788,6 +15954,10 @@ local function spawnOne(player: Player): boolean
 	-- Great Tree "Lucky Finds": eggs you find carry more luck
 	luck = math.max(1, math.floor(luck * (1 + TreeConfig.bonus(Data.Get(player), "FindLuck")) + 0.5))
 	local egg = { Key = "k" .. st.Serial, Type = eggType, Position = pos, Area = area.Name, Luck = luck }
+	if EggConfig.Guardians.Enabled then
+		-- the egg lies in a nest and a dragon guards it: you take it by winning a duel (see "egg guardians")
+		egg.Guard = EggConfig.guardian(eggType, luck, st.Serial + player.UserId)
+	end
 	st.Active[egg.Key] = egg
 	Net.signal(player, "EggAdded", serialize(egg))
 	return true
@@ -16145,6 +16315,65 @@ function EggService.SpawnBonusEggs(player: Player, count: number, luckRange: { n
 	return spawned
 end
 
+-- ============================================================== egg guardians
+-- The guarded egg of a player's world that a guardian duel may be fought for: egg, or nil + error code + text
+-- (it is gone, nobody guards it, you are too far from the nest, the bag is full, the guardian is still angry).
+function EggService.GuardInfo(player: Player, key: string): (any?, string?, string?)
+	local st = states[player]
+	local data = Data.Get(player)
+	if not st or not data then
+		return nil, "NOT_LOADED"
+	end
+	local egg = st.Active[key]
+	if not egg then
+		return nil, "GONE", "That egg is gone."
+	end
+	if not egg.Guard then
+		return nil, "NOT_GUARDED", "Nobody guards that egg - just take it."
+	end
+	-- (the Egg Magnet widens the range like it widens the pickup range)
+	if nearestDistance(player, egg.Position) > EggReach.range(data, EggConfig.Guardians.Range) then
+		return nil, "TOO_FAR", "Get closer to the nest to challenge its guardian."
+	end
+	if #data.Eggs >= capacity(data) then
+		return nil, "EGG_STORAGE_FULL", "Your egg bag is full! Hatch eggs at your sanctuary nest or upgrade Egg Storage."
+	end
+	local wait = (egg.RetryAt or 0) - Workspace:GetServerTimeNow()
+	if wait > 0 then
+		return nil, "GUARD_ANGRY", string.format("The guardian is still angry. Try again in %d s.", math.ceil(wait))
+	end
+	return egg
+end
+
+-- A guardian duel was lost: the same guardian cannot be challenged again for a few seconds.
+function EggService.GuardLost(player: Player, key: string)
+	local st = states[player]
+	local egg = st and st.Active[key]
+	if egg then
+		egg.RetryAt = Workspace:GetServerTimeNow() + EggConfig.Guardians.Retry
+	end
+end
+
+-- The guardian was beaten: the egg leaves the world and goes to the player (into the hand, else the bag; the
+-- bag may overflow - a won egg is never lost). Returns { Id, Type, Luck, Held, Power } or nil when the egg is gone.
+function EggService.CollectGuarded(player: Player, key: string)
+	local st = states[player]
+	local egg = st and st.Active[key]
+	if not st or not egg then
+		return nil
+	end
+	st.Active[key] = nil
+	local ok, id, inHand = EggService.GiveEgg(player, egg.Type, egg.Luck or 1, true)
+	if not ok then
+		st.Active[key] = egg
+		return nil
+	end
+	-- (the client plays the collect effect when its duel scene is over)
+	Net.signal(player, "EggRemoved", { Key = key, Collected = true, Type = egg.Type, Luck = egg.Luck or 1, Held = inHand })
+	scheduleRespawn(player)
+	return { Id = id, Type = egg.Type, Luck = egg.Luck or 1, Held = inHand, Power = egg.Guard and egg.Guard.Power or 1 }
+end
+
 -- ============================================================== handlers
 local function handlePickup(player: Player, p)
 	if not Net.check.str(p.Key, 16) then
@@ -16158,6 +16387,10 @@ local function handlePickup(player: Player, p)
 	local egg = st.Active[p.Key]
 	if not egg then
 		return false, "GONE"
+	end
+	if egg.Guard then
+		-- a guarded egg is only given by DuelService (the guardian duel), never by walking into it
+		return false, "GUARDED", "A dragon guards this egg! Win a duel against it to take the egg."
 	end
 	local slack = 0
 	local dragons = Workspace:FindFirstChild("Dragons")
@@ -18615,6 +18848,7 @@ local TEMPLATE = {
 		DuelsWon = 0,
 		DuelsLost = 0,
 		Rides = 0,
+		Guardians = 0, -- egg guardians beaten (EggService / DuelService "Guardian")
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},
@@ -30323,7 +30557,8 @@ local function buildVisual(model: Model)
 	entry.BodyC0inv = entry.BodyC0:Inverse()
 	local audio = registry.AudioController
 	anim.OnFootstep = function()
-		if entry.Tier == 1 and audio then
+		-- (only after the dragon has really been on the ground for a moment: no steps while it takes off or lands in flight)
+		if entry.Tier == 1 and audio and (entry.GroundTime or 0) > 0.35 then
 			audio.play3D("Footstep", root, 0.12, math.clamp((anim.Params.Speed or 0) / 40, 0.4, 1))
 		end
 	end
@@ -30722,6 +30957,11 @@ function AnimationController.stepAll(dt: number)
 			end
 			idleBehaviour(entry, step)
 		end
+		if anim.Params.Mode == "Ground" then
+			entry.GroundTime = (entry.GroundTime or 0) + step
+		else
+			entry.GroundTime = 0
+		end
 		anim:Update(step)
 		entry.MemAccum += step
 		local memInterval = tier == 1 and 0 or TIERS[tier].Membranes
@@ -31043,8 +31283,11 @@ return AnnounceController
 	- loop(key, parent?): managed looping sound (wind, waterfalls)
 	- music crossfades between region tracks
 	Keys without an asset id (AudioConfig) are skipped silently.
+	- the default Roblox character sounds (running steps, jumping, landing...) are muted while a character is
+	  mounted: a rider is carried by the dragon, they would play "running" while it flies
 ]]
 
+local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31185,6 +31428,52 @@ function AudioController.setVolumes(music: number, sfx: number)
 		groups.SFX.Volume = AudioConfig.Groups.SFX.Volume * sfxVolume * 1.25
 		groups.UI.Volume = AudioConfig.Groups.UI.Volume * sfxVolume * 1.25
 	end
+end
+
+-- ============================================================== riders do not run
+-- The sounds Roblox's own character script adds under the HumanoidRootPart of every avatar.
+local CHARACTER_SOUNDS = { Running = true, Jumping = true, Landing = true, Climbing = true, Swimming = true, GettingUp = true, FreeFalling = true, Splash = true }
+local muteGroup: SoundGroup? = nil
+
+local function gateCharacter(character: Model)
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return
+	end
+	local mounted = character:GetAttribute("Mounted") == true
+	for _, child in hrp:GetChildren() do
+		if child:IsA("Sound") and CHARACTER_SOUNDS[child.Name] then
+			if mounted then
+				if child.SoundGroup ~= muteGroup then
+					child.SoundGroup = muteGroup
+				end
+			elseif muteGroup and child.SoundGroup == muteGroup then
+				child.SoundGroup = nil
+			end
+		end
+	end
+end
+
+function AudioController.Start()
+	local group = SoundService:FindFirstChild("RAD_MuteCharacter")
+	if not group then
+		group = Instance.new("SoundGroup")
+		group.Name = "RAD_MuteCharacter"
+		group.Volume = 0
+		group.Parent = SoundService
+	end
+	muteGroup = group :: SoundGroup
+	task.spawn(function()
+		while true do
+			task.wait(0.15)
+			for _, player in Players:GetPlayers() do
+				local character = player.Character
+				if character then
+					gateCharacter(character)
+				end
+			end
+		end
+	end)
 end
 
 function AudioController.Init()
@@ -34132,6 +34421,8 @@ return DragonController
 	The HUD, prompts and your own companion are hidden while the scene runs; the character is held.
 	DuelController.State() / .choose(move) are for tests and tools; .preview(kind) is for the UI Lab.
 	Signals (server): DuelStart, DuelTurn, DuelEnd, DuelChallenge, DuelChallengeEnd.
+	EGG GUARDIANS: DuelController.startGuardian(eggKey) starts the same scene against the dragon that guards a world
+	egg (EggController); the intro tells about the egg and the end card shows the egg that was won.
 ]]
 
 local Debris = game:GetService("Debris")
@@ -34151,6 +34442,7 @@ local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("Dragon
 local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
 local Builder = require(Shared:WaitForChild("Dragons"):WaitForChild("Builder"))
 local DuelConfig = require(Configs:WaitForChild("DuelConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
 
 local UI = script.Parent.Parent:WaitForChild("UI")
 local Theme = require(UI:WaitForChild("Theme"))
@@ -34846,12 +35138,17 @@ local function showEnd(mine: any, info)
 	ui.Box.Visible = false
 	ui.Turn.Visible = false
 	local won = info.Winner == info.Side
-	ui.EndTitle.Text = won and "VICTORY!" or (info.Winner == nil and "DUEL OVER" or "DEFEAT")
+	local guardian = s.Kind == "Guardian"
+	ui.EndTitle.Text = won and (guardian and "EGG WON!" or "VICTORY!") or (info.Winner == nil and "DUEL OVER" or "DEFEAT")
 	ui.EndTitle.TextColor3 = won and Color3.fromRGB(255, 214, 90) or Color3.fromRGB(235, 100, 90)
 	ui.EndSub.Text = info.Forfeit and (won and "Your opponent gave up." or "You gave up.") or string.format("%s vs %s", s.Fighters[1].Owner or "You", s.Fighters[2].Owner or "Foe")
 	local r = info.Reward
 	if r then
 		local parts = {}
+		if r.Egg then
+			local eggDef = EggConfig.Eggs[r.Egg.Type]
+			table.insert(parts, string.format("+1 %s%s", eggDef and eggDef.Name or "Egg", (r.Egg.Luck or 1) > 1 and string.format(" (x%d LUCK)", r.Egg.Luck) or ""))
+		end
 		if (r.Cash or 0) > 0 then
 			table.insert(parts, Format.cash(r.Cash))
 		end
@@ -34861,6 +35158,11 @@ local function showEnd(mine: any, info)
 		local text = table.concat(parts, "   +   ")
 		if r.Rematch and won then
 			text ..= "\n(a rematch pays less)"
+		end
+		if guardian and not won then
+			text = "The guardian keeps its egg.\nTry again in a moment - or come back stronger."
+		elseif guardian and r.Gone then
+			text = "The nest is empty - the egg is gone."
 		end
 		ui.EndRewards.Text = text ~= "" and text or "No reward this time."
 	else
@@ -34988,6 +35290,7 @@ local function begin(view)
 		Id = view.Id,
 		Side = view.Side,
 		Kind = view.Kind,
+		Egg = view.Egg,
 		Fighters = view.Fighters,
 		Dragons = {},
 		Shields = {},
@@ -35127,9 +35430,16 @@ local function begin(view)
 		if mine.Dragons[2] then
 			mine.Dragons[2].Anim:Play("Roar")
 		end
-		type_(mine, string.format("%s wants to duel!", foe.Owner or "Foe"))
-		sleep(mine, 0.7)
-		type_(mine, string.format("%s sends out %s!", foe.Owner or "Foe", string.upper(foe.Name)))
+		if mine.Kind == "Guardian" then
+			local eggDef = mine.Egg and EggConfig.Eggs[mine.Egg.Type]
+			type_(mine, string.format("The guardian of the %s wakes up!", eggDef and eggDef.Name or "egg"))
+			sleep(mine, 0.7)
+			type_(mine, string.format("%s blocks the way to the egg!", string.upper(foe.Name)))
+		else
+			type_(mine, string.format("%s wants to duel!", foe.Owner or "Foe"))
+			sleep(mine, 0.7)
+			type_(mine, string.format("%s sends out %s!", foe.Owner or "Foe", string.upper(foe.Name)))
+		end
 		sleep(mine, 0.5)
 		ui.Me.Panel.Visible = true
 		tween(mine, 0.6, function(a)
@@ -35282,6 +35592,19 @@ function DuelController.startTrainer(trainerId: string): (boolean, string?)
 		return false, "You are already in a duel."
 	end
 	local res = Net.request("Duel", "Start", { Trainer = trainerId })
+	if not res.ok then
+		return false, res.msg or res.err
+	end
+	begin(res.data)
+	return true
+end
+
+-- Starts a duel against the guardian of a world egg (called by EggController); returns ok, message.
+function DuelController.startGuardian(eggKey: string): (boolean, string?)
+	if session then
+		return false, "You are already in a duel."
+	end
+	local res = Net.request("Duel", "Guardian", { Key = eggKey })
 	if not res.ok then
 		return false, res.msg or res.err
 	end
@@ -35463,13 +35786,21 @@ return DuelController
 	Shows the local player's personal world eggs (glowing shells with a light
 	pillar visible from the air), animates them, and picks them up when the
 	player walks or flies through them (server validates range + capacity).
+
+	EGG GUARDIANS (EggConfig.Guardians): an egg that comes with a Guard lies in a NEST of twigs and stones and a
+	dragon guards it. You cannot take it by flying through it: come close, press CHALLENGE (the button or the key X)
+	and win the duel (DuelController.startGuardian). The nest is always built; the guardian's model is built only
+	while you are near (ShowRange), it wakes up, turns to you and roars when you come closer (WakeRange), and its
+	label tells how dangerous it is for YOUR dragon. When the duel is won the egg jumps into your hand and the
+	guardian fades away. EggController.challenge(key) is the same as the button (tools and tests).
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Configs = ReplicatedStorage:WaitForChild("Configs")
@@ -35477,16 +35808,36 @@ local Net = require(Shared:WaitForChild("Net"))
 local EggVisual = require(Shared:WaitForChild("EggVisual"))
 local EggConfig = require(Configs:WaitForChild("EggConfig"))
 local GameConfig = require(Configs:WaitForChild("GameConfig"))
+local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
+local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
+local DuelConfig = require(Configs:WaitForChild("DuelConfig"))
 local EggReach = require(Shared:WaitForChild("EggReach"))
+local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("DragonVisual"))
+local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
+local Builder = require(Shared:WaitForChild("Dragons"):WaitForChild("Builder"))
+
+local UI = script.Parent.Parent:WaitForChild("UI")
+local Theme = require(UI:WaitForChild("Theme"))
+local Responsive = require(UI:WaitForChild("Responsive"))
+local Kit = require(UI:WaitForChild("Kit"))
+
+local C = Theme.Colors
 
 local EggController = {}
 
 local registry
 local LocalPlayer = Players.LocalPlayer
 local folder: Folder? = nil
-local eggs: { [string]: any } = {} -- key -> { Key, Type, Position, Model, Pending }
+local eggs: { [string]: any } = {} -- key -> { Key, Type, Position, Model, Pending, Guard?, Nest?, GuardDragon? }
 local lastFullWarning = 0
+local lastGuardHint = 0
 local clock = 0
+
+local MAX_GUARDIANS = 5 -- guardian models alive at the same time
+local GUARD_KEY = Enum.KeyCode.X
+local WOOD = Color3.fromRGB(112, 80, 50)
+local WOOD_DARK = Color3.fromRGB(74, 52, 34)
+local STRAW = Color3.fromRGB(214, 184, 118)
 
 local function getFolder(): Folder
 	if not folder or not folder.Parent then
@@ -35498,12 +35849,235 @@ local function getFolder(): Folder
 	return folder :: Folder
 end
 
+-- ============================================================== nest
+local function nestPart(parent: Instance, name: string, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = material
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	if shape then
+		p.Shape = shape
+	end
+	p.Parent = parent
+	return p
+end
+
+-- A nest of twigs and stones on the ground, a straw bed and a ring of light in the egg's colour.
+local function buildNest(ground: Vector3, glow: Color3, seed: number): Model
+	local rng = Random.new(seed)
+	local nest = Instance.new("Model")
+	nest.Name = "Nest"
+	local turn = CFrame.Angles(0, 0, math.rad(90)) -- (a cylinder part lies along X: stand it up)
+	nestPart(nest, "Bed", Vector3.new(0.9, 10, 10), CFrame.new(ground + Vector3.new(0, 0.45, 0)) * turn, STRAW, Enum.Material.Fabric, Enum.PartType.Cylinder)
+	local ring = nestPart(nest, "Glow", Vector3.new(0.14, 7.4, 7.4), CFrame.new(ground + Vector3.new(0, 0.98, 0)) * turn, glow, Enum.Material.Neon, Enum.PartType.Cylinder)
+	ring.Transparency = 0.55
+	local function twigs(count: number, radius: number, y: number, length: number, thick: number, lean: number)
+		for i = 1, count do
+			local a = (i - 1) / count * math.pi * 2 + rng:NextNumber(-0.12, 0.12)
+			local pos = ground + Vector3.new(math.cos(a) * radius, y + rng:NextNumber(-0.1, 0.1), math.sin(a) * radius)
+			-- a twig lies along the ring (its long side follows the tangent) and leans a little
+			local cf = CFrame.new(pos) * CFrame.Angles(0, -a + rng:NextNumber(-0.2, 0.2), 0) * CFrame.Angles(rng:NextNumber(-lean, lean), 0, rng:NextNumber(-lean, lean))
+			nestPart(nest, "Twig", Vector3.new(thick, thick, length), cf, WOOD:Lerp(WOOD_DARK, rng:NextNumber()), Enum.Material.Wood)
+		end
+	end
+	twigs(12, 5.2, 1.0, 5.6, 0.8, 0.22)
+	twigs(8, 4.5, 1.7, 5.0, 0.7, 0.3)
+	for i = 1, 6 do
+		local a = (i - 1) / 6 * math.pi * 2 + rng:NextNumber(-0.25, 0.25)
+		local r = rng:NextNumber(6.6, 7.8)
+		local size = rng:NextNumber(1.5, 2.6)
+		nestPart(nest, "Stone", Vector3.new(size * 1.3, size, size * 1.1), CFrame.new(ground + Vector3.new(math.cos(a) * r, size * 0.35, math.sin(a) * r)) * CFrame.Angles(rng:NextNumber(0, 3), rng:NextNumber(0, 3), 0), Color3.fromRGB(122, 120, 116):Lerp(Color3.fromRGB(160, 156, 148), rng:NextNumber()), Enum.Material.Slate, Enum.PartType.Ball)
+	end
+	return nest
+end
+
+-- ============================================================== guardian model
+local function seedOf(key: string): number
+	local h = 17
+	for i = 1, #key do
+		h = (h * 31 + string.byte(key, i)) % 100003
+	end
+	return h
+end
+
+-- Strength of a fighter (the way a duel counts it): hit points x damage.
+local function strength(level: number, rank: number): number
+	return DuelConfig.maxHP(level, rank) * DuelConfig.baseDamage(level, rank)
+end
+
+-- How dangerous the guardian is for your equipped dragon: threat row { Name, Color }, the guardian's level.
+local function threatOf(guard)
+	local cfg = EggConfig.Guardians
+	local data = registry and registry.DataController and registry.DataController.all()
+	local mine = data and data.Dragons and data.Dragons[data.EquippedDragon]
+	local myLevel = mine and mine.Level or 1
+	local myRank = mine and DragonConfig.rarityRank(mine.Rarity) or 1
+	local species = DragonConfig.Species[guard.Species]
+	local level = EggConfig.guardianLevel(guard, myLevel)
+	local rank = species and DragonConfig.rarityRank(species.Rarity) or 1
+	local soften = guard.Scale or 1
+	local ratio = strength(level, rank) * soften * soften / math.max(1, strength(myLevel, myRank))
+	for _, row in cfg.Threat do
+		if ratio <= row.Max then
+			return row, level
+		end
+	end
+	return cfg.Threat[#cfg.Threat], level
+end
+
+local function guardianName(guard): string
+	local species = DragonConfig.Species[guard.Species]
+	local name = species and species.Name or guard.Species
+	local mut = guard.Mutation ~= "None" and MutationConfig.Mutations[guard.Mutation]
+	return (mut and (mut.Name .. " ") or "") .. name
+end
+
+local function setGuardLabel(e)
+	local g = e.GuardDragon
+	if not g or not g.Name1 then
+		return
+	end
+	local threat, level = threatOf(e.Guard)
+	g.Name1.Text = string.upper(guardianName(e.Guard))
+	g.Name2.Text = string.format("GUARDIAN  Lv %d  -  %s", level, threat.Name)
+	g.Name2.TextColor3 = threat.Color
+end
+
+-- The guardian dragon of an egg as a living model standing next to its nest. nil when it cannot be built.
+local function buildGuardian(e)
+	local guard = e.Guard
+	local ok, result = pcall(function()
+		local holder = Instance.new("Model")
+		holder.Name = "Guardian_" .. e.Key
+		local root = Builder.makeRoot(guard.Species, nil)
+		root.Anchored = true
+		local info = Builder.mountInfo(guard.Species, nil)
+		local hip = info and info.HipHeight or 3
+		-- next to the nest, on the ground (found with a ray), looking at the egg
+		local a = seedOf(e.Key) / 100003 * math.pi * 2
+		local ground = e.Position - Vector3.new(0, 2.6, 0)
+		local spot = ground + Vector3.new(math.cos(a) * 9, 0, math.sin(a) * 9)
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { getFolder() }
+		local hit = Workspace:Raycast(spot + Vector3.new(0, 40, 0), Vector3.new(0, -90, 0), params)
+		if hit and (hit.Instance == Workspace.Terrain or hit.Instance:GetAttribute("EggSurface") == true) and math.abs(hit.Position.Y - ground.Y) < 18 then
+			spot = hit.Position
+		end
+		root.CFrame = CFrame.lookAt(spot + Vector3.new(0, hip, 0), Vector3.new(e.Position.X, spot.Y + hip, e.Position.Z))
+		root.Parent = holder
+		holder.PrimaryPart = root
+		local visual = DragonVisual.build(guard.Species, { Root = root, Mutation = guard.Mutation, Detail = "Medium", Saddle = false })
+		visual.Name = "Visual"
+		-- a stronger guardian is a bigger one (about 9 studs wide for the weakest, 20 for the strongest)
+		local size = visual:GetExtentsSize()
+		local k = math.clamp((8 + guard.Power * 1.4) / math.max(size.X, size.Z, 1), 0.4, 2.6)
+		if math.abs(k - 1) > 0.04 then
+			pcall(function()
+				visual:ScaleTo(visual:GetScale() * k)
+			end)
+		end
+		root.CFrame = root.CFrame + Vector3.new(0, hip * (k - 1), 0)
+		local fade = {}
+		for _, d in visual:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.CanCollide = false
+				d.CanQuery = false
+				d.CanTouch = false
+				fade[d] = d.Transparency
+			end
+		end
+		visual.Parent = holder
+		-- the label above its head: name, level and how dangerous it is for your dragon
+		local bb = Instance.new("BillboardGui")
+		bb.Name = "GuardLabel"
+		bb.Size = UDim2.fromScale(11, 3.4)
+		bb.StudsOffsetWorldSpace = Vector3.new(0, 10 + guard.Power * 1.2, 0)
+		bb.MaxDistance = 210
+		bb.LightInfluence = 0
+		bb.Adornee = root
+		bb.Parent = root
+		local rarity = DragonConfig.Species[guard.Species] and DragonConfig.Rarities[DragonConfig.Species[guard.Species].Rarity]
+		local name1 = Instance.new("TextLabel")
+		name1.Name = "Name"
+		name1.BackgroundTransparency = 1
+		name1.Size = UDim2.fromScale(1, 0.56)
+		name1.Font = Enum.Font.GothamBlack
+		name1.TextScaled = true
+		name1.TextColor3 = rarity and rarity.Color or Color3.new(1, 1, 1)
+		name1.TextStrokeTransparency = 0.2
+		name1.Parent = bb
+		local name2 = Instance.new("TextLabel")
+		name2.Name = "Danger"
+		name2.BackgroundTransparency = 1
+		name2.Position = UDim2.fromScale(0, 0.58)
+		name2.Size = UDim2.fromScale(1, 0.4)
+		name2.Font = Enum.Font.GothamBold
+		name2.TextScaled = true
+		name2.TextColor3 = Color3.new(1, 1, 1)
+		name2.TextStrokeTransparency = 0.3
+		name2.Parent = bb
+		holder.Parent = getFolder()
+		local anim = Animator.new(visual)
+		anim:Snap("Idle")
+		return { Model = holder, Root = root, Visual = visual, Anim = anim, Fade = fade, Pos = root.Position, Look = (root.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit, Awake = false, Name1 = name1, Name2 = name2 }
+	end)
+	if ok then
+		return result
+	end
+	warn("[Eggs] guardian failed: " .. tostring(result))
+	return nil
+end
+
+-- Drops the guardian's model (it is built again when you come back). A beaten guardian fades away instead.
+local function destroyGuardian(e, dissolve: boolean?)
+	local g = e.GuardDragon
+	e.GuardDragon = nil
+	if not g then
+		return
+	end
+	local model = g.Model
+	if dissolve and model and model.Parent then
+		for part in g.Fade do
+			if part.Parent then
+				TweenService:Create(part, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 1 }):Play()
+			end
+		end
+		for _, d in model:GetDescendants() do
+			if d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") or d:IsA("Light") then
+				(d :: any).Enabled = false
+			elseif d:IsA("BillboardGui") then
+				d.Enabled = false
+			end
+		end
+		task.delay(1, function()
+			model:Destroy()
+		end)
+	elseif model then
+		model:Destroy()
+	end
+end
+
+-- ============================================================== eggs
 local function removeEgg(key: string, collected: boolean)
 	local e = eggs[key]
 	if not e then
 		return
 	end
 	eggs[key] = nil
+	destroyGuardian(e, collected)
+	if e.Nest then
+		e.Nest:Destroy()
+	end
 	local model = e.Model
 	if not model then
 		return
@@ -35603,6 +36177,14 @@ local function addEgg(info)
 		end
 	end
 	model.Parent = getFolder()
+	local guard = type(info.Guard) == "table" and info.Guard or nil
+	local nest = nil
+	if guard then
+		-- the egg rests in a nest (the egg's spot is 2.6 studs above the ground)
+		nest = buildNest(info.Position - Vector3.new(0, 2.6, 0), def.Glow, seedOf(info.Key))
+		nest.Name = "Nest_" .. info.Key
+		nest.Parent = getFolder()
+	end
 	eggs[info.Key] = {
 		Key = info.Key,
 		Type = info.Type,
@@ -35611,6 +36193,8 @@ local function addEgg(info)
 		Model = model,
 		Phase = math.random() * math.pi * 2,
 		Pending = false,
+		Guard = guard,
+		Nest = nest,
 	}
 end
 
@@ -35634,6 +36218,17 @@ local function myPositions(): ({ Vector3 }, number)
 		end
 	end
 	return out, slack
+end
+
+local function distanceTo(positions: { Vector3 }, target: Vector3): (number, Vector3?)
+	local best, at = math.huge, nil
+	for _, p in positions do
+		local d = (p - target).Magnitude
+		if d < best then
+			best, at = d, p
+		end
+	end
+	return best, at
 end
 
 local function tryPickup(e)
@@ -35672,6 +36267,8 @@ local function tryPickup(e)
 				end
 			elseif res.err == "GONE" then
 				removeEgg(e.Key, false)
+			elseif res.err == "GUARDED" then
+				e.CooldownUntil = clock + 30 -- (it is won with a duel, not by walking into it)
 			else
 				e.CooldownUntil = clock + 1
 			end
@@ -35679,19 +36276,199 @@ local function tryPickup(e)
 	end)
 end
 
+-- ============================================================== challenge (the button, key X)
+local prompt: any = nil -- { Panel, Title, Sub, Button, Key }
+local challenging = false
+local previewing = false -- UI Lab: the button shows sample text and stays
+
+-- Challenges the guardian of the egg `key`; returns ok, message.
+function EggController.challenge(key: string): (boolean, string?)
+	local e = eggs[key]
+	if not e or not e.Guard then
+		return false, "Nobody guards that egg."
+	end
+	local duel = registry and registry.DuelController
+	if not duel or not duel.startGuardian then
+		return false, "Duels are not ready."
+	end
+	if challenging then
+		return false, "Wait a moment..."
+	end
+	challenging = true
+	local ok, msg = duel.startGuardian(key)
+	challenging = false
+	if not ok then
+		local uic = registry.UIController
+		if uic and msg then
+			uic.Notify("warning", msg)
+		end
+	end
+	return ok, msg
+end
+
+local function layoutPrompt()
+	if not prompt then
+		return
+	end
+	local R = Responsive
+	local panel = prompt.Panel
+	if R.Device == "Phone" then
+		panel.Position = UDim2.fromScale(0.5, R.Portrait and 0.8 or 0.74)
+		panel.Size = UDim2.fromScale(R.Portrait and 0.9 or 0.46, R.Portrait and 0.15 or 0.3)
+	else
+		panel.Position = UDim2.fromScale(0.5, 0.8)
+		panel.Size = UDim2.fromScale(R.Device == "Tablet" and 0.4 or 0.3, R.Device == "Tablet" and 0.15 or 0.16)
+	end
+end
+
+local function getPrompt()
+	if prompt and prompt.Panel.Parent then
+		return prompt
+	end
+	local uic = registry and registry.UIController
+	local layer = uic and uic.Layers and (uic.Layers.GameHUD or uic.Layers.GameUI)
+	if not layer then
+		return nil
+	end
+	local panel = Kit.surface({
+		Name = "GuardianPrompt",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.fromScale(0.5, 0.8),
+		Size = UDim2.fromScale(0.3, 0.16),
+		Color = C.Panel,
+		Transparency = 0.05,
+		StrokeColor = Color3.fromRGB(255, 120, 90),
+		StrokeTransparency = 0.1,
+		Radius = "Window",
+		Parent = layer.Root,
+	})
+	panel.ZIndex = 30
+	panel.Visible = false
+	local title = Kit.text({ Name = "Title", Text = "", Role = "Heading", Scaled = true, MinTextSize = 9, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.04, 0.06), Size = UDim2.fromScale(0.92, 0.3), Truncate = true, Parent = panel })
+	local sub = Kit.text({ Name = "Sub", Text = "", Role = "Micro", Scaled = true, MinTextSize = 8, Color = C.TextMuted, XAlign = Enum.TextXAlignment.Center, Position = UDim2.fromScale(0.04, 0.37), Size = UDim2.fromScale(0.92, 0.22), Truncate = true, Parent = panel })
+	local button = Kit.button({ Name = "Challenge", Text = "CHALLENGE  [X]", Style = "Danger", Position = UDim2.fromScale(0.18, 0.64), Size = UDim2.fromScale(0.64, 0.3), Parent = panel })
+	prompt = { Panel = panel, Title = title, Sub = sub, Button = button, Key = nil }
+	button.Activated:Connect(function()
+		local key = prompt and prompt.Key
+		if key then
+			task.spawn(EggController.challenge, key)
+		end
+	end)
+	layoutPrompt()
+	Responsive.Changed:Connect(layoutPrompt)
+	return prompt
+end
+
+local function showPrompt(e)
+	local p = getPrompt()
+	if not p then
+		return
+	end
+	if not e then
+		p.Panel.Visible = false
+		p.Key = nil
+		return
+	end
+	if p.Key ~= e.Key then
+		p.Key = e.Key
+		local threat, level = threatOf(e.Guard)
+		local def = EggConfig.Eggs[e.Type]
+		p.Title.Text = string.format("%s  -  Lv %d", string.upper(guardianName(e.Guard)), level)
+		p.Sub.Text = string.format("guards a %s x%d  -  DANGER: %s", def and def.Name or "egg", e.Luck, threat.Name)
+		p.Sub.TextColor3 = threat.Color
+	end
+	p.Panel.Visible = true
+end
+
+-- ============================================================== per frame
+local function lookAtYou(g, dt: number, target: Vector3)
+	local flat = Vector3.new(target.X - g.Pos.X, 0, target.Z - g.Pos.Z)
+	if flat.Magnitude > 0.5 then
+		g.Look = g.Look:Lerp(flat.Unit, math.min(1, dt * 2.4))
+		if g.Look.Magnitude < 0.05 then
+			g.Look = flat.Unit
+		end
+	end
+	g.Root.CFrame = CFrame.lookAt(g.Pos, g.Pos + g.Look.Unit)
+end
+
 local function step(dt: number)
 	clock += dt
 	local positions, slack = myPositions()
 	-- Great Tree "Egg Magnet", the Egg Magnet potion and the Egg Hunter pass widen the pickup range
-	local range = EggReach.range(registry.DataController.all(), GameConfig.Interaction.EggPickupRange, Workspace:GetServerTimeNow()) + slack
+	local data = registry.DataController.all()
+	local now = Workspace:GetServerTimeNow()
+	local range = EggReach.range(data, GameConfig.Interaction.EggPickupRange, now) + slack
+	local cfg = EggConfig.Guardians
+	local promptRange = EggReach.range(data, cfg.PromptRange, now) + slack
+	local nearest, nearestD = nil, math.huge
+	local builtNow = false
+	local alive = 0
+	for _, e in eggs do
+		if e.GuardDragon then
+			alive += 1
+		end
+	end
 	for _, e in eggs do
 		local model = e.Model
 		if model and model.Parent then
-			-- bob + spin
+			-- bob + spin (an egg in a nest only rocks a little)
 			local t = clock + e.Phase
-			EggVisual.place(model, CFrame.new(e.Position + Vector3.new(0, math.sin(t * 2) * 0.35, 0)) * CFrame.Angles(0, t * 0.8, math.sin(t * 1.3) * 0.08))
+			local bob = e.Guard and 0.12 or 0.35
+			EggVisual.place(model, CFrame.new(e.Position + Vector3.new(0, math.sin(t * 2) * bob, 0)) * CFrame.Angles(0, t * 0.8, math.sin(t * 1.3) * 0.08))
 		end
-		if not e.Pending and (not e.CooldownUntil or clock > e.CooldownUntil) then
+		if e.Guard then
+			-- the guardian: built while you are near, awake and turned to you when you come closer
+			local d, at = distanceTo(positions, e.Position)
+			if d <= cfg.ShowRange and not e.GuardDragon and not e.GuardFailed and not builtNow and alive < MAX_GUARDIANS then
+				builtNow = true
+				alive += 1
+				e.GuardDragon = buildGuardian(e)
+				if e.GuardDragon then
+					setGuardLabel(e)
+					e.NextLabel = clock + 2
+				else
+					e.GuardFailed = true
+				end
+			elseif d > cfg.ShowRange * 1.35 and e.GuardDragon then
+				destroyGuardian(e)
+			end
+			local g = e.GuardDragon
+			if g and g.Root.Parent then
+				local awake = d <= cfg.WakeRange
+				if awake and not g.Awake then
+					g.Awake = true
+					g.Anim:Play("Roar")
+					local audio = registry.AudioController
+					if audio and audio.play3D then
+						audio.play3D("Roar", g.Root, 0.05)
+					end
+				elseif g.Awake and d > cfg.WakeRange * 1.25 then
+					g.Awake = false
+				end
+				lookAtYou(g, dt, awake and at or e.Position)
+				if d <= cfg.ShowRange * 0.6 then
+					g.Anim:SetParams({ Mode = "Ground", Speed = 0, Look = Vector2.zero })
+					g.Anim:Update(dt)
+					g.Anim:Apply(true)
+				end
+				if e.NextLabel and clock >= e.NextLabel then
+					e.NextLabel = clock + 2
+					setGuardLabel(e)
+				end
+			end
+			if d <= promptRange and d < nearestD then
+				nearest, nearestD = e, d
+			end
+			-- flying through a guarded egg: tell the player what to do (once in a while)
+			if d <= range and clock - lastGuardHint > 12 and not e.Pending then
+				lastGuardHint = clock
+				local uic = registry.UIController
+				if uic then
+					uic.Notify("info", "A dragon guards this egg! Press X (or CHALLENGE) and beat it in a duel.")
+				end
+			end
+		elseif not e.Pending and (not e.CooldownUntil or clock > e.CooldownUntil) then
 			for _, p in positions do
 				if (p - e.Position).Magnitude <= range then
 					tryPickup(e)
@@ -35700,10 +36477,18 @@ local function step(dt: number)
 			end
 		end
 	end
+	-- the CHALLENGE button of the nearest guarded egg
+	local duel = registry.DuelController
+	if duel and duel.active() then
+		nearest = nil
+	end
+	if not previewing and (nearest or prompt) then
+		showPrompt(nearest)
+	end
 end
 
 -- Nearest egg the companion should fly to and pick up (nil when the bag is
--- full or nothing is close to the player).
+-- full or nothing is close to the player). Guarded eggs are not for the companion.
 EggController.BagFullAt = -100
 function EggController.fetchTarget(center: Vector3, range: number): Vector3?
 	if clock - EggController.BagFullAt < 12 then
@@ -35711,7 +36496,7 @@ function EggController.fetchTarget(center: Vector3, range: number): Vector3?
 	end
 	local best, bestD = nil, range
 	for _, e in eggs do
-		if not e.Pending and (not e.CooldownUntil or clock > e.CooldownUntil) then
+		if not e.Guard and not e.Pending and (not e.CooldownUntil or clock > e.CooldownUntil) then
 			local d = (e.Position - center).Magnitude
 			if d < bestD then
 				best, bestD = e.Position, d
@@ -35733,8 +36518,63 @@ function EggController.list()
 	return eggs
 end
 
+-- The key of the egg whose CHALLENGE button is showing (nil = none) - for tools and tests.
+function EggController.promptKey(): string?
+	return prompt and prompt.Panel.Visible and prompt.Key or nil
+end
+
+-- UI Lab: the CHALLENGE button with sample text (no egg needed).
+function EggController.preview(on: boolean)
+	previewing = on
+	local p = getPrompt()
+	if not p then
+		return
+	end
+	if on then
+		local hard = EggConfig.Guardians.Threat[3]
+		p.Key = "preview"
+		p.Title.Text = "SHINY FROST DRAGON  -  Lv 18"
+		p.Sub.Text = "guards a Frost Egg x10  -  DANGER: " .. hard.Name
+		p.Sub.TextColor3 = hard.Color
+		p.Panel.Visible = true
+	else
+		p.Key = nil
+		p.Panel.Visible = false
+	end
+end
+
 function EggController.Init(reg)
 	registry = reg
+end
+
+-- The guardian was beaten (the server took the egg): once the duel scene is over, the egg bursts, jumps into
+-- your hand and the guardian fades away.
+local function onCollected(payload)
+	local key = payload.Key
+	task.spawn(function()
+		local duel = registry.DuelController
+		local waited = 0
+		while duel and duel.active() and waited < 180 do
+			waited += task.wait(0.25)
+		end
+		local e = eggs[key]
+		local position = e and e.Position
+		removeEgg(key, true)
+		local def = EggConfig.Eggs[payload.Type]
+		local held = registry.HeldEggController
+		if held and payload.Held and position then
+			held.flyIn(payload.Type, position)
+		end
+		local luck = tonumber(payload.Luck) or 1
+		if registry.AnimationController then
+			registry.AnimationController.react(luck >= 25 and "Rare" or "Egg", math.clamp(luck / 100, 0, 1))
+		end
+		local uic = registry.UIController
+		if uic then
+			local where = payload.Held and "  -  in your hand" or "  -  in your bag"
+			uic.Notify(luck >= 25 and "rare" or "success", "+1 " .. (def and def.Name or "Egg") .. (luck > 1 and ("  (x" .. tostring(luck) .. " LUCK)") or "") .. where)
+		end
+	end)
 end
 
 function EggController.Start()
@@ -35749,10 +36589,23 @@ function EggController.Start()
 	Net.onSignal("EggAdded", addEgg)
 	Net.onSignal("EggRemoved", function(payload)
 		if payload and payload.Key then
-			removeEgg(payload.Key, false)
+			if payload.Collected then
+				onCollected(payload)
+			else
+				removeEgg(payload.Key, false)
+			end
 		end
 	end)
 	RunService.Heartbeat:Connect(step)
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed or input.KeyCode ~= GUARD_KEY then
+			return
+		end
+		local key = prompt and prompt.Panel.Visible and prompt.Key
+		if key then
+			task.spawn(EggController.challenge, key)
+		end
+	end)
 	-- resync once in case the initial list arrived before this controller started
 	task.delay(4, function()
 		if EggController.count() == 0 then
@@ -42800,7 +43653,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "DuelMenu", "DuelEnd", "DuelHall", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "DuelMenu", "DuelEnd", "DuelHall", "Guardian", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -42868,6 +43721,10 @@ function UILab.reset()
 	if duel and duel.clear then
 		duel.clear()
 	end
+	local eggs = registry.EggController
+	if eggs and eggs.preview then
+		eggs.preview(false)
+	end
 end
 
 function UILab.show(screen: string)
@@ -42911,6 +43768,13 @@ function UILab.show(screen: string)
 		local duel = registry.DuelController
 		if duel and duel.preview then
 			duel.preview(screen == "DuelEnd" and "End" or "Menu")
+		end
+		return nil
+	elseif screen == "Guardian" then
+		-- the CHALLENGE button of an egg guardian (sample text)
+		local eggs = registry.EggController
+		if eggs and eggs.preview then
+			eggs.preview(true)
 		end
 		return nil
 	elseif screen == "DuelHall" then

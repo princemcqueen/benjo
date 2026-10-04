@@ -9,7 +9,7 @@ import luau_interp as LI  # noqa: E402
 import rbx_api  # noqa: E402
 import rbx_physics  # noqa: E402
 from rbx_types import CFrame  # noqa: E402
-from sim_runner import boot, run_client_lua, lua_table_to_py  # noqa: E402
+from sim_runner import boot, run_client_lua, lua_table_to_py, NO_GUARDIANS  # noqa: E402
 
 FAIL = []
 
@@ -64,7 +64,7 @@ shared.R = {{}}
 
 
 def main():
-    sim = boot()
+    sim = boot(extra_server=[NO_GUARDIANS])
     sim.physics = rbx_physics.make_physics()
     player = sim.add_player()
     sim.run_for(5, 1 / 30)

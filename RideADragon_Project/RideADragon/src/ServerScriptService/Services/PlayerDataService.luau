@@ -86,6 +86,7 @@ local TEMPLATE = {
 		DuelsWon = 0,
 		DuelsLost = 0,
 		Rides = 0,
+		Guardians = 0, -- egg guardians beaten (EggService / DuelService "Guardian")
 	},
 	Flags = { StarterGranted = false, OwnerPass = false, Passes = {} },
 	Boosts = {},

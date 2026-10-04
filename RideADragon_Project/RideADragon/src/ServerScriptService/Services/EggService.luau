@@ -25,6 +25,11 @@
 
 	Robux items use EggService.GiveEgg(.., force) (the bag may overflow - paid eggs are never
 	lost) and EggService.SpawnBonusEggs (Lucky Egg Call: lucky eggs near the player for a while).
+
+	EGG GUARDIANS: every egg of the normal spawn cycle lies in a nest with a Guard (EggConfig.guardian: a dragon
+	as strong as the egg). Egg.Pickup refuses it ("GUARDED"); the egg is won with a duel: DuelService asks
+	EggService.GuardInfo (range, bag room, retry wait), and calls CollectGuarded (win) / GuardLost (loss).
+	Bonus eggs (Lucky Egg Call) and the wild event eggs have no guardian.
 ]]
 
 local Players = game:GetService("Players")
@@ -212,7 +217,7 @@ local function eggTypeFor(area): string
 end
 
 local function serialize(egg)
-	return { Key = egg.Key, Type = egg.Type, Position = egg.Position, Area = egg.Area, Luck = egg.Luck }
+	return { Key = egg.Key, Type = egg.Type, Position = egg.Position, Area = egg.Area, Luck = egg.Luck, Guard = egg.Guard }
 end
 
 local function spawnOne(player: Player): boolean
@@ -252,6 +257,10 @@ local function spawnOne(player: Player): boolean
 	-- Great Tree "Lucky Finds": eggs you find carry more luck
 	luck = math.max(1, math.floor(luck * (1 + TreeConfig.bonus(Data.Get(player), "FindLuck")) + 0.5))
 	local egg = { Key = "k" .. st.Serial, Type = eggType, Position = pos, Area = area.Name, Luck = luck }
+	if EggConfig.Guardians.Enabled then
+		-- the egg lies in a nest and a dragon guards it: you take it by winning a duel (see "egg guardians")
+		egg.Guard = EggConfig.guardian(eggType, luck, st.Serial + player.UserId)
+	end
 	st.Active[egg.Key] = egg
 	Net.signal(player, "EggAdded", serialize(egg))
 	return true
@@ -609,6 +618,65 @@ function EggService.SpawnBonusEggs(player: Player, count: number, luckRange: { n
 	return spawned
 end
 
+-- ============================================================== egg guardians
+-- The guarded egg of a player's world that a guardian duel may be fought for: egg, or nil + error code + text
+-- (it is gone, nobody guards it, you are too far from the nest, the bag is full, the guardian is still angry).
+function EggService.GuardInfo(player: Player, key: string): (any?, string?, string?)
+	local st = states[player]
+	local data = Data.Get(player)
+	if not st or not data then
+		return nil, "NOT_LOADED"
+	end
+	local egg = st.Active[key]
+	if not egg then
+		return nil, "GONE", "That egg is gone."
+	end
+	if not egg.Guard then
+		return nil, "NOT_GUARDED", "Nobody guards that egg - just take it."
+	end
+	-- (the Egg Magnet widens the range like it widens the pickup range)
+	if nearestDistance(player, egg.Position) > EggReach.range(data, EggConfig.Guardians.Range) then
+		return nil, "TOO_FAR", "Get closer to the nest to challenge its guardian."
+	end
+	if #data.Eggs >= capacity(data) then
+		return nil, "EGG_STORAGE_FULL", "Your egg bag is full! Hatch eggs at your sanctuary nest or upgrade Egg Storage."
+	end
+	local wait = (egg.RetryAt or 0) - Workspace:GetServerTimeNow()
+	if wait > 0 then
+		return nil, "GUARD_ANGRY", string.format("The guardian is still angry. Try again in %d s.", math.ceil(wait))
+	end
+	return egg
+end
+
+-- A guardian duel was lost: the same guardian cannot be challenged again for a few seconds.
+function EggService.GuardLost(player: Player, key: string)
+	local st = states[player]
+	local egg = st and st.Active[key]
+	if egg then
+		egg.RetryAt = Workspace:GetServerTimeNow() + EggConfig.Guardians.Retry
+	end
+end
+
+-- The guardian was beaten: the egg leaves the world and goes to the player (into the hand, else the bag; the
+-- bag may overflow - a won egg is never lost). Returns { Id, Type, Luck, Held, Power } or nil when the egg is gone.
+function EggService.CollectGuarded(player: Player, key: string)
+	local st = states[player]
+	local egg = st and st.Active[key]
+	if not st or not egg then
+		return nil
+	end
+	st.Active[key] = nil
+	local ok, id, inHand = EggService.GiveEgg(player, egg.Type, egg.Luck or 1, true)
+	if not ok then
+		st.Active[key] = egg
+		return nil
+	end
+	-- (the client plays the collect effect when its duel scene is over)
+	Net.signal(player, "EggRemoved", { Key = key, Collected = true, Type = egg.Type, Luck = egg.Luck or 1, Held = inHand })
+	scheduleRespawn(player)
+	return { Id = id, Type = egg.Type, Luck = egg.Luck or 1, Held = inHand, Power = egg.Guard and egg.Guard.Power or 1 }
+end
+
 -- ============================================================== handlers
 local function handlePickup(player: Player, p)
 	if not Net.check.str(p.Key, 16) then
@@ -622,6 +690,10 @@ local function handlePickup(player: Player, p)
 	local egg = st.Active[p.Key]
 	if not egg then
 		return false, "GONE"
+	end
+	if egg.Guard then
+		-- a guarded egg is only given by DuelService (the guardian duel), never by walking into it
+		return false, "GUARDED", "A dragon guards this egg! Win a duel against it to take the egg."
 	end
 	local slack = 0
 	local dragons = Workspace:FindFirstChild("Dragons")

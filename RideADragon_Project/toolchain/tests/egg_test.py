@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import rbx_api  # noqa: E402
 import rbx_physics  # noqa: E402
 from rbx_types import CFrame  # noqa: E402
-from sim_runner import boot, client_of, run_client_lua, lua_table_to_py, render as ui_render  # noqa: E402
+from sim_runner import boot, client_of, run_client_lua, lua_table_to_py, render as ui_render, NO_GUARDIANS  # noqa: E402
 
 from paths import OUT  # noqa: E402
 
@@ -39,7 +39,7 @@ shared.SD = { Eggs = #d.Eggs, Dragons = n, Hatched = d.Stats.Hatched, Found = d.
 
 
 def main():
-    sim = boot()
+    sim = boot(extra_server=[NO_GUARDIANS])
     sim.physics = rbx_physics.make_physics()
     player = sim.add_player()
     sim.run_for(5, 1 / 30)

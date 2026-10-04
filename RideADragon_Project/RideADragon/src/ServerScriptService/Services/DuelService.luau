@@ -8,6 +8,8 @@
 	  Start { Trainer }      -> match view (see view())
 	  Challenge { UserId }   -> {} (the other player gets the signal DuelChallenge)
 	  Respond { From, Accept } -> match view when accepted
+	  Guardian { Key }       -> match view: the duel against the dragon that guards the world egg `Key` (a win gives
+	                            the egg - EggService.CollectGuarded - and XP; a loss starts a short retry wait)
 	  Move { Id, Move }      -> { Waiting = true } (the result of the turn arrives as signal DuelTurn)
 	  Forfeit { Id }         -> {}
 	Signals to the players of a match:
@@ -32,6 +34,7 @@ local DragonStats = require(Shared:WaitForChild("DragonStats"))
 local DragonConfig = require(Configs:WaitForChild("DragonConfig"))
 local MutationConfig = require(Configs:WaitForChild("MutationConfig"))
 local DuelConfig = require(Configs:WaitForChild("DuelConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
 
 local DuelService = {}
 
@@ -130,8 +133,14 @@ local function view(match, side: number)
 		Turn = match.Turn,
 		Title = match.Title,
 		Color = match.Color,
+		Egg = match.Egg and { Type = match.Egg.Type, Luck = match.Egg.Luck } or nil,
 		Fighters = { fighterView(me), fighterView(foe) },
 	}
+end
+
+-- A match against the computer (a trainer or an egg guardian) instead of another player.
+local function vsAI(match): boolean
+	return match.Kind == "NPC" or match.Kind == "Guardian"
 end
 
 -- The player's equipped dragon (a copy of the record) or nil.
@@ -346,7 +355,17 @@ local function finish(match, winner: number?, forfeit: boolean?)
 			local rewardOut = nil
 			local data = Data.Get(player)
 			if winner == side then
-				if match.Kind == "NPC" then
+				if match.Kind == "Guardian" then
+					-- the egg is the prize (and XP by how strong the egg - and so the guardian - was)
+					local egg = match.Egg
+					local given = Services.EggService.CollectGuarded(player, egg.Key)
+					local xp = EggConfig.guardianXP(egg.Power)
+					Services.LevelService.Add(player, xp, "Guardian")
+					if data then
+						Data.Increment(player, { "Stats", "Guardians" }, 1)
+					end
+					rewardOut = { Cash = 0, XP = xp, Egg = given and { Type = given.Type, Luck = given.Luck, Held = given.Held } or nil, Gone = given == nil }
+				elseif match.Kind == "NPC" then
 					lastWin[player] = lastWin[player] or {}
 					local last = lastWin[player][match.Trainer.Id] or -math.huge
 					local fresh = clock() - last >= DuelConfig.TrainerCooldown
@@ -367,15 +386,21 @@ local function finish(match, winner: number?, forfeit: boolean?)
 					end
 					pairLast[key] = clock()
 				end
-				if data then
+				if data and match.Kind ~= "Guardian" then
 					Data.Increment(player, { "Stats", "DuelsWon" }, 1)
 				end
 			elseif winner then
-				if data then
-					Data.Increment(player, { "Stats", "DuelsLost" }, 1)
+				if match.Kind == "Guardian" then
+					-- the guardian keeps its egg; it needs a moment before it takes the next challenger
+					Services.EggService.GuardLost(player, match.Egg.Key)
+					rewardOut = { Cash = 0, XP = 0, Retry = EggConfig.Guardians.Retry }
+				else
+					if data then
+						Data.Increment(player, { "Stats", "DuelsLost" }, 1)
+					end
+					rewardOut = { Cash = 0, XP = DuelConfig.LoserXP }
+					Services.LevelService.Add(player, DuelConfig.LoserXP, "Duel")
 				end
-				rewardOut = { Cash = 0, XP = DuelConfig.LoserXP }
-				Services.LevelService.Add(player, DuelConfig.LoserXP, "Duel")
 			end
 			Net.signal(player, "DuelEnd", { Id = match.Id, Winner = winner, Side = side, Reward = rewardOut, Forfeit = forfeit == true, HP1 = match.Sides[side].HP, HP2 = match.Sides[3 - side].HP })
 		end
@@ -448,6 +473,36 @@ local function startNPC(player: Player, trainer)
 	return match
 end
 
+-- The duel for a guarded world egg: the guardian is a dragon of the egg's strength (EggConfig.guardian), its
+-- level follows the level of the player's equipped dragon.
+local function startGuardian(player: Player, egg)
+	local record = equipped(player)
+	local guard = egg.Guard
+	local me = makeFighter(player, player.DisplayName, record)
+	local foeRecord = DragonStats.newRecord("NPC", guard.Species, guard.Mutation, 0)
+	foeRecord.Level = EggConfig.guardianLevel(guard, record.Level)
+	DragonStats.refresh(foeRecord)
+	local foe = makeFighter(nil, "Egg Guardian", foeRecord)
+	local soften = guard.Scale or 1
+	foe.MaxHP = math.max(1, math.floor(foe.MaxHP * soften + 0.5))
+	foe.HP = foe.MaxHP
+	foe.Damage *= soften
+	local def = EggConfig.Eggs[egg.Type]
+	local match = {
+		Id = newId(),
+		Kind = "Guardian",
+		Egg = { Key = egg.Key, Type = egg.Type, Luck = egg.Luck or 1, Power = guard.Power },
+		Title = "Egg Guardian",
+		Color = def and def.Glow or Color3.fromRGB(255, 200, 90),
+		Sides = { me, foe },
+		Players = { player, nil },
+		Turn = 1,
+		Choices = {},
+	}
+	open(match)
+	return match
+end
+
 local function startPlayers(a: Player, b: Player)
 	local fa = makeFighter(a, a.DisplayName, equipped(a))
 	local fb = makeFighter(b, b.DisplayName, equipped(b))
@@ -504,6 +559,22 @@ local function handleStart(player: Player, p)
 		return false, code, msg
 	end
 	local match = startNPC(player, trainer)
+	return true, view(match, 1)
+end
+
+local function handleGuardian(player: Player, p)
+	if not Net.check.str(p.Key, 16) then
+		return false, "BAD_REQUEST"
+	end
+	local code, msg = blocked(player)
+	if code then
+		return false, code, msg
+	end
+	local egg, err, text = Services.EggService.GuardInfo(player, p.Key)
+	if not egg then
+		return false, err or "FAILED", text
+	end
+	local match = startGuardian(player, egg)
 	return true, view(match, 1)
 end
 
@@ -583,7 +654,7 @@ end
 
 local function playTurn(match)
 	local choices = { match.Choices[1], match.Choices[2] }
-	if match.Kind == "NPC" then
+	if vsAI(match) then
 		choices[2] = chooseFor(match.Sides[2], match.Sides[1])
 	end
 	match.Choices = {}
@@ -638,7 +709,7 @@ local function handleMove(player: Player, p)
 	end
 	match.Choices[side] = p.Move
 	match.LastAct = clock()
-	local ready = match.Choices[1] and (match.Kind == "NPC" or match.Choices[2])
+	local ready = match.Choices[1] and (vsAI(match) or match.Choices[2])
 	if ready then
 		playTurn(match)
 		return true, { Played = true }
@@ -664,6 +735,7 @@ function DuelService.Init(services)
 	Net.handle("Duel", "Start", handleStart, { Burst = 3, PerSecond = 1 })
 	Net.handle("Duel", "Challenge", handleChallenge, { Burst = 3, PerSecond = 1 })
 	Net.handle("Duel", "Respond", handleRespond, { Burst = 3, PerSecond = 1 })
+	Net.handle("Duel", "Guardian", handleGuardian, { Burst = 3, PerSecond = 1 })
 	Net.handle("Duel", "Move", handleMove, { Burst = 6, PerSecond = 3 })
 	Net.handle("Duel", "Forfeit", handleForfeit, { Burst = 3, PerSecond = 1 })
 end
@@ -688,8 +760,8 @@ function DuelService.Start()
 		while true do
 			task.wait(1)
 			for _, match in matches do
-				if not match.Closed and match.Kind == "NPC" and clock() - match.LastAct > DuelConfig.IdleSeconds then
-					finish(match, 2, true) -- the player went away: the trainer wins, nobody is paid
+				if not match.Closed and vsAI(match) and clock() - match.LastAct > DuelConfig.IdleSeconds then
+					finish(match, 2, true) -- the player went away: the trainer / guardian wins, nobody is paid
 				elseif not match.Closed and match.Kind == "PVP" and clock() > match.Deadline then
 					for side = 1, 2 do
 						if not match.Choices[side] then

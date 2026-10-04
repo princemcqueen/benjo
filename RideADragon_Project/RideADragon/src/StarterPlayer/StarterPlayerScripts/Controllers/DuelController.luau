@@ -14,6 +14,8 @@
 	The HUD, prompts and your own companion are hidden while the scene runs; the character is held.
 	DuelController.State() / .choose(move) are for tests and tools; .preview(kind) is for the UI Lab.
 	Signals (server): DuelStart, DuelTurn, DuelEnd, DuelChallenge, DuelChallengeEnd.
+	EGG GUARDIANS: DuelController.startGuardian(eggKey) starts the same scene against the dragon that guards a world
+	egg (EggController); the intro tells about the egg and the end card shows the egg that was won.
 ]]
 
 local Debris = game:GetService("Debris")
@@ -33,6 +35,7 @@ local DragonVisual = require(Shared:WaitForChild("Dragons"):WaitForChild("Dragon
 local Animator = require(Shared:WaitForChild("Dragons"):WaitForChild("Animator"))
 local Builder = require(Shared:WaitForChild("Dragons"):WaitForChild("Builder"))
 local DuelConfig = require(Configs:WaitForChild("DuelConfig"))
+local EggConfig = require(Configs:WaitForChild("EggConfig"))
 
 local UI = script.Parent.Parent:WaitForChild("UI")
 local Theme = require(UI:WaitForChild("Theme"))
@@ -728,12 +731,17 @@ local function showEnd(mine: any, info)
 	ui.Box.Visible = false
 	ui.Turn.Visible = false
 	local won = info.Winner == info.Side
-	ui.EndTitle.Text = won and "VICTORY!" or (info.Winner == nil and "DUEL OVER" or "DEFEAT")
+	local guardian = s.Kind == "Guardian"
+	ui.EndTitle.Text = won and (guardian and "EGG WON!" or "VICTORY!") or (info.Winner == nil and "DUEL OVER" or "DEFEAT")
 	ui.EndTitle.TextColor3 = won and Color3.fromRGB(255, 214, 90) or Color3.fromRGB(235, 100, 90)
 	ui.EndSub.Text = info.Forfeit and (won and "Your opponent gave up." or "You gave up.") or string.format("%s vs %s", s.Fighters[1].Owner or "You", s.Fighters[2].Owner or "Foe")
 	local r = info.Reward
 	if r then
 		local parts = {}
+		if r.Egg then
+			local eggDef = EggConfig.Eggs[r.Egg.Type]
+			table.insert(parts, string.format("+1 %s%s", eggDef and eggDef.Name or "Egg", (r.Egg.Luck or 1) > 1 and string.format(" (x%d LUCK)", r.Egg.Luck) or ""))
+		end
 		if (r.Cash or 0) > 0 then
 			table.insert(parts, Format.cash(r.Cash))
 		end
@@ -743,6 +751,11 @@ local function showEnd(mine: any, info)
 		local text = table.concat(parts, "   +   ")
 		if r.Rematch and won then
 			text ..= "\n(a rematch pays less)"
+		end
+		if guardian and not won then
+			text = "The guardian keeps its egg.\nTry again in a moment - or come back stronger."
+		elseif guardian and r.Gone then
+			text = "The nest is empty - the egg is gone."
 		end
 		ui.EndRewards.Text = text ~= "" and text or "No reward this time."
 	else
@@ -870,6 +883,7 @@ local function begin(view)
 		Id = view.Id,
 		Side = view.Side,
 		Kind = view.Kind,
+		Egg = view.Egg,
 		Fighters = view.Fighters,
 		Dragons = {},
 		Shields = {},
@@ -1009,9 +1023,16 @@ local function begin(view)
 		if mine.Dragons[2] then
 			mine.Dragons[2].Anim:Play("Roar")
 		end
-		type_(mine, string.format("%s wants to duel!", foe.Owner or "Foe"))
-		sleep(mine, 0.7)
-		type_(mine, string.format("%s sends out %s!", foe.Owner or "Foe", string.upper(foe.Name)))
+		if mine.Kind == "Guardian" then
+			local eggDef = mine.Egg and EggConfig.Eggs[mine.Egg.Type]
+			type_(mine, string.format("The guardian of the %s wakes up!", eggDef and eggDef.Name or "egg"))
+			sleep(mine, 0.7)
+			type_(mine, string.format("%s blocks the way to the egg!", string.upper(foe.Name)))
+		else
+			type_(mine, string.format("%s wants to duel!", foe.Owner or "Foe"))
+			sleep(mine, 0.7)
+			type_(mine, string.format("%s sends out %s!", foe.Owner or "Foe", string.upper(foe.Name)))
+		end
 		sleep(mine, 0.5)
 		ui.Me.Panel.Visible = true
 		tween(mine, 0.6, function(a)
@@ -1164,6 +1185,19 @@ function DuelController.startTrainer(trainerId: string): (boolean, string?)
 		return false, "You are already in a duel."
 	end
 	local res = Net.request("Duel", "Start", { Trainer = trainerId })
+	if not res.ok then
+		return false, res.msg or res.err
+	end
+	begin(res.data)
+	return true
+end
+
+-- Starts a duel against the guardian of a world egg (called by EggController); returns ok, message.
+function DuelController.startGuardian(eggKey: string): (boolean, string?)
+	if session then
+		return false, "You are already in a duel."
+	end
+	local res = Net.request("Duel", "Guardian", { Key = eggKey })
 	if not res.ok then
 		return false, res.msg or res.err
 	end

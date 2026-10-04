@@ -155,7 +155,8 @@ local function buildVisual(model: Model)
 	entry.BodyC0inv = entry.BodyC0:Inverse()
 	local audio = registry.AudioController
 	anim.OnFootstep = function()
-		if entry.Tier == 1 and audio then
+		-- (only after the dragon has really been on the ground for a moment: no steps while it takes off or lands in flight)
+		if entry.Tier == 1 and audio and (entry.GroundTime or 0) > 0.35 then
 			audio.play3D("Footstep", root, 0.12, math.clamp((anim.Params.Speed or 0) / 40, 0.4, 1))
 		end
 	end
@@ -553,6 +554,11 @@ function AnimationController.stepAll(dt: number)
 				estimateParams(entry, root, step)
 			end
 			idleBehaviour(entry, step)
+		end
+		if anim.Params.Mode == "Ground" then
+			entry.GroundTime = (entry.GroundTime or 0) + step
+		else
+			entry.GroundTime = 0
 		end
 		anim:Update(step)
 		entry.MemAccum += step

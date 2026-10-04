@@ -34,15 +34,16 @@ QuestConfig.Templates = {
 	SpinWheel = { Text = "Spin the wheel %s times", Goal = 2, GoalPerLevel = 0.1, Reward = 300, Stat = "Spins", Fmt = "count" },
 	TryMutation = { Text = "Try the mutation machine %s times", Goal = 2, GoalPerLevel = 0.1, Reward = 350, Stat = "MutateTries", Fmt = "count" },
 	WinDuel = { Text = "Win %s duel in the Battle Hall", Goal = 1, GoalPerLevel = 0.04, Reward = 600, Stat = "DuelsWon", Fmt = "count" },
+	DefeatGuardians = { Text = "Beat %s egg guardians", Goal = 1, GoalPerLevel = 0.12, Reward = 500, Stat = "Guardians", Fmt = "count" },
 }
 
-QuestConfig.TemplateOrder = { "FindEggs", "HatchDragons", "FlyDistance", "CollectIncome", "FeedDragons", "BoostTime", "CollectCoins", "SellDragons", "SpinWheel", "TryMutation", "WinDuel" }
+QuestConfig.TemplateOrder = { "FindEggs", "HatchDragons", "FlyDistance", "CollectIncome", "FeedDragons", "BoostTime", "CollectCoins", "SellDragons", "SpinWheel", "TryMutation", "WinDuel", "DefeatGuardians" }
 
 -- First goals. Check = which fact of the player's data makes it done (QuestService.starterDone).
 QuestConfig.Starter = {
 	{ Id = "Ride", Text = "Ride your dragon", Hint = "Press R or tap RIDE", Check = "Rides", Need = 1, Reward = 150 },
 	{ Id = "Fly", Text = "Fly 500 studs", Hint = "SPACE to take off, SHIFT to boost", Check = "DistanceFlown", Need = 500, Reward = 200 },
-	{ Id = "FindEgg", Text = "Pick up an egg", Hint = "Follow the egg arrow", Check = "EggsFound", Need = 1, Reward = 200 },
+	{ Id = "FindEgg", Text = "Win an egg from its guardian", Hint = "Fly to a nest, press X and beat the dragon that guards it", Check = "EggsFound", Need = 1, Reward = 200 },
 	{ Id = "Hatch", Text = "Hatch a dragon", Hint = "Put an egg in a nest at your sanctuary", Check = "Hatched", Need = 1, Reward = 300 },
 	{ Id = "Perch", Text = "Rest a dragon on a perch", Hint = "Open DRAGONS (G) and press PLACE", Check = "Perch", Need = 1, Reward = 400 },
 	{ Id = "Feed", Text = "Feed a dragon", Hint = "Open DRAGONS (G) and press FEED", Check = "Fed", Need = 1, Reward = 250 },

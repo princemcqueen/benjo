@@ -62,6 +62,13 @@ def find_node(node, name):
     return None
 
 
+# A server script for tests that walk into world eggs: no guardian duel in the way (EggConfig.Guardians).
+# Usage: boot(extra_server=[NO_GUARDIANS]). The guardian tests leave guardians on.
+NO_GUARDIANS = """
+require(game:GetService("ReplicatedStorage"):WaitForChild("Configs"):WaitForChild("EggConfig")).Guardians.Enabled = false
+"""
+
+
 def boot(extra_server=None, extra_client=None, instant_tweens=True, verbose=False, datastore=None,
          signal_behavior="Deferred", project=PROJECT, inject_terrain=True, patch_tree=None):
     sim = Sim(verbose=verbose, instant_tweens=instant_tweens, datastore=datastore, signal_behavior=signal_behavior)

@@ -38,7 +38,7 @@ UILab.Resolutions = {
 	{ "Tablet", { 1180, 820, "Tablet" } },
 }
 
-UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "DuelMenu", "DuelEnd", "DuelHall", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
+UILab.Screens = { "HUD", "HeldEgg", "RareBanner", "WildEgg", "RaceLobby", "RaceCount", "RaceHud", "RaceFinish", "ArenaHud", "ArenaDown", "RaceTop", "RaceArena", "ArenaTouch", "DuelMenu", "DuelEnd", "DuelHall", "Guardian", "Radar", "Boosts", "EggHunter", "Riding", "Inventory", "Details", "Shop", "Tree", "EggStorage", "Hatch", "Index", "Settings", "Quests", "Daily", "Confirm", "Notifications" }
 
 local ui = nil
 local registry = nil
@@ -106,6 +106,10 @@ function UILab.reset()
 	if duel and duel.clear then
 		duel.clear()
 	end
+	local eggs = registry.EggController
+	if eggs and eggs.preview then
+		eggs.preview(false)
+	end
 end
 
 function UILab.show(screen: string)
@@ -149,6 +153,13 @@ function UILab.show(screen: string)
 		local duel = registry.DuelController
 		if duel and duel.preview then
 			duel.preview(screen == "DuelEnd" and "End" or "Menu")
+		end
+		return nil
+	elseif screen == "Guardian" then
+		-- the CHALLENGE button of an egg guardian (sample text)
+		local eggs = registry.EggController
+		if eggs and eggs.preview then
+			eggs.preview(true)
 		end
 		return nil
 	elseif screen == "DuelHall" then

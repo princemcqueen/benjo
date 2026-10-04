@@ -6,8 +6,11 @@
 	- loop(key, parent?): managed looping sound (wind, waterfalls)
 	- music crossfades between region tracks
 	Keys without an asset id (AudioConfig) are skipped silently.
+	- the default Roblox character sounds (running steps, jumping, landing...) are muted while a character is
+	  mounted: a rider is carried by the dragon, they would play "running" while it flies
 ]]
 
+local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -148,6 +151,52 @@ function AudioController.setVolumes(music: number, sfx: number)
 		groups.SFX.Volume = AudioConfig.Groups.SFX.Volume * sfxVolume * 1.25
 		groups.UI.Volume = AudioConfig.Groups.UI.Volume * sfxVolume * 1.25
 	end
+end
+
+-- ============================================================== riders do not run
+-- The sounds Roblox's own character script adds under the HumanoidRootPart of every avatar.
+local CHARACTER_SOUNDS = { Running = true, Jumping = true, Landing = true, Climbing = true, Swimming = true, GettingUp = true, FreeFalling = true, Splash = true }
+local muteGroup: SoundGroup? = nil
+
+local function gateCharacter(character: Model)
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return
+	end
+	local mounted = character:GetAttribute("Mounted") == true
+	for _, child in hrp:GetChildren() do
+		if child:IsA("Sound") and CHARACTER_SOUNDS[child.Name] then
+			if mounted then
+				if child.SoundGroup ~= muteGroup then
+					child.SoundGroup = muteGroup
+				end
+			elseif muteGroup and child.SoundGroup == muteGroup then
+				child.SoundGroup = nil
+			end
+		end
+	end
+end
+
+function AudioController.Start()
+	local group = SoundService:FindFirstChild("RAD_MuteCharacter")
+	if not group then
+		group = Instance.new("SoundGroup")
+		group.Name = "RAD_MuteCharacter"
+		group.Volume = 0
+		group.Parent = SoundService
+	end
+	muteGroup = group :: SoundGroup
+	task.spawn(function()
+		while true do
+			task.wait(0.15)
+			for _, player in Players:GetPlayers() do
+				local character = player.Character
+				if character then
+					gateCharacter(character)
+				end
+			end
+		end
+	end)
 end
 
 function AudioController.Init()
